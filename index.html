@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>东方逆转 · 极简演示</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚡</span>
+      <div>
+        <h1>东方逆转</h1>
+        <p class="sub">Marvel Snap 玩法 · 东方 Project 主题 · 极简网页 Demo</p>
+      </div>
+    </div>
+    <div class="hud">
+      <div class="hud-item" id="turnBox"><span class="hud-label">回合</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit">/ 6</span></div>
+      <div class="hud-item clickable" id="energyBox" title="点击可重置本回合已暗出的牌（能量全额返还）" onclick="Game.ui.onEnergyReset()">
+        <span class="hud-label">能量</span><span class="hud-value" id="energyVal">1</span><span class="hud-unit" id="energyUnit">/ 6</span><span class="reset-mark">↺</span>
+      </div>
+      <div class="hud-item cubes"><span class="hud-label">赌注</span><span class="cube" id="cubeVal">1</span><span class="cube-pips" id="cubePips"></span></div>
+    </div>
+    <div class="top-actions">
+      <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
+      <button id="btnSnap" class="btn btn-snap" onclick="Game.ui.onSnap()">双倍下注</button>
+      <button id="btnRestart" class="btn btn-ghost" onclick="Game.restart()">重新开始</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="board-wrap">
+      <div class="board" id="board"></div>
+    </section>
+
+    <aside class="side" id="sidePanel">
+      <div class="opponent">
+        <div class="side-title">对手（AI）</div>
+        <div class="avatar-row">
+          <div class="avatar av-ai">🤖</div>
+          <div class="mini-stats">
+            <div>已打 <span id="aiCount">0</span> 张</div>
+            <div>牌库 <span id="aiDeck">12</span> 张</div>
+          </div>
+        </div>
+        <div id="aiSnapTag" class="snap-tag hidden">⚡ 已加倍</div>
+      </div>
+      <div class="rules">
+        <h3>玩法速览</h3>
+        <ul>
+          <li>共 6 回合，能量逐回合 +1（上限 6）。</li>
+          <li>每回合可把多张牌暗出到各区域，总费用不超能量；出完点「结束回合」。</li>
+          <li>出牌结束后翻牌结算「现身」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>
+          <li>每区域比总战力：若出现平局区域，按三区域总点数高低决胜；无平局时赢下区域多者获胜。</li>
+          <li>「双倍下注」可把赌注翻倍（上限 8），回合结算时赢家拿走赌注。</li>
+        </ul>
+      </div>
+      <div class="status-card" id="statusCard">
+        <div class="status-text" id="statusText">准备开始…</div>
+      </div>
+      <div class="log-block">
+        <div class="side-title">对局信息</div>
+        <div class="log" id="log"></div>
+      </div>
+    </aside>
+  </main>
+
+  <section class="hand-wrap">
+    <div class="energy-pips" id="energyPips"></div>
+    <div class="hand" id="hand">
+      <div class="hand-empty" id="handEmpty">回合开始时会抓牌 —— 先选一张手牌，再点击下方任意区域打出</div>
+    </div>
+  </section>
+
+  <footer class="foot">纯前端演示 · 无网络请求 · 按 F5 或「重新开始」再来一局</footer>
+
+  <!-- 结算弹窗 -->
+  <div class="modal-mask hidden" id="modalMask">
+    <div class="modal" id="modal">
+      <div class="modal-emblem" id="modalEmblem">🏆</div>
+      <h2 id="modalTitle">结果</h2>
+      <div class="modal-sub" id="modalSub"></div>
+      <div class="modal-cubes" id="modalCubes"></div>
+      <button class="btn btn-primary" id="btnAgain" onclick="Game.restart()">再来一局</button>
+    </div>
+  </div>
+
+  <!-- 卡牌图鉴 -->
+  <div class="modal-mask hidden" id="codexMask">
+    <div class="modal codex-modal">
+      <div class="codex-head">
+        <h2>📖 卡牌图鉴</h2>
+        <span class="codex-count" id="codexCount"></span>
+        <span class="codex-tip">点击任意卡牌可放大查看</span>
+        <button class="btn btn-ghost codex-close" onclick="Game.ui.onCodex()">关闭 ✕</button>
+      </div>
+      <div class="codex-grid" id="codexGrid"></div>
+    </div>
+  </div>
+
+  <!-- 放大卡牌查看 -->
+  <div class="modal-mask zoom-mask hidden" id="zoomMask">
+    <div class="zoom-stage">
+      <div class="zoom-card-wrap" id="zoomCardSlot"></div>
+      <div class="zoom-info" id="zoomInfo"></div>
+      <button class="btn btn-primary" onclick="Game.ui.closeZoom()">← 返回图鉴</button>
+    </div>
+  </div>
+
+  <!-- 重置本回合暗牌：确认弹窗 -->
+  <div class="modal-mask hidden" id="undoMask">
+    <div class="modal undo-modal">
+      <div class="modal-emblem">↺</div>
+      <h2>重置当回合暗牌？</h2>
+      <p class="undo-text">确认重置当回合放置的暗牌？<br>已放出的牌将返回手牌，能量全额返还。</p>
+      <div class="undo-btns">
+        <button class="btn" onclick="Game.ui.cancelEnergyReset()">取消</button>
+        <button class="btn btn-primary" onclick="Game.ui.confirmEnergyReset()">确认重置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 左下 / 右下常驻操作区 -->
+  <div class="corner-actions corner-left">
+    <button id="btnRetreat" class="btn btn-danger" onclick="Game.ui.onRetreat()">🏳️ 认输</button>
+  </div>
+  <div class="corner-actions corner-right">
+    <button id="btnPass" class="btn btn-pass" onclick="Game.ui.onPass()">跳过回合</button>
+  </div>
+
+  <script src="cards.js"></script>
+  <script src="locations.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
