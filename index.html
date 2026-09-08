@@ -2,7 +2,11 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#e7f2db" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <title>东方逆转 · 极简演示</title>
 <link rel="stylesheet" href="style.css" />
 </head>
@@ -28,6 +32,12 @@
       <button id="btnRestart" class="btn btn-ghost" onclick="Game.restart()">重新开始</button>
     </div>
   </header>
+
+  <!-- 状态提示条：手机端固定显示在顶栏下（桌面端隐藏，仍用侧栏状态卡）；
+       与侧栏 #statusText 同步更新，见 game.js 的 setStatus() -->
+  <div class="mob-status" id="mobStatusCard">
+    <div class="status-text" id="mobStatus">准备开始…</div>
+  </div>
 
   <main class="layout">
     <section class="board-wrap">

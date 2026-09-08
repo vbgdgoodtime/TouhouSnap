@@ -563,6 +563,11 @@ function setStatus(text, busy) {
   const el = $('statusText');
   el.textContent = text;
   $('statusCard').classList.toggle('busy', !!busy);
+  // 手机端顶栏下方的同步状态条（桌面端隐藏，更新无副作用）
+  const mEl = $('mobStatus');
+  if (mEl) mEl.textContent = text;
+  const mCard = $('mobStatusCard');
+  if (mCard) mCard.classList.toggle('busy', !!busy);
 }
 
 function renderAll() {
@@ -772,6 +777,8 @@ function gapCellEl() {
 function renderHand() {
   const st = state;
   const hand = $('hand');
+  // 保留横向滚动位置：renderHand 每次全量重建，否则手机端每点一次牌手牌都会跳回开头
+  const prevScroll = hand.scrollLeft;
   hand.innerHTML = '';
   const cards = st.players.p.hand;
   if (cards.length === 0) {
@@ -793,6 +800,8 @@ function renderHand() {
     el.addEventListener('click', () => selectHand(index));
     hand.appendChild(el);
   });
+  // 赋值后浏览器会自动钳制到合法范围（例如出牌后手牌变少）
+  hand.scrollLeft = prevScroll;
 }
 
 /* ---------------- 图鉴 / 放大卡牌 ---------------- */

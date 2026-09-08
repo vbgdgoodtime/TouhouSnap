@@ -732,3 +732,225 @@ body {
 .slot-gap .gap-glyph { font-size: 15px; line-height: 1; opacity: .85; letter-spacing: 1px; }
 .slot-gap .gap-name { font-size: 10px; opacity: .9; text-shadow: 0 0 6px rgba(150, 120, 230, .6); }
 .slot-gap:hover { filter: none; box-shadow: inset 0 0 10px rgba(0, 0, 0, .35); }
+
+/* ================================================================
+   手机 / 触屏适配（追加在文件末尾，级联优先级高于前面的断点规则）
+   ----------------------------------------------------------------
+   1. ≤900px（手机竖屏 / 小平板竖屏）：切「App 壳」布局 —— 页面不再
+      整页滚动，顶栏 + 状态条固定在上、手牌条固定在下，只有中间的
+      场地/侧栏区域滚动，保证任何时候都能看到回合/能量与手牌。
+   2. ≤700px 进一步紧凑：顶栏、HUD、手牌、按钮收小，把高度让给场地。
+   3. 触屏细节：禁双击缩放/长按菜单，消除点按高亮，可点元素
+      touch-action: manipulation（去掉 300ms 延迟与误缩放）。
+   4. 全面屏安全区：刘海/圆角/Home 条用 env(safe-area-inset-*) 让位。
+   ================================================================ */
+
+/* -- 安全区变量（无刘海设备为 0） -- */
+:root {
+  --sa-top: env(safe-area-inset-top, 0px);
+  --sa-right: env(safe-area-inset-right, 0px);
+  --sa-bottom: env(safe-area-inset-bottom, 0px);
+  --sa-left: env(safe-area-inset-left, 0px);
+}
+
+/* -- 触屏基础（全屏宽均生效，桌面无副作用） -- */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { -webkit-tap-highlight-color: transparent; }
+.btn,
+.hand-card,
+.codex-card,
+.location.hoverable,
+.location.targetable,
+.mini-card.can-inspect,
+.hud-item.clickable {
+  touch-action: manipulation;
+}
+
+/* 手机端状态条：默认隐藏（桌面仍用侧栏 #statusCard） */
+.mob-status { display: none; }
+
+/* ========== 断点一：≤900px —— App 壳 ========== */
+@media (max-width: 900px) {
+  html, body { height: 100%; overflow: hidden; }
+  body { height: 100vh; min-height: 0; }
+  @supports (height: 100dvh) {
+    body { height: 100dvh; min-height: 0; }
+  }
+
+  /* 顶栏：可换行 + 避开刘海/圆角 */
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: calc(8px + var(--sa-top)) calc(10px + var(--sa-right)) 8px calc(10px + var(--sa-left));
+  }
+
+  /* 状态条常驻：同步更新见 game.js setStatus() */
+  .mob-status {
+    display: block;
+    flex: 0 0 auto;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #2e4527;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(246, 251, 240, .5));
+    border-top: 1px solid rgba(108, 148, 100, .18);
+    border-bottom: 1px solid rgba(108, 148, 100, .3);
+  }
+  .mob-status.busy .status-text { color: var(--green); }
+
+  /* 中间主区：唯一滚动区域（覆盖桌面 grid 为纵向 flex） */
+  .layout {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    gap: 12px;
+    padding: 10px 12px 8px;
+    scrollbar-width: thin;
+  }
+  .board-wrap { flex: 0 0 auto; min-height: 0; }
+  .side { order: 2; flex: 0 0 auto; }
+
+  /* 底部手牌区固定不收缩 */
+  .hand-wrap {
+    flex: 0 0 auto;
+    padding-bottom: calc(8px + var(--sa-bottom));
+  }
+  /* 手牌横向滚动：隐藏滚动条，更干净 */
+  .hand { scrollbar-width: none; }
+  .hand::-webkit-scrollbar { display: none; }
+
+  /* 左下/右下常驻按钮：贴安全区、收小，避免遮住主内容 */
+  .corner-left { left: calc(12px + var(--sa-left)); }
+  .corner-right { right: calc(12px + var(--sa-right)); }
+  .corner-left, .corner-right { bottom: calc(12px + var(--sa-bottom)); }
+  .corner-actions .btn { padding: 9px 13px; font-size: 13px; }
+
+  .foot { display: none; }
+}
+
+/* ========== 断点二：≤700px —— 紧凑排版 ========== */
+@media (max-width: 700px) {
+  .topbar {
+    gap: 6px 10px;
+    padding: calc(6px + var(--sa-top)) calc(8px + var(--sa-right)) 6px calc(8px + var(--sa-left));
+  }
+  .brand .logo { font-size: 23px; }
+  .brand h1 { font-size: 16px; letter-spacing: 1px; }
+  .brand .sub { display: none; }
+
+  .hud { gap: 6px; margin-left: auto; order: 2; }
+  .hud-item { padding: 3px 9px; gap: 4px; }
+  .hud-label { display: none; }
+  .hud-value, .hud-item.cubes .cube { font-size: 16px; }
+  .cube-pips span { width: 6px; height: 6px; }
+  .top-actions { gap: 6px; order: 3; flex: 1 1 100%; justify-content: flex-end; }
+  .btn { padding: 6px 10px; font-size: 12px; }
+
+  .layout { gap: 10px; padding: 8px 10px 6px; }
+  .board { gap: 10px; min-height: 0; }
+
+  /* 底部手牌：卡片收小、两侧让位给常驻按钮（84px 足够容纳） */
+  .hand-wrap { padding-top: 4px; padding-bottom: calc(6px + var(--sa-bottom)); }
+  .energy-pips {
+    margin-bottom: 4px;
+    padding-left: 84px;
+    padding-right: 84px;
+  }
+  .hand {
+    min-height: 118px;
+    gap: 8px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    padding-left: 84px;
+    padding-right: 84px;
+  }
+  .hand-card {
+    width: 72px;
+    padding: 4px 4px 6px;
+    border-radius: 10px;
+  }
+  .hand-card .cost-orb, .hand-card .p { width: 21px; height: 21px; font-size: 11px; border-width: 1.5px; }
+  .hand-card .hc-icon { font-size: 25px; margin: 2px 0 0; }
+  .hand-card .hc-art { margin: 3px auto 1px; }
+  .hand-card .hc-art .hc-icon { font-size: 25px; }
+  .hand-card .hc-name { font-size: 11px; }
+  .hand-card .hc-text { font-size: 7.6px; line-height: 1.25; margin-top: 2px; }
+  .hand-card .hc-cost-tag { font-size: 8px; }
+}
+
+/* ========== 断点三：≤640px —— 三区域横向并列（手机竖屏） ==========
+   手机窄屏不纵向堆叠，改为三列紧凑横排：
+   每列 ≥112px（屏再窄则整板可横向微滚动），列高由内容撑起，
+   头部/中间带/卡位/分数均按窄列收小，保证一屏能同时看到三块区域。 */
+@media (max-width: 640px) {
+  .board {
+    grid-template-columns: repeat(3, minmax(112px, 1fr));
+    grid-template-rows: auto;
+    gap: 6px;
+    min-height: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .board::-webkit-scrollbar { display: none; }
+
+  .location { border-radius: 12px; min-height: 0; }
+  .loc-head { padding: 4px 6px 3px; }
+  .loc-name { font-size: 12.5px; }
+  .loc-name .icon { font-size: 13px; }
+  .loc-mid { gap: 3px; padding: 5px 4px; }
+  .loc-mid .loc-effect { font-size: 9px; gap: 3px; }
+  .loc-total { gap: 4px; padding: 2px 6px; }
+  .loc-total .lt-label { font-size: 9.5px; }
+  .loc-total .lt-num { font-size: 15px; min-width: 20px; }
+  .zone { min-height: 112px; gap: 3px; padding: 4px 4px; }
+  .zone .slot-row { gap: 3px; padding: 0; }
+  .zone-score { top: 3px; right: 4px; font-size: 10px; padding: 0 5px; }
+  .zone-score .score-num { font-size: 12px; }
+  .slot-count { font-size: 8.5px; bottom: 3px; left: 5px; }
+  .mini-card { padding: 4px 2px 3px; border-radius: 8px; }
+  .mini-card .mc-cost { font-size: 11px; min-width: 16px; top: 2px; left: 2px; padding: 0 3px; border-radius: 5px; }
+  .mini-card .p { font-size: 12px; min-width: 17px; top: 2px; right: 2px; padding: 0 3px; border-radius: 5px; }
+  .slot-gap { border-radius: 8px; }
+  .slot-gap .gap-glyph { font-size: 12px; }
+  .slot-gap .gap-name { font-size: 8px; }
+}
+
+/* ========== 断点四：≤560px —— 弹窗 / 图鉴适配小屏 ========== */
+@media (max-width: 560px) {
+  .modal { padding: 24px 16px; border-radius: 14px; max-height: 88vh; overflow-y: auto; }
+  .modal h2 { font-size: 22px; }
+  .codex-modal {
+    width: 100vw;
+    max-height: 94vh;
+    padding: 10px 8px 14px;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+  }
+  .codex-head { gap: 6px; }
+  .codex-tip { display: none; }
+  .codex-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+  .zoom-stage { padding: 18px 12px; }
+  .zoom-card { width: min(250px, 76vw); padding: 10px 10px 14px; }
+  .zoom-card .hc-art { width: min(230px, 66vw); }
+  .zoom-card .hc-icon, .zoom-card .hc-art .hc-icon { font-size: 46px; }
+  .zoom-card .cost-orb, .zoom-card .p { width: 38px; height: 38px; font-size: 18px; }
+  .undo-btns .btn { min-width: 0; flex: 1; }
+  .undo-btns { gap: 8px; }
+}
+
+/* ========== 断点五：矮视口（手机横屏 / 小平板横放） ==========
+   场地高度优先：压缩顶部与手牌，去掉能量小点 */
+@media (max-height: 560px) and (min-width: 500px) {
+  .brand .sub { display: none; }
+  .brand h1 { font-size: 15px; }
+  .brand .logo { font-size: 22px; }
+  .hud-item { padding: 2px 8px; }
+  .energy-pips { display: none; }
+  .hand-wrap { padding-top: 2px; }
+  .hand { min-height: 96px; }
+  .hand-card { width: 66px; }
+}
+
