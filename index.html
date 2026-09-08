@@ -27,6 +27,8 @@
       <div class="hud-item cubes"><span class="hud-label">赌注</span><span class="cube" id="cubeVal">1</span><span class="cube-pips" id="cubePips"></span></div>
     </div>
     <div class="top-actions">
+      <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()">⚡ 修改能量</button>
+      <button id="btnPick" class="btn btn-ghost" onclick="Game.ui.onPick()">🎯 指定卡牌</button>
       <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
       <button id="btnSnap" class="btn btn-snap" onclick="Game.ui.onSnap()">双倍下注</button>
       <button id="btnRestart" class="btn btn-ghost" onclick="Game.restart()">重新开始</button>
@@ -112,11 +114,31 @@
     </div>
   </div>
 
+  <!-- 开发者：指定卡牌（点选 1 张 → 确认加入手牌） -->
+  <div class="modal-mask hidden" id="pickMask">
+    <div class="modal codex-modal">
+      <div class="codex-head">
+        <h2>🎯 指定卡牌（开发者）</h2>
+        <span class="codex-tip" id="pickTip">点选 1 张卡牌，点「确认加入手牌」</span>
+        <button class="btn btn-ghost codex-close" onclick="Game.ui.onPickClose()">取消 ✕</button>
+      </div>
+      <div class="codex-grid" id="pickGrid"></div>
+      <div class="pick-actions">
+        <button class="btn btn-primary" id="btnPickConfirm" onclick="Game.ui.onPickConfirm()">确认加入手牌</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 放大卡牌查看 -->
   <div class="modal-mask zoom-mask hidden" id="zoomMask">
     <div class="zoom-stage">
-      <div class="zoom-card-wrap" id="zoomCardSlot"></div>
-      <div class="zoom-info" id="zoomInfo"></div>
+      <div class="zoom-row">
+        <div class="zoom-main-col">
+          <div class="zoom-card-wrap" id="zoomCardSlot"></div>
+          <div class="zoom-info" id="zoomInfo"></div>
+        </div>
+        <div class="zoom-deriv hidden" id="zoomDeriv"></div>
+      </div>
       <button class="btn btn-primary" onclick="Game.ui.closeZoom()">← 返回图鉴</button>
     </div>
   </div>
@@ -126,7 +148,7 @@
     <div class="modal undo-modal">
       <div class="modal-emblem">↺</div>
       <h2>重置当回合暗牌？</h2>
-      <p class="undo-text">确认重置当回合放置的暗牌？<br>已放出的牌将返回手牌，能量全额返还。</p>
+      <p class="undo-text">确认重置当回合操作？<br>已放出的暗牌将返回手牌、能量全额返还；<br>本回合移动过的卡牌（如射命丸文）将移回原区域并恢复移动次数。</p>
       <div class="undo-btns">
         <button class="btn" onclick="Game.ui.cancelEnergyReset()">取消</button>
         <button class="btn btn-primary" onclick="Game.ui.confirmEnergyReset()">确认重置</button>

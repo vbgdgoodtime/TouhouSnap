@@ -70,8 +70,22 @@ function locAllBonus(locIdx, card) {
   if (!card || card.def.un) return 0;
   return locDef(locIdx).all || 0;
 }
-// 卡牌在指定区域的实时战力 = 基础威力 + 永久增益 + 区域阵营加成 + 区域费用加成 + 区域全体修正
-function cardPowerIn(locIdx, card) { return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card); }
+// 在场光环（og，如比那名居天子）：该卡已翻开且仍在己方某区时，
+// 己方所有带匹配 tk 标记的卡牌（如己方石块）常驻 +N。动态读取：源卡被摧毁即消失。
+function cardAuraBonus(card) {
+  if (!card || !card.def.tk || !card.side) return 0;
+  let b = 0;
+  for (let j = 0; j < 3; j++) {
+    for (const c of state.players[card.side].zones[j]) {
+      if (c.revealed && !c.def.un && c.def.og && c.def.og.tk === card.def.tk) b += c.def.og.add;
+    }
+  }
+  return b;
+}
+// 卡牌在指定区域的实时战力 = 基础威力 + 永久增益 + 区域加成（阵营/费用/全区）+ 在场光环
+function cardPowerIn(locIdx, card) {
+  return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card) + cardAuraBonus(card);
+}
 // 区域总点数：默认只统计“已翻开”的牌（暗牌不计入，翻面后才计入）。
 // includeHidden=true 用于 AI 决策估值（AI 能看到完整盘面）。
 // 放满加成：区域 fill=N 时，某一方在本区实际放满 max 张（含暗牌，即 4/4）则该方
@@ -120,10 +134,14 @@ const state = {
   playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc}]
   aiMoves: [],         // 本回合对手已暗出的牌
   playHandOrder: [],   // 本回合开始时玩家手牌 id 顺序（供重置暗牌时恢复）
+  moveCardId: null,    // “每回合可移动一次”的牌：当前正在选目标区域的卡 id
+  flyMoved: new Set(), // 本回合已自移过的卡 id（如射命丸文）
+  flyMovedFrom: {},    // 本回合自移过的卡：卡 id → 回合初所在区域下标（供重置）
   logCount: 0,
 };
 
 let pendingResolve = null;
+let pickDef = null; // 开发者“指定卡牌”弹窗当前选中（人物卡 def 或 null）
 
 /* ---------------- 流程主循环 ---------------- */
 function restart() {
@@ -165,6 +183,9 @@ function restart() {
     }
   }
   state.locs = picks.map((def) => ({ def }));
+  state.moveCardId = null;
+  state.flyMoved = new Set();
+  state.flyMovedFrom = {};
 
   // DOM 骨架
   buildBoard();
@@ -181,11 +202,7 @@ function restart() {
     if (!def) return;
     const cnt = sp.n || 1;
     for (const side of ['p', 'a']) {
-      for (let i = 0; i < cnt; i++) {
-        const card = newCard(def);
-        card.revealed = true;
-        state.players[side].zones[locIdx].push(card);
-      }
+      placeToken(side, locIdx, def, cnt);
     }
     log('sys', `${loc.def.icon}「${loc.def.n}」出现：双方各生成 ${cnt} 张「${def.n}」，已落场翻开。`);
   });
@@ -222,8 +239,24 @@ function drawOne(side) {
   const pl = state.players[side];
   if (pl.deck.length === 0 || pl.hand.length >= 7) return null;
   const card = pl.deck.pop();
+  card.side = side; // 记属方：供“在场光环”等按己方判定
   pl.hand.push(card);
   return card;
+}
+
+// 把特殊卡落到某方某区：落地即翻开、占用格位、记录属方；放满则放不下
+function placeToken(side, locIdx, tkDef, cnt) {
+  let placed = 0;
+  const zone = state.players[side].zones[locIdx];
+  for (let i = 0; i < cnt; i++) {
+    if (zone.length >= locDef(locIdx).max) break;
+    const card = newCard(tkDef);
+    card.side = side;
+    card.revealed = true;
+    zone.push(card);
+    placed++;
+  }
+  return placed;
 }
 
 async function playRound(gen) {
@@ -234,6 +267,9 @@ async function playRound(gen) {
   st.energyLeft = st.energyTotal;
   st.phase = 'play';
   st.selected = -1;
+  st.moveCardId = null;
+  st.flyMoved = new Set();
+  st.flyMovedFrom = {};
   st.playerMoves = [];
   st.aiMoves = [];
   // 记录本回合开始时的玩家手牌顺序（重置暗牌时按此顺序放回）
@@ -280,11 +316,63 @@ function resolvePlayer(obj) {
 function selectHand(index) {
   const st = state;
   if (st.phase !== 'play') return;
+  st.moveCardId = null; // 开始选牌即取消“移动牌”模式
   const card = st.players.p.hand[index];
   if (!card) return;
   if (card.def.c > st.energyLeft) { setStatus('剩余能量不足，换一张更便宜的吧。'); return; }
   st.selected = (st.selected === index) ? -1 : index;
   renderAll();
+}
+
+// 找出玩家场上的某张卡（按其所在区域）
+function findPlayerCard(cardId) {
+  const zones = state.players.p.zones;
+  for (let j = 0; j < 3; j++) {
+    const i = zones[j].findIndex((c) => c.id === cardId);
+    if (i >= 0) return { zone: zones[j], j, card: zones[j][i] };
+  }
+  return null;
+}
+
+// 点击“每回合可移动一次”的己方已翻开卡（如射命丸文）：进入/取消选目标
+function uiMoveFly(cardId) {
+  const st = state;
+  if (st.phase !== 'play') return;
+  const found = findPlayerCard(cardId);
+  if (!found || !found.card.def.fly || !found.card.revealed) return;
+  if (st.moveCardId === cardId) {
+    st.moveCardId = null;
+    setStatus('已取消移动。');
+    renderZones();
+    return;
+  }
+  if (st.flyMoved.has(cardId)) { setStatus('这张卡本回合已经移动过一次。'); return; }
+  st.moveCardId = cardId;
+  setStatus('已选中移动目标：点另一个区域完成移动（每回合一次；再点该卡取消）。');
+  renderZones();
+}
+
+// 移动模式下点击某区域：把目标卡移过去（未满且已开放；其它情况只提示）
+function tryMoveFlyTo(locIdx) {
+  const st = state;
+  if (st.moveCardId == null) return false;
+  const found = findPlayerCard(st.moveCardId);
+  if (!found) { st.moveCardId = null; renderZones(); return true; }
+  const card = found.card;
+  if (st.flyMoved.has(card.id)) { setStatus('这张卡本回合已经移动过一次。'); st.moveCardId = null; renderZones(); return true; }
+  if (locIdx === found.j) { setStatus('这张卡本来就在这个区域，选别的区域吧。'); return true; }
+  if (!locOpen(locIdx)) { setStatus(`「${locDef(locIdx).n}」还没开放，不能移过去。`); return true; }
+  const dz = st.players.p.zones[locIdx];
+  if (dz.length >= locDef(locIdx).max) { setStatus('目标区域已放满，不能移过去。'); return true; }
+  st.flyMovedFrom[card.id] = found.j; // 记录回合初所在区域，供“能量重置”退回
+  found.zone.splice(found.zone.indexOf(card), 1);
+  dz.push(card);
+  st.flyMoved.add(card.id);
+  st.moveCardId = null;
+  log('p', `⇄ 「${card.def.n}」移动到了「${st.locs[locIdx].def.n}」（本回合不可再移）。`);
+  setStatus(`已把「${card.def.n}」移到「${st.locs[locIdx].def.n}」。`);
+  renderAll();
+  return true;
 }
 
 function tryPlayAt(locIdx) {
@@ -343,6 +431,7 @@ function uiEndTurn() {
   const st = state;
   if (st.phase !== 'play') return;
   st.selected = -1;
+  st.moveCardId = null; // 结束出牌即取消“移动牌”模式
   if (st.playerMoves.length === 0) {
     log('p', '你选择跳过本回合。');
   } else {
@@ -355,7 +444,10 @@ function uiEndTurn() {
 function uiEnergyReset() {
   const st = state;
   if (st.phase !== 'play') { setStatus('只有在出牌阶段才能重置暗牌。'); return; }
-  if (st.playerMoves.length === 0) { setStatus('本回合还没有暗出的牌，无需重置。'); return; }
+  if (st.playerMoves.length === 0 && st.flyMoved.size === 0) {
+    setStatus('本回合还没有暗出的牌或移动，无需重置。');
+    return;
+  }
   $('undoMask').classList.remove('hidden');
 }
 
@@ -366,8 +458,11 @@ function cancelEnergyReset() {
 function confirmEnergyReset() {
   $('undoMask').classList.add('hidden');
   const st = state;
-  if (st.phase !== 'play' || st.playerMoves.length === 0) return;
-  undoPlacedCards();
+  if (st.phase !== 'play') return;
+  if (st.playerMoves.length === 0 && st.flyMoved.size === 0) return;
+  undoPlacedCards(); // 暗牌放回手牌、能量返还
+  undoFlyMoves();    // 本回合“每回合移动一次”的卡移回回合初区域、恢复移动次数
+  renderAll();
 }
 
 // 把本回合已暗出的牌按放置前的顺序放回手牌，能量全额返还
@@ -402,6 +497,26 @@ function undoPlacedCards() {
   st.playerMoves = [];
   log('p', `↺ 你重置了本回合暗出的 ${removed.length} 张牌，已放回手牌，能量返还。`);
   renderAll();
+}
+
+// 重置：把本回合“每回合移动一次”移过的卡移回回合初所在区域，并恢复移动次数
+function undoFlyMoves() {
+  const st = state;
+  const froms = st.flyMovedFrom || {};
+  st.moveCardId = null;
+  for (const idStr of Object.keys(froms)) {
+    const id = Number(idStr);
+    const from = froms[id];
+    const found = findPlayerCard(id);
+    if (!found || found.j === from) { st.flyMoved.delete(id); continue; }
+    const back = st.players.p.zones[from];
+    if (back.length >= locDef(from).max) continue; // 理论不会发生：先重置暗牌已腾位
+    found.zone.splice(found.zone.indexOf(found.card), 1);
+    back.push(found.card);
+    st.flyMoved.delete(id);
+    log('p', `↺ 移动重置：「${found.card.def.n}」回到「${st.locs[from].def.n}」，本回合可再移动。`);
+  }
+  st.flyMovedFrom = {};
 }
 
 function uiRetreat() {
@@ -589,6 +704,96 @@ function applyEffect(side, locIdx, card) {
       log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${minP}）`);
       break;
     }
+    case 'spawn': {
+      // 现身：给本区域双方各生成特殊卡（如「比那名居天子」给双方各 1 张石块）
+      const sp = def.spawn;
+      const tk = sp && TOKENS[sp.card];
+      if (sp && tk) {
+        const cnt = sp.n || 1;
+        const total = cnt * 2;
+        const placed = placeToken(side, locIdx, tk, cnt) + placeToken(other, locIdx, tk, cnt);
+        log(side, `✦ ${def.n}：本区域双方各生成 ${cnt} 张「${tk.n}」${placed < total ? '（部分区域已放满）' : ''}`);
+      }
+      break;
+    }
+    case 'xform': {
+      // 现身：把本区域变成目标地形（def.xf = locations 池 id，如辉针城 needle）
+      const target = LOCATION_POOL.find((l) => l.id === def.xf);
+      if (!target) break;
+      const over = ['p', 'a'].some((s2) => state.players[s2].zones[locIdx].length > target.max);
+      if (over) { log('danger', `✦ ${def.n} 想把本区变成「${target.n}」，但双方牌数超出其上限，变形失败。`); break; }
+      state.locs[locIdx].def = target;
+      refreshLocHeader(locIdx); // 更新列名/图标/效果文字/配色（隙间随 max=4 自动消失）
+      log('danger', `✦ ${def.n} 将本区域变成了「${target.n}」！`);
+      break;
+    }
+    case 'mv': {
+      // 现身：把本区“对方战力最低”的已翻开卡移到另外两区随机一处；
+      // 候选区必须该侧未满且已开放（避开锁定的七夕坂等）；全满/全不可达则移动失败。
+      const vis = theirs.filter((c) => c.revealed && !c.def.un);
+      if (vis.length === 0) { log(side, `✦ ${def.n} 想移走对方卡牌，但对方本区没有已翻开的可移动卡牌。`); break; }
+      let minP = Infinity, target = null;
+      for (const c of vis) {
+        const p = cardPowerIn(locIdx, c);
+        if (p < minP) { minP = p; target = c; }
+      }
+      const cands = [];
+      for (let j = 0; j < 3; j++) {
+        if (j === locIdx) continue;
+        if (locOpen(j) && st.players[other].zones[j].length < locDef(j).max) cands.push(j);
+      }
+      if (cands.length === 0) { log('danger', `✦ ${def.n} 想把对方「${target.def.n}」移走，但另外两个区域都放不下，移动失败。`); break; }
+      const dst = cands.length === 1 ? cands[0] : cands[Math.floor(Math.random() * cands.length)];
+      theirs.splice(theirs.indexOf(target), 1);
+      st.players[other].zones[dst].push(target);
+      log('danger', `✦ ${def.n} 把对方「${target.def.n}」（威力 ${minP}）移到了「${st.locs[dst].def.n}」。`);
+      break;
+    }
+    case 'give': {
+      // 现身：把指定特殊卡加入自己手牌（手牌衍生物，如八云紫 → 废弃列车）
+      const gv = def.give;
+      const tk = gv && TOKENS[gv.card];
+      if (gv && tk) {
+        const cnt = gv.n || 1;
+        const hand = st.players[side].hand;
+        let added = 0;
+        for (let i = 0; i < cnt; i++) {
+          if (hand.length >= 7) break;
+          const c2 = newCard(tk);
+          c2.side = side;
+          hand.push(c2);
+          added++;
+        }
+        log(side, `✦ ${def.t}${added < cnt ? '（手牌已满，部分未能加入）' : ''}`);
+      }
+      break;
+    }
+    case 'dwh': {
+      // 现身：摧毁本区对方一张“已翻开且战力最高”的卡（平局取第一张最高者）
+      if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
+      const vis = theirs.filter((c) => c.revealed && !c.def.un);
+      if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区的牌都还没翻开。`); break; }
+      let maxP = -Infinity, target = null;
+      for (const c of vis) {
+        const p = cardPowerIn(locIdx, c);
+        if (p > maxP) { maxP = p; target = c; }
+      }
+      theirs.splice(theirs.indexOf(target), 1);
+      log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${maxP}）`);
+      break;
+    }
+    case 'oc': {
+      // 现身：翻开当回合，对方是否在本区域放置过至少一张牌（本回合落牌记录）
+      const oppMoves = side === 'p' ? st.aiMoves : st.playerMoves;
+      const present = oppMoves.some((m) => m.loc === locIdx);
+      if (present) {
+        card.buff += def.a;
+        log(side, `✦ 对方本回合在本区放过牌：${def.n} 威力 +${def.a}（现 ${cardPowerIn(locIdx, card)}）`);
+      } else {
+        log(side, `✦ 对方本回合没有在本区放牌，${def.n} 效果未触发。`);
+      }
+      break;
+    }
     default: break;
   }
 }
@@ -763,7 +968,10 @@ function buildBoard() {
     col.appendChild(mine);
 
     // 整列点击 = 出到该区域
-    col.addEventListener('click', () => tryPlayAt(idx));
+    col.addEventListener('click', () => {
+      // 若正处于“移动卡”模式则先处理移动；否则正常出牌
+      if (!tryMoveFlyTo(idx)) tryPlayAt(idx);
+    });
     col.addEventListener('mouseenter', () => {
       if (state.phase === 'play' && state.selected >= 0 && canPlaceP(idx)) col.classList.add('active-hover');
     });
@@ -779,6 +987,18 @@ function buildBoard() {
   Game._els = els;
 }
 
+// 区域被“变形”（如鬼人正邪 → 辉针城）后刷新该列的标题/图标/效果文字/配色 class
+function refreshLocHeader(locIdx) {
+  const col = Game._els.cols[locIdx];
+  if (!col) return;
+  const def = locDef(locIdx);
+  col.className = 'location ' + def.id;
+  const nameEl = col.querySelector('.loc-name');
+  if (nameEl) nameEl.innerHTML = `<span><span class="icon">${def.icon}</span> ${def.n}</span>`;
+  const effEl = col.querySelector('.loc-effect');
+  if (effEl) effEl.innerHTML = `<span class="le-icon">${def.icon}</span>${def.eff}`;
+}
+
 function canPlaceP(idx) {
   const st = state;
   const card = st.players.p.hand[st.selected];
@@ -787,7 +1007,7 @@ function canPlaceP(idx) {
   return st.players.p.zones[idx].length < locDef(idx).max;
 }
 
-function miniCardEl(card, locIdx) {
+function miniCardEl(card, locIdx, side) {
   const el = document.createElement('div');
   el.className = 'mini-card' + (card.justRevealed ? ' played-now' : '');
   if (card.justRevealed) card.justRevealed = false;
@@ -816,10 +1036,21 @@ function miniCardEl(card, locIdx) {
         <span class="mc-name">${card.def.n}</span>
         ${net !== 0 ? `<span class="mc-mod">${net > 0 ? '+' : ''}${net}</span>` : ''}`;
     }
+    // 己方“每回合可移动一次”的已翻开卡（如射命丸文）：出牌阶段点击进入移动
+    const canFly = side === 'p' && state.phase === 'play' && card.def.fly && card.revealed && !state.flyMoved.has(card.id);
+    if (canFly) {
+      el.classList.add('can-fly');
+      if (state.moveCardId === card.id) el.classList.add('fly-moving');
+      const badge = document.createElement('span');
+      badge.className = 'mc-fly';
+      badge.textContent = '⇄ 移动';
+      el.appendChild(badge);
+    }
     // 已翻开的敌我卡牌：点击后像图鉴一样放大查看（带场上实时数据）
     el.classList.add('can-inspect');
     el.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (canFly) { uiMoveFly(card.id); return; }
       showFieldCard(card, locIdx);
     });
   }
@@ -853,6 +1084,8 @@ function renderZones() {
     mineZoneEl.querySelector('.slot-count').textContent =
       `已放 ${count}${mt && !locOpen(j) ? ` · 🔒 第 ${mt} 回合开放` : ''}`;
     mineZoneEl.parentElement.classList.toggle('hoverable', canPlaceP(j));
+    // 未开放区域加灰色遮罩（如七夕坂第 5 回合前）
+    Game._els.cols[j].classList.toggle('locked', !!locDef(j).minTurn && !locOpen(j));
   }
 }
 
@@ -870,7 +1103,7 @@ function buildZoneChildren(side, locIdx) {
       continue;
     }
     const card = cards[i];
-    if (card) out.push(miniCardEl(card, locIdx));
+    if (card) out.push(miniCardEl(card, locIdx, side));
     else if (def.max === 4) out.push(guideCellEl());
     else out.push(spacerCellEl());
   }
@@ -923,8 +1156,13 @@ function renderHand() {
     el.style.setProperty('--cgrad', gradOf(card.def));
     el.innerHTML = cardFaceHTML(card.def);
     el.addEventListener('click', () => {
-      if (st.phase === 'over') showZoom(card.def); // 终局复盘：点击放大查看卡面
+      if (st.phase === 'over') showZoom(card.def, true); // 终局复盘：点击放大查看卡面
       else selectHand(index);
+    });
+    // 右键手牌：弹出完整卡牌详情（含被省略号截断的完整效果文案）
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showZoom(card.def, true);
     });
     hand.appendChild(el);
   });
@@ -984,13 +1222,116 @@ function closeCodex() {
   $('codexMask').classList.add('hidden');
 }
 
+/* ---------------- 开发者：指定卡牌（调试用） ---------------- */
+function uiOnPick() {
+  const mask = $('pickMask');
+  if (!mask.classList.contains('hidden')) { uiOnPickClose(); return; }
+  pickDef = null;
+  buildPickGrid();
+  mask.classList.remove('hidden');
+}
+
+function buildPickGrid() {
+  const grid = $('pickGrid');
+  grid.innerHTML = '';
+  for (let c = 1; c <= 6; c++) {
+    for (const def of POOL[c]) {
+      const el = document.createElement('div');
+      el.className = 'codex-card hand-card';
+      el.style.setProperty('--cgrad', gradOf(def));
+      el.innerHTML = cardFaceHTML(def);
+      el.title = def.n;
+      el.addEventListener('click', () => {
+        pickDef = def;
+        grid.querySelectorAll('.pick-picked').forEach((x) => x.classList.remove('pick-picked'));
+        el.classList.add('pick-picked');
+        $('pickTip').textContent = `已选：「${def.n}」（${def.c} 费 / 威力 ${def.p}）`;
+      });
+      grid.appendChild(el);
+    }
+  }
+  $('pickTip').textContent = `当前手牌 ${state.players.p.hand.length}/7 — 点选 1 张后确认`;
+}
+
+function uiOnPickClose() {
+  $('pickMask').classList.add('hidden');
+  pickDef = null;
+}
+
+// 开发者调试：把本回合能量设为 7（仅当前出牌阶段生效；下回合 playRound 会按回合数重置）
+function uiOnEnergyDev() {
+  const st = state;
+  if (st.phase !== 'play') { setStatus('只有在你的出牌阶段才能修改能量。'); return; }
+  st.energyTotal = 7;
+  st.energyLeft = 7;
+  log('sys', '⚡ 开发者指令：本回合能量已设为 7（下回合恢复为按回合数计）。');
+  setStatus('本回合能量已改为 7，可继续出牌（仅本回合有效，下回合恢复）。');
+  renderAll();
+}
+
+function uiOnPickConfirm() {
+  if (!pickDef) { setStatus('请先在弹窗里点选一张卡牌。'); return; }
+  const pl = state.players.p;
+  if (pl.hand.length >= 7) {
+    setStatus(`手牌已满（${pl.hand.length}/7），无法加入「${pickDef.n}」。`);
+    return;
+  }
+  const name = pickDef.n;
+  const card = newCard(pickDef);
+  card.side = 'p';
+  pl.hand.push(card);
+  log('sys', `🎯 开发者指令：指定「${name}」加入你的手牌（现 ${pl.hand.length}/7）。`);
+  setStatus(`已将「${name}」加入手牌（${pl.hand.length}/7）。`);
+  pickDef = null;
+  $('pickMask').classList.add('hidden');
+  renderHand();
+}
+
 function zoomStageBtn(label) {
   const btn = document.querySelector('.zoom-stage .btn');
   if (btn) btn.textContent = label;
 }
 
-// 图鉴入口的放大查看（展示静态卡面）
-function showZoom(def) {
+// 找出与某张卡“相关联”的衍生特殊卡（SPLIT：give/spawn 生成的、og 在场光环作用的）
+function tokenLinksForDef(def) {
+  const list = [];
+  const add = (key) => {
+    if (!key) return;
+    const d = TOKENS[key];
+    if (d && !list.includes(d)) list.push(d);
+  };
+  if (def.give) add(def.give.card);
+  if (def.spawn) add(def.spawn.card);
+  if (def.og && def.og.tk) {
+    for (const k in TOKENS) {
+      const d = TOKENS[k];
+      if (d && d.tk === def.og.tk) add(k);
+    }
+  }
+  return list;
+}
+
+// 在卡牌详情弹窗右侧渲染“衍生卡牌”区（与主弹窗同框，关闭时一起关闭）
+function renderDeriv(def) {
+  const box = $('zoomDeriv');
+  const list = tokenLinksForDef(def);
+  if (!list.length) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="deriv-head">衍生卡牌</div>';
+  for (const d of list) {
+    const item = document.createElement('div');
+    item.className = 'deriv-item';
+    const card = document.createElement('div');
+    card.className = 'zoom-card hand-card deriv-card';
+    card.style.setProperty('--cgrad', gradOf(d));
+    card.innerHTML = cardFaceHTML(d);
+    item.appendChild(card);
+    box.appendChild(item);
+  }
+}
+
+// 卡牌放大查看（图鉴/手牌右键等）：展示静态卡面；standalone=true 时按钮显示“关闭”
+function showZoom(def, standalone) {
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
   const el = document.createElement('div');
@@ -1003,7 +1344,8 @@ function showZoom(def) {
     <div class="zoom-meta"><span class="zm-cost">费用 ${def.c}</span><span class="zm-pow">威力 ${def.p}</span></div>
     <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
-  zoomStageBtn('← 返回图鉴');
+  renderDeriv(def);
+  zoomStageBtn(standalone ? '关闭 ✕' : '← 返回图鉴');
   $('zoomMask').classList.remove('hidden');
 }
 
@@ -1036,6 +1378,7 @@ function showFieldCard(card, locIdx) {
     ${ab !== 0 ? `<div class="zm-kind">区域效果：本区域所有卡牌 威力 ${ab > 0 ? '+' : ''}${ab}</div>` : ''}
     <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
+  renderDeriv(def);
   zoomStageBtn('关闭 ✕');
   $('zoomMask').classList.remove('hidden');
 }
@@ -1084,6 +1427,10 @@ window.Game = {
     onCodex: uiOnCodex,
     closeZoom,
     closeResult,
+    onPick: uiOnPick,
+    onPickClose: uiOnPickClose,
+    onPickConfirm: uiOnPickConfirm,
+    onEnergyDev: uiOnEnergyDev,
     onEnergyReset: uiEnergyReset,
     confirmEnergyReset,
     cancelEnergyReset,
@@ -1105,13 +1452,16 @@ window.Game = {
   const codexMask = $('codexMask');
   const zoomMask = $('zoomMask');
   const undoMask = $('undoMask');
+  const pickMask = $('pickMask');
   codexMask.addEventListener('click', (e) => { if (e.target === codexMask) closeCodex(); });
   zoomMask.addEventListener('click', (e) => { if (e.target === zoomMask) closeZoom(); });
   undoMask.addEventListener('click', (e) => { if (e.target === undoMask) cancelEnergyReset(); });
+  pickMask.addEventListener('click', (e) => { if (e.target === pickMask) uiOnPickClose(); });
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!zoomMask.classList.contains('hidden')) closeZoom();
     else if (!codexMask.classList.contains('hidden')) closeCodex();
+    else if (!pickMask.classList.contains('hidden')) uiOnPickClose();
     else if (!undoMask.classList.contains('hidden')) cancelEnergyReset();
   });
 })();

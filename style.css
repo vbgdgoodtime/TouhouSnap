@@ -155,6 +155,37 @@ body {
 .location.tanabata  { border-color: rgba(196, 108, 150, .55); }
 .location.underworld { border-color: rgba(108, 120, 140, .6); }
 .location.reactor   { border-color: rgba(216, 96, 44, .6); }
+/* 未开放区域（minTurn，如七夕坂第 5 回合前）：整体灰色遮罩 */
+.location.locked::after {
+  content: "🔒";
+  position: absolute;
+  inset: 0;
+  background: rgba(96, 106, 118, .5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  z-index: 5;
+  border-radius: inherit;
+  pointer-events: none;
+}
+/* “每回合可移动一次”的牌（射命丸文）视觉 */
+.mini-card.can-fly { outline: 2px dashed rgba(242, 201, 76, .95); outline-offset: -2px; cursor: grab; }
+.mini-card.fly-moving { box-shadow: 0 0 0 3px rgba(242, 201, 76, .95), 0 0 14px rgba(242, 201, 76, .55); }
+.mini-card .mc-fly {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 3px;
+  background: rgba(255, 238, 150, .96);
+  color: #7a5c00;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 0 5px;
+  border-radius: 6px;
+  z-index: 4;
+  white-space: nowrap;
+}
 .location.hoverable { cursor: pointer; }
 .location.targetable:hover, .location.targetable.active-hover {
   border-color: #b98800;
@@ -396,6 +427,13 @@ body {
 .hand-card .hc-icon { font-size: 30px; text-align: center; margin: 4px 0 2px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
 .hand-card .hc-name { font-size: 12.5px; font-weight: 800; text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 .hand-card .hc-text { font-size: 8.8px; line-height: 1.3; color: rgba(255,255,255,.88); margin-top: 4px; flex: 1; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+/* 手牌区的效果文字：最多两行，超长省略号截断（完整文案可右键手牌或点击放大查看） */
+#hand .hand-card .hc-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .hand-card .hc-cost-tag { position: absolute; bottom: -1px; right: -1px; font-size: 9px; background: rgba(0,0,0,.6); border-radius: 6px 0 8px 0; padding: 2px 5px; border: 1px solid rgba(255,255,255,.15); }
 
 /* ---------- 日志 ---------- */
@@ -543,6 +581,9 @@ body {
 .undo-text { color: #64805c; font-size: 14px; line-height: 1.8; margin: 10px 0 20px; }
 .undo-btns, .modal-btns { display: flex; gap: 10px; justify-content: center; }
 .undo-btns .btn, .modal-btns .btn { min-width: 96px; }
+/* 开发者“指定卡牌”弹窗 */
+.pick-actions { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+.codex-card.pick-picked { border-color: #f2c94c; box-shadow: 0 0 0 3px rgba(242, 201, 76, .85), 0 8px 18px rgba(46, 78, 40, .4); transform: translateY(-4px); }
 
 /* ============ 图鉴 / 放大卡牌 ============ */
 .codex-modal {
@@ -606,6 +647,39 @@ body {
 .zm-pow { color: #8a5b00; }
 .zm-kind { color: #a86f00; font-weight: 700; }
 .zm-desc { margin-top: 4px; color: #2e4527; }
+
+/* 放大视图：主卡信息与右侧“衍生卡牌”并排 */
+.zoom-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+}
+.zoom-main-col { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 460px; }
+.zoom-deriv {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  border: 1px dashed rgba(126, 168, 118, .6);
+  border-radius: 18px;
+  background: rgba(238, 247, 226, .55);
+  min-width: 196px;
+  align-self: stretch;
+  justify-content: flex-start;
+}
+.zoom-deriv .deriv-head { font-size: 13px; font-weight: 800; color: #64805c; letter-spacing: 2px; white-space: nowrap; }
+.deriv-card { width: 180px; }
+.deriv-card .hc-icon { font-size: 46px; margin: 6px 0 2px; }
+.deriv-card .hc-name { font-size: 16px; }
+.deriv-card .hc-text { font-size: 11px; line-height: 1.4; margin-top: 8px; }
+@media (max-width: 760px) {
+  .zoom-row { flex-direction: column; align-items: center; }
+  .zoom-deriv { width: min(320px, 92vw); }
+}
 
 /* 放大/手牌卡面上的增减益威力配色 */
 .hand-card .p.up { color: #4ade8f; border-color: #4ade8f; }

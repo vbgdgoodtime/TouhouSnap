@@ -37,17 +37,21 @@
 | youmu.png | 魂魄妖梦 | 3 |
 | medicine.png | 梅蒂欣·梅兰可莉 | 3 |
 | remilia.png | 蕾米莉亚·斯卡蕾特 | 4 |
-| yukari.png | 八云紫 | 4 |
+| yukari.png | 八云紫 | 5 |
 | yuyuko.png | 西行寺幽幽子 | 4 |
 | flandre.png | 芙兰朵露·斯卡蕾特 | 4 |
 | sanae.png | 东风谷早苗 | 5 |
-| tenshi.png | 比那名居天子 | 5 |
+| tenshi.png | 比那名居天子 | 3 |
 | eirin.png | 八意永琳 | 5 |
 | aya.png | 射命丸文 | 5 |
 | yuka.png | 风见幽香 | 6 |
 | suika.png | 伊吹萃香 | 6 |
 | mokou.png | 藤原妹红 | 6 |
 | suwako.png | 洩矢诹访子 | 6 |
+| seija.png | 鬼人正邪 | 6 |
+
+> ⚠️ **版本更新（人物更名）**：露米娅 / 博丽灵梦 / 蕾米莉亚 / 东风谷早苗 / 伊吹萃香 已更名（小妖精 / 中妖精 / 中妖怪 / 大妖怪 / 贤者），这些卡 `img` 已清除、**暂时用 emoji 兜底**——对应文件（rumia/reimu/remilia/sanae/suika.png）当前**未被引用**，保留备用。
+> ✅ 红美铃已作为新卡重新实装（2费/3力/mv，红魔馆成员），`meiling.png` 恢复引用。
 
 ## 当前素材状态（2026-09-08 第三次同步 · 已补齐）
 
