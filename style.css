@@ -154,7 +154,237 @@ body {
 .location.needle    { border-color: rgba(168, 132, 214, .6); }
 .location.tanabata  { border-color: rgba(196, 108, 150, .55); }
 .location.underworld { border-color: rgba(108, 120, 140, .6); }
-.location.reactor   { border-color: rgba(216, 96, 44, .6); }
+.location.reactor   { border-color: rgba(255, 122, 72, .6); }
+/* 聚变反应炉：暗红色为主的主题底 */
+.location.reactor {
+  background: linear-gradient(180deg, #47100b 0%, #5c1509 100%);
+}
+.location.reactor .loc-head {
+  background: linear-gradient(180deg, rgba(130, 32, 18, .92), rgba(96, 20, 10, .86));
+  border-bottom-color: rgba(255, 150, 110, .4);
+}
+.location.reactor .loc-name { color: #ffe0cf; }
+.location.reactor .loc-mid {
+  background: linear-gradient(180deg, rgba(64, 13, 9, .45), rgba(56, 11, 8, .55));
+  border-bottom-color: rgba(255, 150, 110, .3);
+}
+.location.reactor .loc-effect { color: #ffc3a8; }
+.location.reactor .zone.opp {
+  background: rgba(110, 24, 14, .28);
+  border-bottom-color: rgba(255, 170, 130, .25);
+}
+.location.reactor .zone.player-zone {
+  background: linear-gradient(180deg, rgba(255, 130, 88, .16), transparent 70%);
+}
+.location.reactor .slot-count { color: #ffe3d0; background: rgba(58, 12, 8, .78); }
+.location.reactor .cell-guide { border-color: rgba(255, 200, 170, .28); }
+.location.reactor .zone .slot-row.quad::before { background: rgba(255, 190, 160, .22); }
+
+/* 辉针城：反转区意象——上下各半（上黑下白） */
+.location.needle {
+  background: linear-gradient(180deg, #191a20 0%, #20222b 49.9%, #f5f5ee 50.1%, #ffffff 100%);
+}
+.location.needle .loc-head {
+  background: linear-gradient(180deg, rgba(30, 32, 42, .97), rgba(22, 23, 30, .94));
+  border-bottom-color: rgba(215, 215, 225, .4);
+}
+.location.needle .loc-name { color: #eef0f8; }
+.location.needle .loc-mid {
+  background: linear-gradient(180deg, rgba(32, 34, 46, .5), rgba(120, 122, 136, .28));
+  border-bottom-color: rgba(150, 152, 168, .35);
+}
+.location.needle .loc-effect { color: #e3e5ef; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.location.needle .zone.opp {
+  background: rgba(255, 255, 255, .05);
+  border-bottom-color: rgba(255, 255, 255, .22);
+}
+.location.needle .zone.player-zone {
+  background: linear-gradient(180deg, rgba(0, 0, 0, .05), transparent 70%);
+}
+.location.needle .cell-guide { border-color: rgba(120, 122, 140, .35); }
+.location.needle .zone .slot-row.quad::before { background: rgba(120, 122, 145, .3); }
+
+/* 冥界：成套浅灰主题（主底浅灰；边框/表头深灰） */
+.location.underworld {
+  background: #e4e5e3;
+  border-color: #6c7076;
+}
+.location.underworld .loc-head {
+  background: linear-gradient(180deg, #5a5e66, #484c54);
+  border-bottom-color: rgba(255, 255, 255, .25);
+}
+.location.underworld .loc-name { color: #ffffff; }
+.location.underworld .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .65), rgba(235, 236, 234, .5));
+  border-bottom-color: rgba(108, 112, 118, .3);
+}
+.location.underworld .loc-effect { color: #494d55; }
+.location.underworld .zone.opp {
+  background: rgba(108, 112, 118, .12);
+  border-bottom-color: rgba(108, 112, 118, .25);
+}
+.location.underworld .zone.player-zone {
+  background: linear-gradient(180deg, rgba(108, 112, 118, .08), transparent 70%);
+}
+.location.underworld .cell-guide { border-color: rgba(108, 112, 118, .4); }
+.location.underworld .zone .slot-row.quad::before { background: rgba(108, 112, 118, .35); }
+.location.underworld .slot-count { color: #4a4e55; background: rgba(255, 255, 255, .85); }
+
+/* 雾之湖：成套浅蓝主题（主底浅蓝；边框/表头深蓝） */
+.location.lake {
+  background: #e8f3fb;
+  border-color: #2f6fa8;
+}
+.location.lake .loc-head {
+  background: linear-gradient(180deg, #2f6fa8, #24598f);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.lake .loc-name { color: #ffffff; }
+.location.lake .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(224, 240, 252, .55));
+  border-bottom-color: rgba(47, 111, 168, .3);
+}
+.location.lake .loc-effect { color: #2d5f8e; }
+.location.lake .zone.opp {
+  background: rgba(47, 111, 168, .10);
+  border-bottom-color: rgba(47, 111, 168, .25);
+}
+.location.lake .zone.player-zone {
+  background: linear-gradient(180deg, rgba(47, 111, 168, .07), transparent 70%);
+}
+.location.lake .cell-guide { border-color: rgba(47, 111, 168, .4); }
+.location.lake .zone .slot-row.quad::before { background: rgba(47, 111, 168, .3); }
+.location.lake .slot-count { color: #2d5f8e; background: rgba(255, 255, 255, .85); }
+
+/* 迷途竹林：中等明暗绿色纯色主题 */
+.location.slot2 {
+  background: #9fcb90;
+  border-color: #4d7a3a;
+}
+.location.slot2 .loc-head {
+  background: linear-gradient(180deg, #4d7a3a, #3d652c);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.slot2 .loc-name { color: #ffffff; }
+.location.slot2 .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(215, 236, 200, .45));
+  border-bottom-color: rgba(77, 122, 58, .35);
+}
+.location.slot2 .loc-effect { color: #2f5520; }
+.location.slot2 .zone.opp {
+  background: rgba(255, 255, 255, .10);
+  border-bottom-color: rgba(77, 122, 58, .3);
+}
+.location.slot2 .zone.player-zone {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .12), transparent 70%);
+}
+.location.slot2 .cell-guide { border-color: rgba(77, 122, 58, .5); }
+.location.slot2 .zone .slot-row.quad::before { background: rgba(255, 255, 255, .4); }
+.location.slot2 .slot-count { color: #2f5520; background: rgba(255, 255, 255, .85); }
+
+/* 红魔馆：纯淡红主题（浅红主底 + 深红边框/表头） */
+.location.mansion {
+  background: #f5dbd5;
+  border-color: #a23a33;
+}
+.location.mansion .loc-head {
+  background: linear-gradient(180deg, #a23a33, #8a2e28);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.mansion .loc-name { color: #ffffff; }
+.location.mansion .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(250, 220, 212, .5));
+  border-bottom-color: rgba(162, 58, 51, .3);
+}
+.location.mansion .loc-effect { color: #8a2e28; }
+.location.mansion .zone.opp {
+  background: rgba(162, 58, 51, .09);
+  border-bottom-color: rgba(162, 58, 51, .25);
+}
+.location.mansion .zone.player-zone {
+  background: linear-gradient(180deg, rgba(162, 58, 51, .07), transparent 70%);
+}
+.location.mansion .cell-guide { border-color: rgba(162, 58, 51, .35); }
+.location.mansion .zone .slot-row.quad::before { background: rgba(162, 58, 51, .25); }
+.location.mansion .slot-count { color: #8a2e28; background: rgba(255, 255, 255, .85); }
+
+/* 虹龙洞：淡黄纯色主题（浅黄主底 + 金黄/棕深色边框与表头） */
+.location.rainbow {
+  background: #f7edc6;
+  border-color: #b78a30;
+}
+.location.rainbow .loc-head {
+  background: linear-gradient(180deg, #b78a30, #9c711f);
+  border-bottom-color: rgba(255, 255, 255, .3);
+}
+.location.rainbow .loc-name { color: #ffffff; }
+.location.rainbow .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(246, 236, 190, .5));
+  border-bottom-color: rgba(183, 138, 48, .32);
+}
+.location.rainbow .loc-effect { color: #7a5b0a; }
+.location.rainbow .zone.opp {
+  background: rgba(183, 138, 48, .10);
+  border-bottom-color: rgba(183, 138, 48, .26);
+}
+.location.rainbow .zone.player-zone {
+  background: linear-gradient(180deg, rgba(183, 138, 48, .08), transparent 70%);
+}
+.location.rainbow .cell-guide { border-color: rgba(183, 138, 48, .4); }
+.location.rainbow .zone .slot-row.quad::before { background: rgba(183, 138, 48, .3); }
+.location.rainbow .slot-count { color: #7a5b0a; background: rgba(255, 255, 255, .85); }
+
+/* 七夕坂：淡粉纯色主题（浅粉主底 + 深粉边框/表头） */
+.location.tanabata {
+  background: #f8e3ea;
+  border-color: #b65f86;
+}
+.location.tanabata .loc-head {
+  background: linear-gradient(180deg, #b65f86, #9a4a6e);
+  border-bottom-color: rgba(255, 255, 255, .3);
+}
+.location.tanabata .loc-name { color: #ffffff; }
+.location.tanabata .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(248, 222, 232, .55));
+  border-bottom-color: rgba(182, 95, 134, .32);
+}
+.location.tanabata .loc-effect { color: #a04a70; }
+.location.tanabata .zone.opp {
+  background: rgba(182, 95, 134, .10);
+  border-bottom-color: rgba(182, 95, 134, .26);
+}
+.location.tanabata .zone.player-zone {
+  background: linear-gradient(180deg, rgba(182, 95, 134, .08), transparent 70%);
+}
+.location.tanabata .cell-guide { border-color: rgba(182, 95, 134, .4); }
+.location.tanabata .zone .slot-row.quad::before { background: rgba(182, 95, 134, .3); }
+.location.tanabata .slot-count { color: #a04a70; background: rgba(255, 255, 255, .85); }
+
+/* 龙神像：很浅的灰色主题（比冥界 #e4e5e3 更浅）+ 深灰边框/表头 */
+.location.dragon {
+  background: #f2f2f0;
+  border-color: #8b9097;
+}
+.location.dragon .loc-head {
+  background: linear-gradient(180deg, #6b7078, #545962);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.dragon .loc-name { color: #ffffff; }
+.location.dragon .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(238, 239, 237, .55));
+  border-bottom-color: rgba(139, 144, 151, .3);
+}
+.location.dragon .loc-effect { color: #52575f; }
+.location.dragon .zone.opp {
+  background: rgba(139, 144, 151, .09);
+  border-bottom-color: rgba(139, 144, 151, .25);
+}
+.location.dragon .zone.player-zone {
+  background: linear-gradient(180deg, rgba(139, 144, 151, .07), transparent 70%);
+}
+.location.dragon .cell-guide { border-color: rgba(139, 144, 151, .38); }
+.location.dragon .zone .slot-row.quad::before { background: rgba(139, 144, 151, .3); }
+.location.dragon .slot-count { color: #52575f; background: rgba(255, 255, 255, .85); }
 /* 未开放区域（minTurn，如七夕坂第 5 回合前）：整体灰色遮罩 */
 .location.locked::after {
   content: "🔒";
