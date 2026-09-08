@@ -92,7 +92,10 @@
       <h2 id="modalTitle">结果</h2>
       <div class="modal-sub" id="modalSub"></div>
       <div class="modal-cubes" id="modalCubes"></div>
-      <button class="btn btn-primary" id="btnAgain" onclick="Game.restart()">再来一局</button>
+      <div class="modal-btns">
+        <button class="btn" id="btnResultClose" onclick="Game.ui.closeResult()">确认</button>
+        <button class="btn btn-primary" id="btnAgain" onclick="Game.restart()">再来一局</button>
+      </div>
     </div>
   </div>
 
@@ -139,8 +142,8 @@
     <button id="btnPass" class="btn btn-pass" onclick="Game.ui.onPass()">跳过回合</button>
   </div>
 
-  <script src="cards.js"></script>
-  <script src="locations.js"></script>
+  <script src="data/cards.js"></script>
+  <script src="data/locations.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------------- 基础数据 ----------------
-   卡牌与区域数据已拆到独立文件（cards.js / locations.js），
+   卡牌与区域数据已拆到独立文件（data/cards.js / data/locations.js），
    在 index.html 中必须先于 game.js 加载。 */
 const GRADS = {
   1: 'linear-gradient(150deg,#2e5f96,#7cc0ff)',
@@ -22,7 +22,12 @@ const BACK_GRAD = 'linear-gradient(160deg,#2b314a,#151929)';
 
 const POOL = (window.DS_CARDS && window.DS_CARDS.POOL) || {};
 const KIND_LABEL = (window.DS_CARDS && window.DS_CARDS.KIND_LABEL) || {};
+const TOKENS = (window.DS_CARDS && window.DS_CARDS.SPECIAL) || {};
+const GROUPS = (window.DS_CARDS && window.DS_CARDS.GROUPS) || {};
 const LOCATION_POOL = (window.DS_LOCATIONS && window.DS_LOCATIONS.POOL) || [];
+
+// 卡面渐变：有自定义 cg（如特殊卡牌「石块」的土黄色）则优先，否则按费用档位取色
+const gradOf = (def) => (def && def.cg) || GRADS[def.c];
 
 const DECK_CURVE = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 6];
 // 兜底抽牌顺序：费用平滑，保证前几回合有牌可打
@@ -46,13 +51,52 @@ function shuffle(arr) {
 }
 function uid() { return (state.cardSeq++); }
 function cardPower(card) { return card.def.p + card.buff; }
+// 区域-阵营加成：区域 aff 给“所属该阵营（card.def.g）”的卡牌加固定威力。
+// 属于常驻实时加成：该卡在此区域的任何实时读取（卡面/总数/摧毁/落后判定/图鉴放大）都计入。
+function locRoleBonus(locIdx, card) {
+  const aff = locDef(locIdx).aff;
+  if (!aff || !card || card.def.un) return 0;
+  return card.def.g === aff.group ? aff.add : 0;
+}
+// 区域-费用加成：区域 cb={c,add} 给位于本区域、费用恰为该值的卡牌加威力
+// （如雾之湖对 1 费卡牌 +2；双方卡与特殊卡都算）。
+function locCostBonus(locIdx, card) {
+  const cb = locDef(locIdx).cb;
+  if (!cb || !card || card.def.un) return 0;
+  return card.def.c === cb.c ? cb.add : 0;
+}
+// 区域-全体修正：区域 all=N（可为负，如冥界 -2）给本区域所有卡牌（双方、特殊卡）加 N 威力
+function locAllBonus(locIdx, card) {
+  if (!card || card.def.un) return 0;
+  return locDef(locIdx).all || 0;
+}
+// 卡牌在指定区域的实时战力 = 基础威力 + 永久增益 + 区域阵营加成 + 区域费用加成 + 区域全体修正
+function cardPowerIn(locIdx, card) { return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card); }
 // 区域总点数：默认只统计“已翻开”的牌（暗牌不计入，翻面后才计入）。
 // includeHidden=true 用于 AI 决策估值（AI 能看到完整盘面）。
+// 放满加成：区域 fill=N 时，某一方在本区实际放满 max 张（含暗牌，即 4/4）则该方
+// 总战力额外 +N；因摧毁/撤回等原因不足 max 张时立即不生效（4→3 不加）。
+function zoneFillBonus(side, locIdx) {
+  const def = locDef(locIdx);
+  if (!def.fill) return 0;
+  return state.players[side].zones[locIdx].length >= def.max ? def.fill : 0;
+}
 function zoneTotals(side, locIdx, includeHidden) {
   return state.players[side].zones[locIdx].reduce(
-    (s, c) => (includeHidden || c.revealed ? s + cardPower(c) : s),
+    (s, c) => (includeHidden || c.revealed ? s + cardPowerIn(locIdx, c) : s),
     0
-  );
+  ) + zoneFillBonus(side, locIdx);
+}
+// 区域“有效战力”（比较口径）：总点数 × dbl 后，若是反转区域（inv，如辉针城）
+// 则取负值 —— 实际战力更低的一方在比较中反而更大（= 低者胜）。
+function zoneEff(side, locIdx, includeHidden) {
+  const t = zoneTotals(side, locIdx, includeHidden) * locDef(locIdx).dbl;
+  return locDef(locIdx).inv ? -t : t;
+}
+// 区域对放牌是否“开放”：带 minTurn 的区域（如七夕坂第 5 回合起）在到达前双方都不能放牌
+function locOpen(locIdx) {
+  const mt = locDef(locIdx).minTurn;
+  return !mt || state.turn >= mt;
 }
 function locDef(locIdx) { return state.locs[locIdx].def; }
 
@@ -107,12 +151,18 @@ function restart() {
   for (let i = 0; i < 3; i++) drawOne('p');
   for (let i = 0; i < 3; i++) drawOne('a');
 
-  // 选 3 块区域（从当前区域池随机，允许重复以增加变化）
-  const picks = [];
-  while (picks.length < 3) {
-    const def = LOCATION_POOL[Math.floor(Math.random() * LOCATION_POOL.length)];
-    if (picks.length === 2 && picks[0] === def && picks[1] === def) continue; // 避免三块完全相同
-    picks.push(def);
+  // 选 3 块区域：每局从区域池中抽 3 块，保证三块互不相同（不重复）。
+  // 区域池不足 3 种时退回旧逻辑（允许重复、仅避免三块完全相同）作兜底。
+  let picks;
+  if (LOCATION_POOL.length >= 3) {
+    picks = shuffle(LOCATION_POOL.slice()).slice(0, 3);
+  } else {
+    picks = [];
+    while (picks.length < 3) {
+      const def = LOCATION_POOL[Math.floor(Math.random() * LOCATION_POOL.length)];
+      if (picks.length === 2 && picks[0] === def && picks[1] === def) continue;
+      picks.push(def);
+    }
   }
   state.locs = picks.map((def) => ({ def }));
 
@@ -122,6 +172,23 @@ function restart() {
   $('undoMask').classList.add('hidden');
   clearLog();
   log('sys', '新对局开始！区域已揭晓，先手暗牌后统一翻面。');
+  // 区域“出现时”效果（如虹龙洞）：立即给双方生成特殊卡牌，落地即翻开、占用格位。
+  // 生成卡不在 playerMoves/aiMoves 中，不会参与回合翻牌流程；会被增益/削弱/摧毁等正常影响。
+  state.locs.forEach((loc, locIdx) => {
+    const sp = loc.def.spawn;
+    if (!sp) return;
+    const def = TOKENS[sp.card];
+    if (!def) return;
+    const cnt = sp.n || 1;
+    for (const side of ['p', 'a']) {
+      for (let i = 0; i < cnt; i++) {
+        const card = newCard(def);
+        card.revealed = true;
+        state.players[side].zones[locIdx].push(card);
+      }
+    }
+    log('sys', `${loc.def.icon}「${loc.def.n}」出现：双方各生成 ${cnt} 张「${def.n}」，已落场翻开。`);
+  });
   renderAll();
   playRound(gen);
 }
@@ -194,6 +261,7 @@ async function playRound(gen) {
   // 翻牌结算
   await revealRound();
   if (gen !== state.gen) return;
+  reactorPurge(); // 回合结束效果（如聚变反应炉），第 6 回合翻面后同样执行
   renderAll();
 
   if (st.turn >= 6) { finishMatch(); return; }
@@ -229,6 +297,10 @@ function tryPlayAt(locIdx) {
   const card = st.players.p.hand[st.selected];
   if (!card || card.def.c > st.energyLeft) return false;
   const zone = st.players.p.zones[locIdx];
+  if (!locOpen(locIdx)) {
+    setStatus(`「${locDef(locIdx).n}」还没开放，要到第 ${locDef(locIdx).minTurn} 回合才能放牌。`);
+    return false;
+  }
   if (zone.length >= locDef(locIdx).max) {
     setStatus('这个区域已经放满，选别的区域吧。');
     return false;
@@ -352,8 +424,15 @@ function hypotheticScore(card, locIdx) {
   for (let j = 0; j < 3; j++) {
     let mine = zoneTotals('a', j, true);
     let opp = zoneTotals('p', j, true);
-    if (j === locIdx) mine += cardPower(card);
-    const adv = mine - opp;
+    if (j === locIdx) {
+      mine += cardPowerIn(locIdx, card);
+      // 若这一手正好把该区放满，预判计入放满加成
+      const def = state.locs[j].def;
+      if (def.fill && state.players.a.zones[j].length + 1 >= def.max) mine += def.fill;
+    }
+    // 反转区域（辉针城）比较口径取负：数值更低反而领先
+    const eff = state.locs[j].def.inv ? -1 : 1;
+    const adv = eff * (mine - opp);
     score += state.locs[j].def.wt * (adv + (adv > 0 ? 5 : adv < 0 ? -3 : 0));
   }
   return score;
@@ -365,7 +444,7 @@ function aiThink() {
   // AI 视局势考虑双倍
   if (!st.aSnapped && st.turn >= 3 && Math.random() < 0.6) {
     let adv = 0;
-    for (let j = 0; j < 3; j++) adv += state.locs[j].def.wt * (zoneTotals('a', j, true) - zoneTotals('p', j, true));
+    for (let j = 0; j < 3; j++) adv += state.locs[j].def.wt * (zoneEff('a', j, true) - zoneEff('p', j, true));
     if (adv > 4 && st.stakes < 8) {
       st.stakes = Math.min(8, st.stakes * 2);
       st.aSnapped = true;
@@ -381,6 +460,7 @@ function aiThink() {
     for (const card of affordable) {
       for (let j = 0; j < 3; j++) {
         if (pl.zones[j].length >= locDef(j).max) continue;
+        if (!locOpen(j)) continue;
         cands.push({ card, loc: j, score: hypotheticScore(card, j) });
       }
     }
@@ -407,8 +487,9 @@ function currentLeaderSide() {
   let pw = 0, aw = 0, pT = 0, aT = 0;
   for (let j = 0; j < 3; j++) {
     const d = state.locs[j].def;
-    const pt = zoneTotals('p', j) * d.dbl;
-    const at = zoneTotals('a', j) * d.dbl;
+    // 反转区域（辉针城）按有效口径：低战力一方视为“领先”该区
+    const pt = zoneEff('p', j);
+    const at = zoneEff('a', j);
     pT += pt; aT += at;
     if (pt > at) pw += d.wt;
     else if (at > pt) aw += d.wt;
@@ -449,7 +530,7 @@ async function revealRound() {
     card.revealed = true;
     card.justRevealed = true;
     renderZones(); // 翻面后该牌战力才计入区域总点数
-    log(mv.side, `「${card.def.n}」翻牌 — 威力 ${cardPower(card)}`);
+    log(mv.side, `「${card.def.n}」翻牌 — 威力 ${cardPowerIn(mv.loc, card)}`);
     if (card.def.k) applyEffect(mv.side, mv.loc, card);
     renderZones();
     await sleep(780);
@@ -467,34 +548,41 @@ function applyEffect(side, locIdx, card) {
 
   switch (def.k) {
     case 'bf': {
+      // 只作用于“结算时已翻开”的其他友军：暗牌不会预领增益（后翻开的牌错过本次结算）
       let n = 0;
-      for (const c of mine) if (c !== card) { c.buff += def.a; n++; }
-      log(side, `✦ ${def.t}${n ? `（影响 ${n} 张）` : '（但该区没有其他友军）'}`);
+      for (const c of mine) if (c !== card && !c.def.un && c.revealed) { c.buff += def.a; n++; }
+      log(side, `✦ ${def.t}${n ? `（影响 ${n} 张）` : '（但该区没有已翻开的其他友军）'}`);
       break;
     }
     case 'de': {
-      for (const c of theirs) c.buff -= def.a;
-      log(side, `✦ ${def.t}（影响 ${theirs.length} 张）`);
+      // 只削弱“结算时已翻开”的对方卡牌：对方暗牌不会提前被降
+      let n = 0;
+      for (const c of theirs) { if (c.def.un || !c.revealed) continue; c.buff -= def.a; n++; }
+      log(side, `✦ ${def.t}${n ? `（影响 ${n} 张）` : '（但没有已翻开的对方卡牌可影响）'}`);
       break;
     }
     case 'ba': {
-      for (const c of mine) c.buff += def.a;
-      for (const c of theirs) c.buff += def.a;
+      // 双方同增同样只作用于结算时已翻开的卡牌
+      for (const c of mine) if (!c.def.un && c.revealed) c.buff += def.a;
+      for (const c of theirs) if (!c.def.un && c.revealed) c.buff += def.a;
       log(side, `✦ ${def.t}`);
       break;
     }
     case 'bl': {
-      const myT = zoneTotals(side, locIdx);
-      const opT = zoneTotals(other, locIdx);
-      if (myT < opT) { card.buff += def.a; log(side, `✦ 落后触发：${def.n} 威力 +${def.a}（现 ${cardPower(card)}）`); }
+      const myT = zoneEff(side, locIdx);
+      const opT = zoneEff(other, locIdx);
+      if (myT < opT) { card.buff += def.a; log(side, `✦ 落后触发：${def.n} 威力 +${def.a}（现 ${cardPowerIn(locIdx, card)}）`); }
       else log(side, `✦ ${def.n} 未落后，效果不触发。`);
       break;
     }
     case 'dw': {
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
+      // 只能以“已翻开”的对方卡牌为目标：暗牌不可被提前摧毁；un 占位卡不可被摧毁
+      const vis = theirs.filter((c) => c.revealed && !c.def.un);
+      if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区的牌都还没翻开。`); break; }
       let minP = Infinity, target = null;
-      for (const c of theirs) {
-        const p = cardPower(c);
+      for (const c of vis) {
+        const p = cardPowerIn(locIdx, c);
         if (p < minP) { minP = p; target = c; }
       }
       theirs.splice(theirs.indexOf(target), 1);
@@ -506,6 +594,32 @@ function applyEffect(side, locIdx, card) {
 }
 
 /* ---------------- 终局结算 ---------------- */
+
+// 回合结束摧毁（purge：如聚变反应炉）：每回合翻牌结算后，把本区域“全场”战力最低的
+// 卡牌摧毁（敌我双方所有已翻开卡混比；并列最低的一并摧毁）。
+function reactorPurge() {
+  const st = state;
+  for (let j = 0; j < 3; j++) {
+    const def = locDef(j);
+    if (!def.purge) continue;
+    const zoneP = st.players.p.zones[j];
+    const zoneA = st.players.a.zones[j];
+    // un 占位卡（如隙间）不可被任何效果摧毁
+    const all = zoneP.concat(zoneA).filter((c) => !c.def.un);
+    if (all.length === 0) continue;
+    let min = Infinity;
+    for (const c of all) min = Math.min(min, cardPowerIn(j, c));
+    const doomed = all.filter((c) => cardPowerIn(j, c) === min);
+    const desc = doomed.map((c) => (zoneP.includes(c) ? '你方' : '敌方') + '「' + c.def.n + '」(' + cardPowerIn(j, c) + ')').join('、');
+    for (const c of doomed) {
+      const pi = zoneP.indexOf(c);
+      if (pi >= 0) zoneP.splice(pi, 1);
+      else zoneA.splice(zoneA.indexOf(c), 1);
+    }
+    log('danger', `⚡ ${def.n}：摧毁本区全场战力最低的牌（威力 ${min}${doomed.length > 1 ? '，并列共 ' + doomed.length + ' 张' : ''}）→ ${desc}`);
+  }
+}
+
 function finishMatch() {
   const st = state;
   st.phase = 'over';
@@ -513,21 +627,25 @@ function finishMatch() {
   let pw = 0, aw = 0, tie = 0, pTotal = 0, aTotal = 0;
   for (let j = 0; j < 3; j++) {
     const def = st.locs[j].def;
-    const pt = zoneTotals('p', j) * def.dbl;
-    const at = zoneTotals('a', j) * def.dbl;
+    const rawP = zoneTotals('p', j) * def.dbl;
+    const rawA = zoneTotals('a', j) * def.dbl;
+    // 反转区域（辉针城）：展示仍用真实点数，但胜负比较取负（低者胜）
+    const pt = def.inv ? -rawP : rawP;
+    const at = def.inv ? -rawA : rawA;
     pTotal += pt;
     aTotal += at;
     if (pt > at) pw += def.wt;
     else if (at > pt) aw += def.wt;
     else tie += def.wt;
     const who = pt > at ? '你胜' : at > pt ? '对手胜' : '平手';
-    const tag = def.dbl > 1 ? '（威力×2）' : '';
-    lines.push(`${def.n}${tag}：你 ${pt} : ${at} 对手 → ${who}`);
+    const tag = (def.dbl > 1 ? '（威力×2）' : '') + (def.inv ? '（低者胜）' : '');
+    lines.push(`${def.n}${tag}：你 ${rawP} : ${rawA} 对手 → ${who}`);
   }
+  const hasInv = st.locs.some((l) => l.def.inv);
   let delta = 0, title, sub, emblem;
   if (tie > 0) {
     // 存在平局区域：按三个区域的总点数决胜
-    sub = `存在平局区域 → 三区总点数决胜：你 ${pTotal} : ${aTotal} 对手`;
+    sub = `存在平局区域 → 三区总点数决胜：你 ${pTotal} : ${aTotal} 对手${hasInv ? '（反转区域按负值计入总点数）' : ''}`;
     if (pTotal > aTotal) { delta = st.stakes; title = '你赢了！'; emblem = '🏆'; }
     else if (aTotal > pTotal) { delta = -st.stakes; title = '你输了…'; emblem = '💀'; }
     else { title = '平局'; emblem = '🤝'; sub += ' · 总点数相同'; }
@@ -665,21 +783,23 @@ function canPlaceP(idx) {
   const st = state;
   const card = st.players.p.hand[st.selected];
   if (!card || card.def.c > st.energyLeft) return false;
+  if (!locOpen(idx)) return false;
   return st.players.p.zones[idx].length < locDef(idx).max;
 }
 
-function miniCardEl(card) {
+function miniCardEl(card, locIdx) {
   const el = document.createElement('div');
   el.className = 'mini-card' + (card.justRevealed ? ' played-now' : '');
   if (card.justRevealed) card.justRevealed = false;
-  const grad = card.revealed ? GRADS[card.def.c] : BACK_GRAD;
+  const grad = card.revealed ? gradOf(card.def) : BACK_GRAD;
   el.style.setProperty('--cgrad', grad);
   if (!card.revealed) {
     // 暗牌
     el.innerHTML = `<span class="mc-q">?</span><span class="mc-tag">暗牌</span>`;
   } else {
-    // 已翻开：左上角白色费用，右上角当前战力（升降相对基础威力着色）
-    const live = cardPower(card);
+    // 已翻开：左上角白色费用，右上角当前战力（含区域阵营加成，升降相对基础威力着色）
+    const live = cardPowerIn(locIdx, card);
+    const net = card.buff + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card);
     const cls = live > card.def.p ? ' up' : live < card.def.p ? ' down' : '';
     if (card.def.img) {
       // 有图片素材：整格铺图，emoji 垫底作缺图兜底
@@ -689,18 +809,18 @@ function miniCardEl(card) {
         <img class="mini-img" src="cards-image/${encodeURIComponent(card.def.img)}" alt="${card.def.n}" loading="lazy" draggable="false"/>
         <span class="mc-shade"></span>
         <span class="mc-name">${card.def.n}</span>
-        ${card.buff !== 0 ? `<span class="mc-mod">${card.buff > 0 ? '+' : ''}${card.buff}</span>` : ''}`;
+        ${net !== 0 ? `<span class="mc-mod">${net > 0 ? '+' : ''}${net}</span>` : ''}`;
     } else {
       el.innerHTML = `<span class="mc-cost">${card.def.c}</span><span class="p${cls}">${live}</span>
         <span class="mc-icon">${card.def.i}</span>
         <span class="mc-name">${card.def.n}</span>
-        ${card.buff !== 0 ? `<span class="mc-mod">${card.buff > 0 ? '+' : ''}${card.buff}</span>` : ''}`;
+        ${net !== 0 ? `<span class="mc-mod">${net > 0 ? '+' : ''}${net}</span>` : ''}`;
     }
     // 已翻开的敌我卡牌：点击后像图鉴一样放大查看（带场上实时数据）
     el.classList.add('can-inspect');
     el.addEventListener('click', (e) => {
       e.stopPropagation();
-      showFieldCard(card);
+      showFieldCard(card, locIdx);
     });
   }
   return el;
@@ -714,20 +834,24 @@ function renderZones() {
     Game._els.mineZone[j].innerHTML = '';
     for (const child of buildZoneChildren('a', j)) Game._els.oppZone[j].appendChild(child);
     for (const child of buildZoneChildren('p', j)) Game._els.mineZone[j].appendChild(child);
-    // 中间带两侧的醒目总点数：当前受效果影响后的最终战力（含区域倍率）
+    // 中间带两侧的醒目总点数：当前受效果影响后的最终战力（横幅显示真实点数）
     const dbl = locDef(j).dbl;
     const ta = zoneTotals('a', j) * dbl;
     const tp = zoneTotals('p', j) * dbl;
     Game._els.totA[j].textContent = ta;
     Game._els.totP[j].textContent = tp;
-    // 该区谁领先谁亮黄；平点则双方都保持蓝色
+    // 该区谁领先谁亮黄（反转区域按有效口径：真实战力更低的一方亮黄）；平点则双方蓝色
+    const eA = locDef(j).inv ? -ta : ta;
+    const eP = locDef(j).inv ? -tp : tp;
     const pillA = Game._els.totA[j].closest('.loc-total');
     const pillP = Game._els.totP[j].closest('.loc-total');
-    pillA.classList.toggle('lead', ta > tp);
-    pillP.classList.toggle('lead', tp > ta);
+    pillA.classList.toggle('lead', eA > eP);
+    pillP.classList.toggle('lead', eP > eA);
     const mineZoneEl = Game._els.mineZone[j].parentElement;
     const count = st.players.p.zones[j].length + '/' + locDef(j).max;
-    mineZoneEl.querySelector('.slot-count').textContent = `已放 ${count}`;
+    const mt = locDef(j).minTurn;
+    mineZoneEl.querySelector('.slot-count').textContent =
+      `已放 ${count}${mt && !locOpen(j) ? ` · 🔒 第 ${mt} 回合开放` : ''}`;
     mineZoneEl.parentElement.classList.toggle('hoverable', canPlaceP(j));
   }
 }
@@ -746,7 +870,7 @@ function buildZoneChildren(side, locIdx) {
       continue;
     }
     const card = cards[i];
-    if (card) out.push(miniCardEl(card));
+    if (card) out.push(miniCardEl(card, locIdx));
     else if (def.max === 4) out.push(guideCellEl());
     else out.push(spacerCellEl());
   }
@@ -794,10 +918,14 @@ function renderHand() {
     const afford = card.def.c <= st.energyLeft;
     if (!afford) el.classList.add('unaffordable');
     if (st.selected === index) el.classList.add('selected');
-    if (st.phase !== 'play') el.classList.add('unaffordable');
-    el.style.setProperty('--cgrad', GRADS[card.def.c]);
+    // 终局复盘（over）时手牌保持原色且可点击查看，其余非出牌阶段置灰
+    if (st.phase !== 'play' && st.phase !== 'over') el.classList.add('unaffordable');
+    el.style.setProperty('--cgrad', gradOf(card.def));
     el.innerHTML = cardFaceHTML(card.def);
-    el.addEventListener('click', () => selectHand(index));
+    el.addEventListener('click', () => {
+      if (st.phase === 'over') showZoom(card.def); // 终局复盘：点击放大查看卡面
+      else selectHand(index);
+    });
     hand.appendChild(el);
   });
   // 赋值后浏览器会自动钳制到合法范围（例如出牌后手牌变少）
@@ -841,7 +969,7 @@ function buildCodexGrid() {
       total++;
       const el = document.createElement('div');
       el.className = 'codex-card hand-card';
-      el.style.setProperty('--cgrad', GRADS[def.c]);
+      el.style.setProperty('--cgrad', gradOf(def));
       el.innerHTML = cardFaceHTML(def);
       el.title = def.n;
       el.addEventListener('click', () => showZoom(def));
@@ -867,7 +995,7 @@ function showZoom(def) {
   slot.innerHTML = '';
   const el = document.createElement('div');
   el.className = 'zoom-card hand-card';
-  el.style.setProperty('--cgrad', GRADS[def.c]);
+  el.style.setProperty('--cgrad', gradOf(def));
   el.innerHTML = cardFaceHTML(def);
   slot.appendChild(el);
 
@@ -879,17 +1007,22 @@ function showZoom(def) {
   $('zoomMask').classList.remove('hidden');
 }
 
-// 场上已翻开卡牌的放大查看：威力为受修正后的当前战力
-function showFieldCard(card) {
+// 场上已翻开卡牌的放大查看：威力为受修正后的当前战力（含区域阵营加成）
+function showFieldCard(card, locIdx) {
   const def = card.def;
-  const live = cardPower(card);
+  const live = cardPowerIn(locIdx, card);
   const diff = live - def.p;
-  const sign = card.buff > 0 ? 'up' : card.buff < 0 ? 'down' : '';
+  const sign = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+  const aff = locDef(locIdx).aff;
+  const rb = aff && card.def.g === aff.group ? aff.add : 0;
+  const cb = locDef(locIdx).cb;
+  const cbb = cb && card.def.c === cb.c ? cb.add : 0;
+  const ab = locDef(locIdx).all || 0;
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
   const el = document.createElement('div');
   el.className = 'zoom-card hand-card';
-  el.style.setProperty('--cgrad', GRADS[def.c]);
+  el.style.setProperty('--cgrad', gradOf(def));
   el.innerHTML = cardFaceHTML(def, { power: live, sign });
   slot.appendChild(el);
 
@@ -898,6 +1031,9 @@ function showFieldCard(card) {
     <div class="zm-kind">${diff !== 0
       ? `场上修正 ${diff > 0 ? '+' : ''}${diff}（基础威力 ${def.p}）`
       : `基础威力 ${def.p} · 场上无修正`}</div>
+    ${rb !== 0 ? `<div class="zm-kind">区域加成：所属「${GROUPS[aff.group] || aff.group}」在此区域 威力 ${rb > 0 ? '+' : ''}${rb}</div>` : ''}
+    ${cbb !== 0 ? `<div class="zm-kind">区域加成：费用 ${cb.c} 的卡牌在此区域 威力 ${cbb > 0 ? '+' : ''}${cbb}</div>` : ''}
+    ${ab !== 0 ? `<div class="zm-kind">区域效果：本区域所有卡牌 威力 ${ab > 0 ? '+' : ''}${ab}</div>` : ''}
     <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
   zoomStageBtn('关闭 ✕');
@@ -919,6 +1055,13 @@ function renderSide() {
 
 /* ---------------- 弹窗 ---------------- */
 function hideModal() { $('modalMask').classList.add('hidden'); }
+
+// 结算/认输弹窗的「确认」：只关弹窗，不清空终局盘面，供玩家点击复盘。
+// 场上已翻开的牌本就可点击放大；此时手牌也可点击查看（阶段 over）。
+function closeResult() {
+  hideModal();
+  setStatus('终局已确认 —— 可点击场上与手牌卡牌复盘，或点顶部「重新开始」再来一局。');
+}
 function showModal(emblem, title, sub, delta) {
   $('modalEmblem').textContent = emblem;
   $('modalTitle').textContent = title;
@@ -940,6 +1083,7 @@ window.Game = {
     onRetreat: uiRetreat,
     onCodex: uiOnCodex,
     closeZoom,
+    closeResult,
     onEnergyReset: uiEnergyReset,
     confirmEnergyReset,
     cancelEnergyReset,
