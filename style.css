@@ -385,6 +385,65 @@ body {
 .location.dragon .cell-guide { border-color: rgba(139, 144, 151, .38); }
 .location.dragon .zone .slot-row.quad::before { background: rgba(139, 144, 151, .3); }
 .location.dragon .slot-count { color: #52575f; background: rgba(255, 255, 255, .85); }
+/* 未揭示地形（v75）：淡紫灰“未解之谜”底色 + 虚线边框 + 随机散布的地形小图标，
+   传达“这一块可能是随机池里任意一种地形”（图标/位置/角度由 JS 开局随机生成）；
+   保持浅色底以保证暗牌与卡面可读（见 .unreveal-decor） */
+.location.unreveal {
+  isolation: isolate;
+  background:
+    radial-gradient(520px 300px at 12% -8%, rgba(148, 146, 255, .16), transparent 62%),
+    radial-gradient(640px 320px at 108% 112%, rgba(214, 148, 255, .12), transparent 60%),
+    linear-gradient(180deg, #edeff9 0%, #e4e7f5 48%, #daddf0 100%);
+  border: 1px dashed rgba(140, 142, 208, .85);
+  box-shadow: 0 3px 14px rgba(96, 100, 176, .18);
+}
+.location.unreveal > .loc-head,
+.location.unreveal > .loc-mid,
+.location.unreveal > .zone { position: relative; z-index: 1; }
+.location.unreveal .loc-head {
+  background: linear-gradient(180deg, rgba(124, 126, 200, .92), rgba(104, 107, 182, .9));
+  border-bottom: 1px dashed rgba(255, 255, 255, .55);
+}
+.location.unreveal .loc-name { color: #ffffff; text-shadow: 0 1px 2px rgba(46, 50, 110, .35); }
+.location.unreveal .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .68), rgba(224, 227, 248, .55));
+  border-bottom: 1px dashed rgba(138, 140, 200, .5);
+}
+.location.unreveal .loc-effect { color: #42478a; font-weight: 700; }
+.location.unreveal .zone.opp {
+  background: rgba(216, 218, 246, .38);
+  border-bottom: 1px dashed rgba(138, 140, 200, .4);
+}
+.location.unreveal .zone.player-zone {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .46), rgba(226, 229, 250, .2));
+}
+.location.unreveal .slot-count { color: #3c4172; background: rgba(255, 255, 255, .9); }
+.location.unreveal .cell-guide { border-color: rgba(150, 152, 208, .5); }
+.location.unreveal .zone .slot-row.quad::before { background: rgba(140, 142, 205, .2); }
+
+/* 随机散布的地形小图标层：绝对铺满整列、垫在内容之下、不可交互；缓慢上下漂浮 */
+.unreveal-decor {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.unreveal-decor span {
+  position: absolute;
+  opacity: .24;
+  filter: saturate(.3);
+  user-select: none;
+  pointer-events: none;
+  will-change: transform;
+  line-height: 1;
+  animation: unrevealDrift ease-in-out infinite alternate;
+}
+@keyframes unrevealDrift {
+  0%   { transform: translateY(0) rotate(var(--rot, 0deg)); }
+  100% { transform: translateY(-9px) rotate(var(--rot, 0deg)); }
+}
+
 /* 未开放区域（minTurn，如七夕坂第 5 回合前）：整体灰色遮罩 */
 .location.locked::after {
   content: "🔒";

@@ -4,7 +4,8 @@
    揭示效果 / 区域特效 / 双倍下注(snap) / 认输 / 重置暗牌
    流程阶段管线：游戏开始 → 每回合(回合开始效果/能量抽牌/放置移动/
    翻牌揭示结算/全场回合结束/区域回合末/手牌回合末) → 游戏结束效果 → 结算胜负
-   （v54 拆分显式阶段 / v55 加入场上放置顺序队列 + fx 时机效果；详见 playRound 上方注释）
+   （v54 拆分显式阶段 / v55 加入场上放置顺序队列 + fx 时机效果 /
+   v74 开局三列「未揭示」逐回合揭晓系统；详见 playRound 上方注释）
    ========================================================= */
 'use strict';
 
@@ -28,6 +29,22 @@ const KIND_LABEL = (window.DS_CARDS && window.DS_CARDS.KIND_LABEL) || {};
 const TOKENS = (window.DS_CARDS && window.DS_CARDS.SPECIAL) || {};
 const GROUPS = (window.DS_CARDS && window.DS_CARDS.GROUPS) || {};
 const LOCATION_POOL = (window.DS_LOCATIONS && window.DS_LOCATIONS.POOL) || [];
+// 非随机地形表（EXTRA，见 locations.js）：存在但**不进开局随机抽选**，
+// 只作为“可按 id 引用的地形”供机制按键名调用（现「未揭示」unreveal = 开局三列初始占位，
+// 由 locationRevealStage 逐回合揭晓；⚠️ 其 id 不能用 'hidden'，与全局 .hidden 隐藏类冲突）
+const LOCATION_EXTRA = (window.DS_LOCATIONS && window.DS_LOCATIONS.EXTRA) || {};
+// 按 id 查找地形定义：随机池 POOL 优先，其次 EXTRA（供 xform 等机制引用非随机地形）
+function findLocDef(id) {
+  const inPool = LOCATION_POOL.find((l) => l.id === id);
+  if (inPool) return inPool;
+  for (const k in LOCATION_EXTRA) {
+    const d = LOCATION_EXTRA[k];
+    if (d && d.id === id) return d;
+  }
+  return null;
+}
+// 「未揭示」地形兜底定义（正式数据在 locations.js EXTRA.unreveal）：开局三列的未揭晓占位态
+const HIDDEN_LOC_DEF = { id: 'unreveal', n: '未揭示', icon: '❓', wt: 1, dbl: 1, max: 4, eff: '未揭示地形' };
 
 // 卡面渐变：有自定义 cg（如特殊卡牌「石块」的土黄色）则优先，否则按费用档位取色
 const gradOf = (def) => (def && def.cg) || GRADS[def.c];
@@ -135,6 +152,7 @@ const state = {
   pSnapped: false,
   aSnapped: false,
   locs: [],
+  locPlan: [],        // 本局三块“真实地形”按揭晓顺序预存（v74：列 0/1/2 在第 1/2/3 回合开始揭晓）
   players: {
     p: { key: 'p', name: '你', zones: [[], [], []], deck: [], hand: [] },
     a: { key: 'a', name: '对手', zones: [[], [], []], deck: [], hand: [] },
@@ -208,7 +226,12 @@ function restart() {
       picks.push(def);
     }
   }
-  state.locs = picks.map((def) => ({ def }));
+  // 地形揭晓系统（v74）：开局即按权重抽定三块真实地形（互不相同），预存到 locPlan；
+  // 场上三列先全部以「未揭示」占位地形展示（max 4、无效果），
+  // 由 locationRevealStage 在第 1/2/3 回合开始时依次揭晓到第 0/1/2 列（左→中→右）。
+  state.locPlan = picks;
+  const hiddenDef = findLocDef('unreveal') || HIDDEN_LOC_DEF;
+  state.locs = picks.map(() => ({ def: hiddenDef }));
   state.moveCardId = null;
   state.flyMoved = new Set();
   state.flyMovedFrom = {};
@@ -218,20 +241,9 @@ function restart() {
   hideModal();
   $('undoMask').classList.add('hidden');
   clearLog();
-  log('sys', '新对局开始！区域已揭晓，先手暗牌后统一翻面。');
-  // 区域“出现时”效果（如虹龙洞）：立即给双方生成特殊卡牌，落地即翻开、占用格位。
-  // 生成卡不在 playerMoves/aiMoves 中，不会参与回合翻牌流程；会被增益/削弱/摧毁等正常影响。
-  state.locs.forEach((loc, locIdx) => {
-    const sp = loc.def.spawn;
-    if (!sp) return;
-    const def = TOKENS[sp.card];
-    if (!def) return;
-    const cnt = sp.n || 1;
-    for (const side of ['p', 'a']) {
-      placeToken(side, locIdx, def, cnt);
-    }
-    log('sys', `${loc.def.icon}「${loc.def.n}」出现：双方各生成 ${cnt} 张「${def.n}」，已落场翻开。`);
-  });
+  log('sys', '新对局开始！三块地形皆为「未揭示」，将在第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。先手暗牌后统一翻面。');
+  // 注：地形“出现时”效果（如虹龙洞给双方石块）不再开局结算——
+  // 三块真实地形在揭晓那一刻才“出现”，由 locationRevealStage 结算（v74）。
   runGameStartEffects(); // ⓪ 游戏开始效果挂点（现无注册效果）：第 1 回合开始前执行
   renderAll();
   playRound(gen);
@@ -291,13 +303,17 @@ function placeToken(side, locIdx, tkDef, cnt) {
 
 /* ========================================================
    流程阶段管线（v54→v55：主循环按显式阶段执行；v55 加入
-   “场上放置顺序队列”，供时机类效果按双方放置先后结算）：
-   游戏开始 restart：建牌库 → 发初始手牌 → 抽选 3 区域 → 区域“出现时”生成
-     → runGameStartEffects（⓪ 开局效果挂点，现空）→ 第 1 回合
+   “场上放置顺序队列”，供时机类效果按双方放置先后结算；
+   v74：加入地形揭晓系统——开局三列均为「未揭示」，逐回合揭晓）：
+   游戏开始 restart：建牌库 → 发初始手牌 → 按权重抽选 3 块真实地形存 locPlan
+     （三列先以「未揭示」占位展示）→ runGameStartEffects（⓪ 开局效果挂点，现空）
+     → 第 1 回合（①-0 地形揭晓在 roundStartStage 内最先执行）
    每回合 playRound 依次：
-     ① roundStart：runTurnStartEffects（全场“回合开始”效果，按放置队列序结算）
-                   → 能量结算 + 抽牌（回合 2+，第 1 回合的 3 张已在开局发放）
-                   → 清空回合临时状态
+     ① roundStart：locationRevealStage（①-0 地形揭晓：第 t 回合揭晓第 t 列，
+                   含该地形“出现时”生成效果）
+                  → runTurnStartEffects（全场“回合开始”效果，按放置队列序结算）
+                  → 能量结算 + 抽牌（回合 2+，第 1 回合的 3 张已在开局发放）
+                  → 清空回合临时状态
      ② 玩家放置与移动（waitPlayer：出牌 / 移动 / 重置 / 双倍 / 认输均在此阶段）
      ③ 对手放置（aiThink）
      ④ revealRound：翻开暗牌，逐张按放置顺序结算「揭示」效果
@@ -384,9 +400,41 @@ function runGameEndEffects() {
   }
 }
 
-// 阶段 ①：回合开始 —— 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置
+/* ①-0 地形揭晓（v74）：开局三列均为「未揭示」占位（EXTRA.unreveal，max 4 / 无效果），
+   真实地形在 restart 已按抽选顺序预存进 state.locPlan；第 t 回合开始时揭晓第 t 列
+   （t=1/2/3，对应左/中/右列）：
+   - 换上真实地形：上限/加成/反转/purge 等全部字段与列头配色即刻生效；
+   - 揭晓时刻 = 该地形的“出现时”：一次性生成类效果在此结算（如虹龙洞 → 双方各 1 张石块）；
+   - 已放卡不移动、不增删；若真实地形为限张（max<4，如迷途竹林）且某侧已有卡超过上限
+     （只有最晚揭晓的第三列可能在未揭示期放到 3 张），卡保留原格位，隙间只补在空置的
+     不可用格位（渲染层自动处理：数量 = 4 − max(已放数, 上限)，即至多 2 个；
+     放满 4 张或整侧被大体积卡占满时 0 个），此后该侧按“已满”不再可放。 */
+function locationRevealStage() {
+  const st = state;
+  const idx = st.turn - 1;
+  if (idx < 0 || idx >= st.locs.length) return;
+  const loc = st.locs[idx];
+  if (!loc || !loc.def || loc.def.id !== 'unreveal') return; // 该列已揭晓（防御）
+  const target = st.locPlan && st.locPlan[idx];
+  if (!target) return;
+  loc.def = target; // 换上真实地形
+  refreshLocHeader(idx); // 列名/图标/效果文案/配色即时更新
+  log('sys', `🃏 第 ${st.turn} 回合开始：地形「${target.n}」揭晓！`);
+  // 揭晓时刻结算该地形的“出现时”生成效果（如虹龙洞给双方各 1 张石块）
+  const sp = target.spawn;
+  if (sp && TOKENS[sp.card]) {
+    const tk = TOKENS[sp.card];
+    const cnt = sp.n || 1;
+    const total = cnt * 2;
+    const placed = placeToken('p', idx, tk, cnt) + placeToken('a', idx, tk, cnt);
+    log('sys', `${target.icon}「${target.n}」出现：双方各生成 ${cnt} 张「${tk.n}」，已落场翻开。${placed < total ? '（部分区域已放满，未能全部落下）' : ''}`);
+  }
+}
+
+// 阶段 ①：回合开始 —— 地形揭晓 → 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置
 function roundStartStage() {
   const st = state;
+  locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
   runTurnStartEffects(); // ①-1 全场“回合开始”效果（按放置队列序）
   if (st.turn > 1) { drawOne('p'); drawOne('a'); } // ①-2 抽牌（第 1 回合的 3 张已在开局发放）
   st.energyTotal = Math.min(st.turn, 6);           // ①-2 能量结算
@@ -806,7 +854,12 @@ async function revealRound() {
     if (card.def.k) {
       // 只有效果“真的会造成变化”时才停顿展示（如对方/己方没有已翻开卡可被加减时直接结算）
       if (revealEffectWillChange(mv.side, mv.loc, card)) await sleep(400);
-      applyEffect(mv.side, mv.loc, card);
+      if (card.def.k === 'shift') {
+        // 八云紫整体右移：分步演出，每移动一张间隔 0.3s（v78）
+        await applyShiftReveal(mv.side, card.def.t);
+      } else {
+        applyEffect(mv.side, mv.loc, card);
+      }
     }
     renderZones();
     await sleep(500); // 效果结算后停顿，再进入下一张翻牌
@@ -830,7 +883,7 @@ function revealEffectWillChange(side, locIdx, card) {
     case 'ba': return true; // 至少自己已翻开会吃到 +N
     case 'bl': return zoneEff(side, locIdx) < zoneEff(other, locIdx);
     case 'dw':
-    case 'dwh': return vis.length > 0;
+    case 'dwh': return vis.length > 0 && !locNoDestroy(locIdx);
     case 'mv': {
       if (vis.length === 0) return false;
       for (let j = 0; j < 3; j++) {
@@ -880,13 +933,19 @@ function revealEffectWillChange(side, locIdx, card) {
     }
     case 'give': return st.players[side].hand.length < 7;
     case 'xform': {
-      const t = LOCATION_POOL.find((l) => l.id === def.xf);
+      const t = findLocDef(def.xf);
       if (!t) return false;
       return !(['p', 'a'].some((s) => sideUsed(s, locIdx) > t.max));
     }
     case 'oc': {
       const opp = side === 'p' ? st.aiMoves : st.playerMoves;
       return opp.some((m) => m.loc === locIdx);
+    }
+    case 'shift': {
+      // 需要“最右侧（第 3 列）己方侧”有空位，且“最左侧（第 1 列）己方侧”有已翻开可搬卡
+      const roomR = sideRoom(side, 2);
+      if (roomR < 1) return false;
+      return st.players[side].zones[0].some((c) => c.revealed && !c.def.un && roomR >= occOf(c));
     }
     default: return false;
   }
@@ -900,6 +959,23 @@ function addBuffLog(card, d, srcCard, tag) {
   if (!card) return;
   if (!Array.isArray(card.powerLog)) card.powerLog = [];
   card.powerLog.push({ d, src: srcCard ? { id: srcCard.id, n: srcCard.def.n, t: srcCard.def.t } : null, tag: tag || null });
+}
+
+// 区域免摧毁（def.prot，现仅蕾蒂）：本区域存在“已翻开且仍在场”的 prot 卡时，
+// 该区域（**双方**）所有在场卡牌均无法被摧毁——针对本区域的任何“摧毁”指向
+// （dw / dwh / 回合末摧毁 purge 等）一律失效；被保护卡不会离场，
+// 因此防摧毁 surv / 凤凰重生 phx 也不会触发。
+// 防护按“源卡当前所在区域”实时判定（locNoDestroy 遍历双方该列）：
+// 蕾蒂被移去其它区域 → 原区域立即失效、新区域立即生效；
+// 同区换边（switch/gift 类把她在本区内换到对方一侧）仍属同一区域，
+// 因保护的是敌我双方，故效果不变；蕾蒂真正离场才全场失效。
+function locNoDestroy(locIdx) {
+  for (const s of ['p', 'a']) {
+    for (const c of state.players[s].zones[locIdx]) {
+      if (c.revealed && c.def.prot) return true;
+    }
+  }
+  return false;
 }
 
 // 防摧毁（def.surv=N，现仅灵乌路空 surv:2）：该卡被任何“摧毁”指向时不会离场，
@@ -938,6 +1014,109 @@ function phoenixRevive(card, locIdx) {
     log('danger', `🔥 「${card.def.n}」被摧毁时想凤凰重生，但手牌已满（7 张），重生失败、被摧毁。`);
   }
   return true;
+}
+
+/* ---- shift（整体右移）的分步实现（v78→v79）----
+   peekShiftCard：找“最左侧区域（下标 0）”下一个可搬的已翻开卡（占格判定，不搬）。
+   shiftMoveCard：把指定卡从最左侧搬到最右侧己方一侧（数据层）。
+   shiftMoveOne：peek + move 一步到位（供同步路径用）。
+   applyShiftReveal：揭示演出版——逐张搬，每张先“滑行 + 缩放”飞过去（约 0.26s），
+   卡片间隔保持约 0.3s；无动画能力时退化为纯停顿。 */
+function peekShiftCard(side) {
+  const st = state;
+  const src = st.players[side].zones[0];
+  if (sideRoom(side, 2) < 1) return null;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (!c.revealed || c.def.un) continue; // 暗牌/un 不搬
+    if (sideRoom(side, 2) < occOf(c)) continue; // 右侧放不下这张（如大体积）
+    return c;
+  }
+  return null;
+}
+function shiftMoveCard(side, card) {
+  const st = state;
+  const src = st.players[side].zones[0];
+  const dst = st.players[side].zones[2];
+  const i = src.indexOf(card);
+  if (i < 0) return;
+  src.splice(i, 1);
+  dst.push(card);
+}
+function shiftMoveOne(side) {
+  const card = peekShiftCard(side);
+  if (!card) return null;
+  shiftMoveCard(side, card);
+  return card;
+}
+// 按卡牌 id 找当前渲染出的场上缩略卡元素
+function miniCardElById(id) {
+  return document.querySelector('.zone [data-cardid="' + id + '"]');
+}
+// 飞行演出：克隆一张卡从源格位“滑行+缩放”落到目标格位，落定后露出真身
+function flyCardTo(card, srcRect) {
+  const dstEl = miniCardElById(card.id);
+  if (!dstEl) return Promise.resolve();
+  const dstRect = dstEl.getBoundingClientRect();
+  const usable = srcRect && srcRect.width > 1 && srcRect.height > 1
+    && dstRect.width > 1 && dstRect.height > 1;
+  const cleanup = () => {
+    const fly = document.querySelector('.fly-card');
+    if (fly && fly.parentNode) fly.parentNode.removeChild(fly);
+    dstEl.style.visibility = '';
+  };
+  if (!usable || typeof dstEl.animate !== 'function') { cleanup(); return Promise.resolve(); }
+  const flyer = document.createElement('div');
+  flyer.className = (dstEl.className || 'mini-card') + ' fly-card';
+  flyer.innerHTML = dstEl.innerHTML;
+  const sx = dstRect.width / srcRect.width;
+  const sy = dstRect.height / srcRect.height;
+  const dx = dstRect.left - srcRect.left;
+  const dy = dstRect.top - srcRect.top;
+  flyer.style.cssText =
+    `position:fixed;left:${srcRect.left}px;top:${srcRect.top}px;` +
+    `width:${srcRect.width}px;height:${srcRect.height}px;margin:0;` +
+    `z-index:9000;pointer-events:none;border-radius:10px;overflow:hidden;` +
+    `box-shadow:0 12px 26px rgba(0,0,0,.42);will-change:transform;`;
+  dstEl.style.visibility = 'hidden'; // 真身先隐藏，防原地叠影
+  document.body.appendChild(flyer);
+  const kf = [
+    { transform: 'translate(0px,0px) scale(.92,.92)' },
+    { transform: `translate(${dx * .55}px, ${dy * .55 - 22}px) scale(${sx * .98}, ${sy * .98})`, offset: .5 },
+    { transform: `translate(${dx}px, ${dy}px) scale(${sx * 1.07}, ${sy * 1.07})`, offset: .84 },
+    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
+  ];
+  const anim = flyer.animate(kf, { duration: 260, easing: 'cubic-bezier(.25,.72,.28,1)' });
+  return anim.finished
+    .catch(() => {}) // 被中断（如重新开局）也照常收尾
+    .then(cleanup);
+}
+
+async function applyShiftReveal(side, txt) {
+  const gen = state.gen;
+  const moved = [];
+  while (true) {
+    if (gen !== state.gen) return; // 重新开局等中断
+    const card = peekShiftCard(side);
+    if (!card) break;
+    // 先记录源卡当前屏幕位置（搬之前）
+    const srcEl = miniCardElById(card.id);
+    const srcRect = srcEl ? srcEl.getBoundingClientRect() : null;
+    shiftMoveCard(side, card); // 数据层搬家
+    moved.push(card.def.n);
+    log(side, `✦ 把「${card.def.n}」搬到了最右侧区域。`);
+    renderZones(); // 真身已在新格位
+    if (srcRect) {
+      await flyCardTo(card, srcRect); // 滑行+缩放（约 0.26s）
+      if (gen !== state.gen) return;
+      await sleep(40); // 与上一张的间隔合计约 0.3s
+    } else {
+      await sleep(300); // 拿不到坐标时退化为纯停顿
+    }
+  }
+  if (!moved.length) {
+    log(side, `✦ ${txt}：最左侧区域没有可搬的已翻开卡，或最右侧区域已放满。`);
+  }
 }
 
 function applyEffect(side, locIdx, card, spec) {
@@ -983,6 +1162,7 @@ function applyEffect(side, locIdx, card, spec) {
     }
     case 'dw': {
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
+      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁持续效果（如「蕾蒂」），所有卡牌都无法被摧毁。`); break; }
       // 只能以“已翻开”的对方卡牌为目标：暗牌不可被提前摧毁；un 占位卡不可被摧毁
       const vis = theirs.filter((c) => c.revealed && !c.def.un);
       if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区的牌都还没翻开。`); break; }
@@ -1131,8 +1311,8 @@ function applyEffect(side, locIdx, card, spec) {
       break;
     }
     case 'xform': {
-      // 揭示：把本区域变成目标地形（fx.xf = locations 池 id，如辉针城 needle）
-      const target = LOCATION_POOL.find((l) => l.id === fx.xf);
+      // 揭示：把本区域变成目标地形（fx.xf = 地形 id，出自 POOL 或 EXTRA，如辉针城 needle）
+      const target = findLocDef(fx.xf);
       if (!target) break;
       const over = ['p', 'a'].some((s2) => sideUsed(s2, locIdx) > target.max);
       if (over) { log('danger', `✦ ${def.n} 想把本区变成「${target.n}」，但双方牌数超出其上限，变形失败。`); break; }
@@ -1186,6 +1366,7 @@ function applyEffect(side, locIdx, card, spec) {
     case 'dwh': {
       // 揭示：摧毁本区对方一张“已翻开且战力最高”的卡（平局取第一张最高者）
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
+      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁持续效果（如「蕾蒂」），所有卡牌都无法被摧毁。`); break; }
       const vis = theirs.filter((c) => c.revealed && !c.def.un);
       if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区的牌都还没翻开。`); break; }
       let maxP = -Infinity, target = null;
@@ -1213,6 +1394,22 @@ function applyEffect(side, locIdx, card, spec) {
       }
       break;
     }
+    case 'shift': {
+      // 揭示：把己方“最左侧区域”（第 1 列，下标 0）**已翻开**的卡牌按放置顺序
+      // 依次搬到“最右侧区域”（第 3 列，下标 2）己方一侧，直到右侧己方侧放满
+      // （按占格 occ 判定：右侧空余 ≥ 该卡占格数才能搬，放满即止）。
+      // 暗牌 / un 卡不搬；不改变归属、揭示状态与场上放置顺序队列；
+      // 施放者本牌若在最左侧也会被一起搬。
+      // （正常翻牌流程里的揭示演出是“逐张搬、每张间隔 0.3s”，见 applyShiftReveal；
+      //   此同步版供 morph/fx 等非翻牌结算路径复用。）
+      const moved = [];
+      let c;
+      while ((c = shiftMoveOne(side))) moved.push(c.def.n);
+      log(side, moved.length
+        ? `✦ ${txt}：把最左侧区域的 ${moved.length} 张已翻开卡（${moved.join('、')}）搬到了最右侧区域。`
+        : `✦ ${txt}：最左侧区域没有可搬的已翻开卡，或最右侧区域已放满。`);
+      break;
+    }
     default: break;
   }
 }
@@ -1232,6 +1429,7 @@ function reactorPurge() {
     // un 占位卡（如隙间）不可被任何效果摧毁
     const all = zoneP.concat(zoneA).filter((c) => !c.def.un);
     if (all.length === 0) continue;
+    if (locNoDestroy(j)) { log('danger', `⚡ ${def.n}：本区域存在免摧毁持续效果（如「蕾蒂」），所有卡牌均无法被摧毁，本次跳过。`); continue; }
     let min = Infinity;
     for (const c of all) min = Math.min(min, cardPowerIn(j, c));
     const doomed = all.filter((c) => cardPowerIn(j, c) === min);
@@ -1402,6 +1600,7 @@ function buildBoard() {
     col.addEventListener('mouseleave', () => col.classList.remove('active-hover'));
 
     board.appendChild(col);
+    if (loc.def.id === 'unreveal') addUnrevealDecor(col); // 未揭示列：散落地形小图标（v75）
     els.cols.push(col);
     els.oppZone.push(opp.querySelector('.slot-row'));
     els.mineZone.push(mine.querySelector('.slot-row'));
@@ -1421,6 +1620,40 @@ function refreshLocHeader(locIdx) {
   if (nameEl) nameEl.innerHTML = `<span><span class="icon">${def.icon}</span> ${def.n}</span>`;
   const effEl = col.querySelector('.loc-effect');
   if (effEl) effEl.innerHTML = `<span class="le-icon">${def.icon}</span>${def.eff}`;
+  syncUnrevealDecor(col, def); // 揭晓成真实地形 → 移除“随机散布”装饰；变回未揭示 → 补回
+}
+
+/* ---- 未揭示列装饰（v75）----
+   在列上随机散布地形池里所有地形的小图标（含 ❓），低透明度 + 轻微漂浮动画，
+   从视觉上表达“这一块可能是随机池里任意一种地形”。每次开局随机布局。 */
+function addUnrevealDecor(col) {
+  if (col.querySelector('.unreveal-decor')) return;
+  const decor = document.createElement('div');
+  decor.className = 'unreveal-decor';
+  const icons = LOCATION_POOL.map((d) => d.icon);
+  icons.push('❓', '❔');
+  const n = 12;
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('span');
+    s.textContent = icons[Math.floor(Math.random() * icons.length)];
+    s.style.left = (4 + Math.random() * 88).toFixed(1) + '%';
+    s.style.top = (2 + Math.random() * 90).toFixed(1) + '%';
+    s.style.fontSize = (15 + Math.random() * 24).toFixed(1) + 'px';
+    s.style.setProperty('--rot', Math.round(Math.random() * 60 - 30) + 'deg');
+    s.style.animationDuration = (2.8 + Math.random() * 3.5).toFixed(2) + 's';
+    s.style.animationDelay = (-Math.random() * 3).toFixed(2) + 's';
+    decor.appendChild(s);
+  }
+  col.insertBefore(decor, col.firstChild);
+}
+function syncUnrevealDecor(col, def) {
+  if (!col) return;
+  const dec = col.querySelector('.unreveal-decor');
+  if (def.id === 'unreveal') {
+    if (!dec) addUnrevealDecor(col);
+  } else if (dec) {
+    dec.remove();
+  }
 }
 
 function canPlaceP(idx) {
@@ -1435,6 +1668,7 @@ function canPlaceP(idx) {
 function miniCardEl(card, locIdx, side) {
   const el = document.createElement('div');
   el.className = 'mini-card' + (card.justRevealed ? ' played-now' : '');
+  el.dataset.cardid = String(card.id); // 供“飞行演出”（flyCardTo）按卡定位格位
   if (card.justRevealed) card.justRevealed = false;
   const grad = card.revealed ? gradOf(card.def) : BACK_GRAD;
   el.style.setProperty('--cgrad', grad);
@@ -1504,10 +1738,12 @@ function renderZones() {
     pillA.classList.toggle('lead', eA > eP);
     pillP.classList.toggle('lead', eP > eA);
     const mineZoneEl = Game._els.mineZone[j].parentElement;
-    const count = sideUsed('p', j) + '/' + locDef(j).max;
-    const mt = locDef(j).minTurn;
-    mineZoneEl.querySelector('.slot-count').textContent =
-      `已放 ${count}${mt && !locOpen(j) ? ` · 🔒 第 ${mt} 回合开放` : ''}`;
+    const ldef = locDef(j);
+    const count = sideUsed('p', j) + '/' + ldef.max;
+    let locTag = '';
+    if (ldef.id === 'unreveal') locTag = ` · 🃏 第 ${j + 1} 回合揭晓`;
+    else if (ldef.minTurn && !locOpen(j)) locTag = ` · 🔒 第 ${ldef.minTurn} 回合开放`;
+    mineZoneEl.querySelector('.slot-count').textContent = `已放 ${count}${locTag}`;
     mineZoneEl.parentElement.classList.toggle('hoverable', canPlaceP(j));
     // 未开放区域加灰色遮罩（如七夕坂第 5 回合前）
     Game._els.cols[j].classList.toggle('locked', !!locDef(j).minTurn && !locOpen(j));
@@ -1515,9 +1751,12 @@ function renderZones() {
 }
 
 /* 把区域的一侧 2×2 格位按规则填充：
-   - 允许格（i < def.max）：按放置顺序放卡；空位补透明占位；
-     max=4 的空位用浅灰虚线格标示 2×2 网格线；
-   - 不允许格（i >= def.max）：固定用「隙间」灰色卡占位，开局即生成、无法操作。 */
+   - 已放卡永远占其格位（含揭晓后超过上限的卡：不删除、不移动，见 locationRevealStage）；
+   - 空位且属于允许格（i < def.max）：max=4 用浅灰虚线格，max<4 用透明占位；
+   - 空位且是不允许格（i >= def.max）：固定用「隙间」灰色卡占位——只铺在“空置”的不可用格，
+     所以隙间数 = 4 − max(已放卡数, 上限)：未超限时 = 4−上限（如迷途竹林 2 个）；
+     揭晓超限时随卡占格递减（已放 3 张 → 1 个；放满 4 张或大体积卡占满整侧 → 0 个），
+     与“不删卡”口径一致。 */
 function buildZoneChildren(side, locIdx) {
   const def = locDef(locIdx);
   const cards = state.players[side].zones[locIdx];
@@ -1532,13 +1771,13 @@ function buildZoneChildren(side, locIdx) {
     return out;
   }
   for (let i = 0; i < 4; i++) {
+    const card = cards[i];
+    if (card) { out.push(miniCardEl(card, locIdx, side)); continue; } // 已有卡优先占格
     if (i >= def.max) {
       out.push(gapCellEl());
       continue;
     }
-    const card = cards[i];
-    if (card) out.push(miniCardEl(card, locIdx, side));
-    else if (def.max === 4) out.push(guideCellEl());
+    if (def.max === 4) out.push(guideCellEl());
     else out.push(spacerCellEl());
   }
   return out;
@@ -1786,11 +2025,27 @@ function showZoom(def, standalone) {
 
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${def.c}</span><span class="zm-pow">威力 ${def.p}</span></div>
-    <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
+    <div class="zm-kind">${kindTags(def)}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
   renderDeriv(def);
   zoomStageBtn(standalone ? '关闭 ✕' : '← 返回图鉴');
   $('zoomMask').classList.remove('hidden');
+}
+
+// 图鉴/放大视图的“效果分类”标签：揭示键的中文名 + 卡级持续机制（prot/og/surv/phx/
+// leave/occ/fly 等非 k 字段）标签，避免把带持续/防护机制的卡误标成“白板”。
+function kindTags(def) {
+  const parts = [];
+  if (def.prot) parts.push('持续 · 区域免摧毁');
+  if (def.og) parts.push('持续 · 强化指定 token');
+  if (def.surv) parts.push('防摧毁');
+  if (def.phx) parts.push('凤凰重生');
+  if (def.leave) parts.push('终局离场');
+  if (def.occ) parts.push('大体积占格');
+  if (def.fly) parts.push('每回合移动一次');
+  const base = KIND_LABEL[def.k] || '';
+  if (base && parts.length) return base + '；' + parts.join('、');
+  return base || parts.join('、');
 }
 
 // 手牌卡放大查看：显示该实例的“当前战力”（基础 + 永久 buff，如凤凰重生后的妹红），
@@ -1812,7 +2067,7 @@ function showHandCard(card) {
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${def.c}</span><span class="zm-pow">当前威力 ${live}</span></div>
     ${diff !== 0 ? `<div class="zm-kind">基础威力 ${def.p} · 永久增益 ${diff > 0 ? '+' : ''}${diff}</div>` : `<div class="zm-kind">基础威力 ${def.p}</div>`}
-    <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
+    <div class="zm-kind">${kindTags(def)}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
   renderDeriv(def);
   zoomStageBtn('关闭 ✕');
@@ -1908,7 +2163,7 @@ function showFieldCard(card, locIdx) {
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${def.c}</span><span class="zm-pow">场上威力 ${live}</span></div>
     <div class="zm-kind">基础威力 ${def.p}</div>
-    <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
+    <div class="zm-kind">${kindTags(def)}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
   renderDeriv(def);
   renderPowerHistory(card, locIdx); // 独立“战力影响历史”面板（同遮罩并排、弹窗外部）

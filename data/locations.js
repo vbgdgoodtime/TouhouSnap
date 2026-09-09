@@ -11,6 +11,8 @@
      eff  = 效果说明文字
      spawn= 可选：本区域“出现时”每方生成的卡牌 { card: SPECIAL 键名, n: 张数 }，
            生成的特殊卡牌落地即翻开、占用格位（如虹龙洞的「石块」）。
+           ⚠️ 结算时机（v74）：该效果在**地形被揭晓时**（locationRevealStage）结算，
+           不再开局统一执行——只有被“揭晓/出现”的地形才触发它。
      aff = 可选：区域-阵营加成 { group: GROUPS 键名, add: 威力 }，
            给位于本区域、所属该阵营的卡牌常驻加威力（实时生效，见 game.js 的
            locRoleBonus/cardPowerIn；如红魔馆对 scarlet 阵营 +2）。
@@ -42,4 +44,15 @@ window.DS_LOCATIONS = {
     { id: 'underworld', n: '冥界', icon: '🪦', wt: 1, dbl: 1, max: 4, all: -2, eff: '此区域所有卡牌 威力 -2' },
     { id: 'reactor', n: '聚变反应炉', icon: '🔥', wt: 1, dbl: 1, max: 4, purge: true, eff: '每回合结束：摧毁本区全场战力最低的牌（并列全删）' },
   ],
+
+  /* ---- 非随机地形（EXTRA）----
+     不放进 POOL → 绝不会被每局开局的三区随机抽选抽到；仅作为“可按 id 引用的地形”存在。
+     现仅「未揭示」：v74 起作为**每局开局三列的初始未揭示态**，由地形揭晓系统
+     （game.js locationRevealStage）在第 1/2/3 回合开始时依次揭晓为真实地形。
+     样式 = 基础面板（与「无名之丘」同款）。 */
+  EXTRA: {
+    // 未揭示：max 4 / 无特殊效果 / 样式与无名之丘相同 / 效果文案（中间带备注）显示「未揭示地形」。
+    // ⚠️ id 不要用 'hidden'——全局 UI 有 .hidden{display:none} 类，列 class 直接取 def.id 会整列隐藏。
+    unreveal: { id: 'unreveal', n: '未揭示', icon: '❓', wt: 1, dbl: 1, max: 4, eff: '未揭示地形' },
+  },
 };
