@@ -169,10 +169,11 @@ const state = {
 };
 
 let pendingResolve = null;
-let pickDef = null; // 开发者“指定卡牌”弹窗当前选中（人物卡 def 或 null）
+let pendingSwitchFly = null; // v96：换边演出待播 {card, srcRect}（由 switch/gift 记录、revealRound 渲染后触发）
+// pickDef（开发者“指定卡牌”选中）已随页面实现一并拆分到 card-browser.js（v92）
 
 /* ---------------- 流程主循环 ---------------- */
-function restart() {
+async function restart() {
   state.gen++;
   const gen = state.gen;
 
@@ -195,8 +196,8 @@ function restart() {
   state.players.p.deck = buildDeckCards();
   state.players.a.deck = buildDeckCards();
 
-  // 初始手牌各 3 张
-  for (let i = 0; i < 3; i++) drawOne('p');
+  // v94：对手初始 3 张先在数据层发放（无展示动画）；玩家初始 3 张由 playOpening
+  // 逐张播放“从右滑入”入场演出，第 1 回合开始双方再各抓 1 张（起手共 4 张）。
   for (let i = 0; i < 3; i++) drawOne('a');
 
   // 选 3 块区域：按抽选权重（pick，默认 1）不放回抽 3 块，保证互不相同；
@@ -247,7 +248,22 @@ function restart() {
   // 三块真实地形在揭晓那一刻才“出现”，由 locationRevealStage 结算（v74）。
   runGameStartEffects(); // ⓪ 游戏开始效果挂点（现无注册效果）：第 1 回合开始前执行
   renderAll();
+  await playOpening(gen); // v94→v119：玩家初始 3 张逐张滑入 → 间隔 500ms
+  if (gen !== state.gen) return;
   playRound(gen);
+}
+
+// v94 开局演出：玩家初始 3 张逐张“从屏幕右侧滑入”（每张约 0.7s 动画节奏），
+// 三张全部到位后停顿 500ms，再进入第 1 回合（第 1 回合开始会再抽 1 张）。
+async function playOpening(gen) {
+  for (let i = 0; i < 3; i++) {
+    const card = drawOne('p');
+    if (card) card.justDrawn = true; // 复用“抽牌从右滑入”演出（v91/v93）
+    renderHand();
+    await sleep(720); // 等滑入动画（0.65s）播完并留一点间隔
+    if (gen !== state.gen) return;
+  }
+  await sleep(500); // 三张抽完 → 间隔 500ms（v119）
 }
 
 function buildDeckCards() {
@@ -402,6 +418,34 @@ function runGameEndEffects() {
   }
 }
 
+/* 地形揭晓换场演出（v98→v99）：把当前“未揭示”外观的整列克隆到悬浮层并从不透明淡出（500ms），
+   下方随即换成真实地形——观感为“未揭示逐渐消失、真实地形逐渐显示”。
+   克隆必须在地形 def 切换前抓取；pointer-events:none 不挡交互，淡完自动清理。 */
+function revealLocFade(locIdx) {
+  const col = Game._els && Game._els.cols && Game._els.cols[locIdx];
+  if (!col) return;
+  const rect = col.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+  const clone = col.cloneNode(true);
+  clone.setAttribute('aria-hidden', 'true');
+  clone.style.cssText =
+    `position:fixed;left:${rect.left}px;top:${rect.top}px;` +
+    `width:${rect.width}px;height:${rect.height}px;margin:0;z-index:9300;` +
+    `pointer-events:none;`;
+  document.body.appendChild(clone);
+  const anim = clone.animate(
+    [
+      { opacity: 1, offset: 0 },
+      { opacity: .6, offset: .35 },
+      { opacity: 0, offset: 1 },
+    ],
+    { duration: 500, easing: 'ease-in' } // v99：700ms → 500ms
+  );
+  anim.finished.catch(() => {}).then(() => {
+    if (clone.parentNode) clone.parentNode.removeChild(clone);
+  });
+}
+
 /* ①-0 地形揭晓（v74）：开局三列均为「未揭示」占位（EXTRA.unreveal，max 4 / 无效果），
    真实地形在 restart 已按抽选顺序预存进 state.locPlan；第 t 回合开始时揭晓第 t 列
    （t=1/2/3，对应左/中/右列）：
@@ -419,6 +463,7 @@ function locationRevealStage() {
   if (!loc || !loc.def || loc.def.id !== 'unreveal') return; // 该列已揭晓（防御）
   const target = st.locPlan && st.locPlan[idx];
   if (!target) return;
+  revealLocFade(idx); // v98：旧“未揭示”外观淡出 700ms（快照需在换 def 前抓取）
   loc.def = target; // 换上真实地形
   refreshLocHeader(idx); // 列名/图标/效果文案/配色即时更新
   log('sys', `🃏 第 ${st.turn} 回合开始：地形「${target.n}」揭晓！`);
@@ -438,11 +483,10 @@ function roundStartStage() {
   const st = state;
   locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
   runTurnStartEffects(); // ①-1 全场“回合开始”效果（按放置队列序）
-  if (st.turn > 1) { // ①-2 抽牌（第 1 回合的 3 张已在开局发放）
-    const drawnP = drawOne('p');
-    if (drawnP) drawnP.justDrawn = true; // v91：玩家抽牌入场演出（屏幕右端滑入）
-    drawOne('a');
-  }
+  // ①-2 抽牌（v94：第 1 回合起每回合双方都各抓 1 张——开局 3 张已逐张发放，第 1 回合再抽第 4 张）
+  const drawnP = drawOne('p');
+  if (drawnP) drawnP.justDrawn = true; // v91：玩家抽牌入场演出（屏幕右端滑入）
+  drawOne('a');
   st.energyTotal = Math.min(st.turn, 6);           // ①-2 能量结算
   st.energyLeft = st.energyTotal;
   st.phase = 'play';
@@ -455,7 +499,7 @@ function roundStartStage() {
   // 记录本回合开始时的玩家手牌顺序（重置暗牌时按此顺序放回）
   st.playHandOrder = st.players.p.hand.map((c) => c.id);
   renderAll();
-  if (st.turn > 1) log('sys', `—— 第 ${st.turn} 回合 · 双方各抓 1 张 ——`);
+  log('sys', `—— 第 ${st.turn} 回合 · 双方各抓 1 张 ——`); // v94：含第 1 回合
   setStatus(`第 ${st.turn} 回合 · 能量 ${st.energyTotal}：可一次暗出多张牌（总费用不超过能量），出完点「结束回合」；点能量框可重置本回合暗牌。`);
 }
 
@@ -742,76 +786,8 @@ function doRetreat() {
 }
 
 /* ---------------- AI ---------------- */
-function hypotheticScore(card, locIdx) {
-  let score = 0;
-  for (let j = 0; j < 3; j++) {
-    let mine = zoneTotals('a', j, true);
-    let opp = zoneTotals('p', j, true);
-    if (j === locIdx) {
-      mine += cardPowerIn(locIdx, card);
-      // 若这一手正好把该区放满，预判计入放满加成
-      const def = state.locs[j].def;
-      if (def.fill && sideUsed('a', j) + occOf(card) >= def.max) mine += def.fill;
-    }
-    // 反转区域（辉针城）比较口径取负：数值更低反而领先
-    const eff = state.locs[j].def.inv ? -1 : 1;
-    const adv = eff * (mine - opp);
-    score += state.locs[j].def.wt * (adv + (adv > 0 ? 5 : adv < 0 ? -3 : 0));
-  }
-  return score;
-}
-
-function aiThink() {
-  const st = state;
-  const pl = st.players.a;
-  // AI 视局势考虑双倍
-  if (!st.aSnapped && st.turn >= 3 && Math.random() < 0.6) {
-    let adv = 0;
-    for (let j = 0; j < 3; j++) adv += state.locs[j].def.wt * (zoneEff('a', j, true) - zoneEff('p', j, true));
-    if (adv > 4 && st.stakes < 8) {
-      st.stakes = Math.min(8, st.stakes * 2);
-      st.aSnapped = true;
-      log('snap', `⚡ 对手双倍下注！赌注升至 ${st.stakes}`);
-    }
-  }
-  // 贪心循环：把剩余能量花完为止
-  let rem = st.energyTotal;
-  while (true) {
-    const affordable = pl.hand.filter((c) => c.def.c <= rem);
-    if (affordable.length === 0) break;
-    const cands = [];
-    for (const card of affordable) {
-      // AI 策略：区域变形到辉针城的卡（鬼人正邪）只在自己落后该区 ≥10 点时考虑
-      const isNeedle = card.def.k === 'xform' && card.def.xf === 'needle';
-      for (let j = 0; j < 3; j++) {
-        if (sideRoom('a', j) < occOf(card)) continue; // 占格口径：大体积卡需要整区空位（occ4 只进 max4 空区）
-        if (!locOpen(j)) continue;
-        if (isNeedle) {
-          const myT = zoneTotals('a', j, true);
-          const opT = zoneTotals('p', j, true);
-          if (opT - myT < 10) continue; // 落后不足 10 点：本回合不打
-        }
-        let sc = hypotheticScore(card, j);
-        if (locDef(j).purge) sc *= 0.25; // 聚变反应炉：权重 -75%，尽量少打
-        cands.push({ card, loc: j, score: sc });
-      }
-    }
-    if (cands.length === 0) break;
-    cands.sort((x, y) => y.score - x.score);
-    const best = cands[0].score;
-    const pool = cands.filter((c) => c.score >= best - 3);
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    pl.zones[pick.loc].push(pick.card);
-    enqueueField(pick.card); // 对手暗出：进入场上放置顺序队列（v55）
-    pl.hand.splice(pl.hand.indexOf(pick.card), 1);
-    rem -= pick.card.def.c;
-    st.aiMoves.push({ cardId: pick.card.id, loc: pick.loc });
-    log('a', `对手在「${st.locs[pick.loc].def.n}」暗出一张牌(${pick.card.def.c}费)。`);
-  }
-  if (st.aiMoves.length === 0) {
-    log('a', '对手没有可打出的牌，选择跳过。');
-  }
-}
+// v117：人机思考逻辑已拆到独立文件 ai.js（hypotheticScore / aiThink），
+// 此处经全局函数名被 playRound 阶段 ③ 调用，详见 ai.js。
 
 /* ---------------- 翻牌与效果 ---------------- */
 // 按“结算胜利标准”判断当前盘面（只看已翻开的牌）的领先方；
@@ -862,19 +838,22 @@ async function revealRound() {
     if (!card) continue;
     card.revealed = true;
     card.justRevealed = true;
-    renderZones(); // 翻面后该牌战力才计入区域总点数
+    renderZones(); // 翻面：新元素带 .played-now → CSS flipIn（0.5s 从小到大缩放）入场
     log(mv.side, `「${card.def.n}」翻牌 — 威力 ${cardPowerIn(mv.loc, card)}`);
+    let willChange = false;
     if (card.def.k) {
-      // 只有效果“真的会造成变化”时才停顿展示（如对方/己方没有已翻开卡可被加减时直接结算）
-      if (revealEffectWillChange(mv.side, mv.loc, card)) await sleep(400);
+      // 只有效果“真的会造成变化”时才停顿展示（缩放动画同时播放，避免同帧重建吞掉入场）
+      willChange = revealEffectWillChange(mv.side, mv.loc, card);
+      if (willChange) await sleep(400);
       if (card.def.k === 'shift') {
         // 八云紫整体右移：分步演出，每移动一张间隔 0.3s（v78）
         await applyShiftReveal(mv.side, card.def.t);
       } else {
         applyEffect(mv.side, mv.loc, card);
       }
+      if (willChange) renderZones(); // 效果确有变化才重建（白板/未触发时保留入场元素直到动画播完）
     }
-    renderZones();
+    flushPendingSwitchFly(); // v96：换边（switch/gift）后播放“滑行+缩放”演出（真身已渲染，克隆飞行）
     await sleep(500); // 效果结算后停顿，再进入下一张翻牌
   }
   st.playerMoves = [];
@@ -1082,6 +1061,16 @@ function playShatter(card) {
     }
   }
   return pieces;
+}
+
+// 在卡片上“登出”换边演出：若 switch/gift 刚记了待播，就在本次渲染后播放。
+// 复用 flyCardTo 的“滑行 + 缩放”克隆飞行（真身已在对方侧渲染，飞完露出）；
+// 不阻塞：revealRound 随后的停顿/渲染会自然接续。
+function flushPendingSwitchFly() {
+  if (!pendingSwitchFly) return;
+  const f = pendingSwitchFly;
+  pendingSwitchFly = null;
+  if (f && f.srcRect) flyCardTo(f.card, f.srcRect);
 }
 
 // 区域免摧毁（def.prot，现仅蕾蒂）：本区域存在“已翻开且仍在场”的 prot 卡时，
@@ -1369,9 +1358,13 @@ function applyEffect(side, locIdx, card, spec) {
       const src = st.players[side].zones[locIdx];
       const idx = src.indexOf(card);
       if (idx < 0) break; // 防御：理论不会发生
+      // v96：记录换边前源格位，供效果渲染后播放“滑行+缩放”演出
+      const swEl = miniCardElById(card.id);
+      const swRect = swEl && swEl.isConnected ? swEl.getBoundingClientRect() : null;
       src.splice(idx, 1);
       dst.push(card);
       card.side = other; // 归属换边
+      pendingSwitchFly = { card, srcRect: swRect }; // v96
       log('danger', `✦ ${def.n} 换边：转移到了对方一侧（${def.p < 0 ? `以 ${-def.p} 负战力计入对方该区` : '该卡现在位于对方一侧'}）。`);
       break;
     }
@@ -1427,9 +1420,13 @@ function applyEffect(side, locIdx, card, spec) {
         else if (p === minP) poolT.push(c);
       }
       const target = poolT[Math.floor(Math.random() * poolT.length)]; // 并列最低随机
+      // v96：记录换边前源格位，供效果渲染后播放“滑行+缩放”演出
+      const gEl = miniCardElById(target.id);
+      const gRect = gEl && gEl.isConnected ? gEl.getBoundingClientRect() : null;
       st.players[side].zones[locIdx].splice(st.players[side].zones[locIdx].indexOf(target), 1);
       dst.push(target);
       target.side = other; // 归属换边
+      pendingSwitchFly = { card: target, srcRect: gRect }; // v96
       log('danger', `✦ ${def.n}：把己方「${target.def.n}」（威力 ${minP}）换边到了对方一侧。`);
       break;
     }
@@ -1975,6 +1972,8 @@ function renderHand() {
   const prevScroll = hand.scrollLeft;
   hand.innerHTML = '';
   const cards = st.players.p.hand;
+  updateHandCount(); // v118：中央“当前手牌 N/7”提示
+  let drewEntry = false; // v95：本次渲染中是否存在“抽牌入场”的卡
   if (cards.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'hand-empty';
@@ -1984,12 +1983,14 @@ function renderHand() {
   }
   cards.forEach((card, index) => {
     const el = document.createElement('div');
-    el.className = 'hand-card';
+    el.className = 'hand-card' + (card.def.img ? '' : ' no-img');
     const afford = card.def.c <= st.energyLeft;
     if (!afford) el.classList.add('unaffordable');
     if (st.selected === index) el.classList.add('selected');
     if (card.justHandAdded) { el.classList.add('hand-new'); card.justHandAdded = false; } // v90 加入手牌演出
-    if (card.justDrawn) { el.classList.add('hand-drawn'); card.justDrawn = false; } // v91 抽牌入场演出
+    // v95：抽牌入场回退为浏览器原生 CSS transform 动画（.hand-drawn，从右侧滑入），
+    // 同时给 #hand 加 .draw-anim（临时 overflow-x:hidden）抑制桌面端横向滚动条
+    if (card.justDrawn) { el.classList.add('hand-drawn'); card.justDrawn = false; drewEntry = true; }
     // 终局复盘（over）时手牌保持原色且可点击查看，其余非出牌阶段置灰
     if (st.phase !== 'play' && st.phase !== 'over') el.classList.add('unaffordable');
     el.style.setProperty('--cgrad', gradOf(card.def));
@@ -2011,6 +2012,25 @@ function renderHand() {
   });
   // 赋值后浏览器会自动钳制到合法范围（例如出牌后手牌变少）
   hand.scrollLeft = prevScroll;
+  if (drewEntry) lockDrawAnimScroll(hand); // v95：入场期间抑制横向滚动条
+}
+
+// v118：更新认输/结束回合按钮之间的“当前手牌 N/7”提示
+function updateHandCount() {
+  const el = $('handCountVal');
+  if (el) el.textContent = state.players.p.hand.length + '/7';
+}
+
+// 抽牌入场期间给手牌容器加 .draw-anim（overflow-x:hidden），动画播完移除；
+// 连续抽牌（如开局 3 张）会重置计时器，保持全程抑制。
+let drawAnimTimer = null;
+function lockDrawAnimScroll(hand) {
+  hand.classList.add('draw-anim');
+  if (drawAnimTimer) clearTimeout(drawAnimTimer);
+  drawAnimTimer = setTimeout(() => {
+    hand.classList.remove('draw-anim');
+    drawAnimTimer = null;
+  }, 750); // 0.65s 动画 + 余量
 }
 
 /* ---------------- 图鉴 / 放大卡牌 ---------------- */
@@ -2031,78 +2051,13 @@ function cardFaceHTML(def, opts) {
     <div class="hc-text">${def.t || '—'}</div>`;
 }
 
-function uiOnCodex() {
-  const mask = $('codexMask');
-  if (mask.classList.contains('hidden')) {
-    buildCodexGrid();
-    mask.classList.remove('hidden');
-  } else {
-    closeCodex();
-  }
-}
-
-function buildCodexGrid() {
-  const grid = $('codexGrid');
-  grid.innerHTML = '';
-  let total = 0;
-  for (let c = 0; c <= 6; c++) {
-    if (!POOL[c]) continue;
-    for (const def of POOL[c]) {
-      total++;
-      const el = document.createElement('div');
-      el.className = 'codex-card hand-card';
-      el.style.setProperty('--cgrad', gradOf(def));
-      el.innerHTML = cardFaceHTML(def);
-      el.title = def.n;
-      el.addEventListener('click', () => showZoom(def));
-      grid.appendChild(el);
-    }
-  }
-  $('codexCount').textContent = `共 ${total} 种`;
-}
-
-function closeCodex() {
-  $('zoomMask').classList.add('hidden');
-  $('codexMask').classList.add('hidden');
-  hidePowerPanel();
-}
-
-/* ---------------- 开发者：指定卡牌（调试用） ---------------- */
-function uiOnPick() {
-  const mask = $('pickMask');
-  if (!mask.classList.contains('hidden')) { uiOnPickClose(); return; }
-  pickDef = null;
-  buildPickGrid();
-  mask.classList.remove('hidden');
-}
-
-function buildPickGrid() {
-  const grid = $('pickGrid');
-  grid.innerHTML = '';
-  for (let c = 0; c <= 6; c++) {
-    if (!POOL[c]) continue;
-    for (const def of POOL[c]) {
-      const el = document.createElement('div');
-      el.className = 'codex-card hand-card';
-      el.style.setProperty('--cgrad', gradOf(def));
-      el.innerHTML = cardFaceHTML(def);
-      el.title = def.n;
-      el.addEventListener('click', () => {
-        pickDef = def;
-        grid.querySelectorAll('.pick-picked').forEach((x) => x.classList.remove('pick-picked'));
-        el.classList.add('pick-picked');
-        $('pickTip').textContent = `已选：「${def.n}」（${def.c} 费 / 威力 ${def.p}）`;
-      });
-      grid.appendChild(el);
-    }
-  }
-  $('pickTip').textContent = `当前手牌 ${state.players.p.hand.length}/7 — 点选 1 张后确认`;
-}
-
-function uiOnPickClose() {
-  $('pickMask').classList.add('hidden');
-  pickDef = null;
-}
+/* ===== 图鉴 / 开发者“指定卡牌”页面入口（v92 起实现拆分到 card-browser.js）=====
+   网格渲染、费用筛选（全部/0-1/2/3/4/5/6 费）、选中与加入手牌的逻辑
+   都在 window.CardBrowser（见 card-browser.js）；这里保留按钮/快捷键入口转发。 */
+function uiOnCodex() { if (window.CardBrowser) window.CardBrowser.toggleCodex(); }
+function closeCodex() { if (window.CardBrowser) window.CardBrowser.closeCodex(); }
+function uiOnPick() { if (window.CardBrowser) window.CardBrowser.togglePick(); }
+function uiOnPickClose() { if (window.CardBrowser) window.CardBrowser.closePick(); }
 
 // 开发者调试：把本回合能量设为 7（仅当前出牌阶段生效；下回合 playRound 会按回合数重置）
 function uiOnEnergyDev() {
@@ -2115,24 +2070,7 @@ function uiOnEnergyDev() {
   renderAll();
 }
 
-function uiOnPickConfirm() {
-  if (!pickDef) { setStatus('请先在弹窗里点选一张卡牌。'); return; }
-  const pl = state.players.p;
-  if (pl.hand.length >= 7) {
-    setStatus(`手牌已满（${pl.hand.length}/7），无法加入「${pickDef.n}」。`);
-    return;
-  }
-  const name = pickDef.n;
-  const card = newCard(pickDef);
-  card.side = 'p';
-  card.justHandAdded = true; // v90：加入手牌演出
-  pl.hand.push(card);
-  log('sys', `🎯 开发者指令：指定「${name}」加入你的手牌（现 ${pl.hand.length}/7）。`);
-  setStatus(`已将「${name}」加入手牌（${pl.hand.length}/7）。`);
-  pickDef = null;
-  $('pickMask').classList.add('hidden');
-  renderHand();
-}
+function uiOnPickConfirm() { if (window.CardBrowser) window.CardBrowser.confirmPick(); }
 
 function zoomStageBtn(label) {
   const btn = document.querySelector('.zoom-stage .btn');
@@ -2161,9 +2099,12 @@ function tokenLinksForDef(def) {
 }
 
 // 在卡牌详情弹窗右侧渲染“衍生卡牌”区（与主弹窗同框，关闭时一起关闭）
+// v102：没有衍生卡的卡牌弹窗整体收窄（.zoom-stage.no-deriv）
 function renderDeriv(def) {
   const box = $('zoomDeriv');
   const list = tokenLinksForDef(def);
+  const stage = document.querySelector('.zoom-stage');
+  if (stage) stage.classList.toggle('no-deriv', !list.length);
   if (!list.length) { box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
   box.innerHTML = '<div class="deriv-head">衍生卡牌</div>';

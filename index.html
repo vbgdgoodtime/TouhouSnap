@@ -35,12 +35,6 @@
     </div>
   </header>
 
-  <!-- 状态提示条：手机端固定显示在顶栏下（桌面端隐藏，仍用侧栏状态卡）；
-       与侧栏 #statusText 同步更新，见 game.js 的 setStatus() -->
-  <div class="mob-status" id="mobStatusCard">
-    <div class="status-text" id="mobStatus">准备开始…</div>
-  </div>
-
   <main class="layout">
     <section class="board-wrap">
       <div class="board" id="board"></div>
@@ -79,6 +73,13 @@
     </aside>
   </main>
 
+  <!-- 状态提示条：手机端显示在地形区（layout）之后、手牌之前（v107 移动，
+       避免文案换行增减导致地形上下位移；桌面端隐藏，仍用侧栏状态卡），
+       与侧栏 #statusText 同步更新，见 game.js 的 setStatus() -->
+  <div class="mob-status" id="mobStatusCard">
+    <div class="status-text" id="mobStatus">准备开始…</div>
+  </div>
+
   <section class="hand-wrap">
     <div class="energy-pips" id="energyPips"></div>
     <div class="hand" id="hand">
@@ -111,6 +112,7 @@
         <span class="codex-tip">点击任意卡牌可放大查看</span>
         <button class="btn btn-ghost codex-close" onclick="Game.ui.onCodex()">关闭 ✕</button>
       </div>
+      <div class="card-filter-bar" id="codexFilter"></div>
       <div class="codex-grid" id="codexGrid"></div>
     </div>
   </div>
@@ -123,6 +125,7 @@
         <span class="codex-tip" id="pickTip">点选 1 张卡牌，点「确认加入手牌」</span>
         <button class="btn btn-ghost codex-close" onclick="Game.ui.onPickClose()">取消 ✕</button>
       </div>
+      <div class="card-filter-bar" id="pickFilter"></div>
       <div class="codex-grid" id="pickGrid"></div>
       <div class="pick-actions">
         <button class="btn btn-primary" id="btnPickConfirm" onclick="Game.ui.onPickConfirm()">确认加入手牌</button>
@@ -168,6 +171,10 @@
   <div class="corner-actions corner-left">
     <button id="btnRetreat" class="btn btn-danger" onclick="Game.ui.onRetreat()">🏳️ 认输</button>
   </div>
+  <!-- v118：认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7） -->
+  <div class="corner-actions corner-center" id="handCountBox">
+    <span class="hand-count-chip" id="handCountVal">0/7</span>
+  </div>
   <div class="corner-actions corner-right">
     <button id="btnPass" class="btn btn-pass" onclick="Game.ui.onPass()">跳过回合</button>
   </div>
@@ -175,5 +182,7 @@
   <script src="data/cards.js"></script>
   <script src="data/locations.js"></script>
   <script src="game.js"></script>
+  <script src="ai.js"></script>
+  <script src="card-browser.js"></script>
 </body>
 </html>

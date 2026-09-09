@@ -666,7 +666,7 @@ body {
   z-index: 4;
 }
 .mini-card.dim { opacity: .5; filter: saturate(.4); }
-.mini-card.played-now { animation: pop .4s ease; box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(46, 78, 40, .3); }
+.mini-card.played-now { animation: flipIn .5s ease-out; box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(46, 78, 40, .3); }
 /* v80→v83：卡牌“永久 +N 战力”的绿色小动画（1000ms）
    卡面本体只做短暂提亮；绿环扩散与“+N”气泡放在独立 body 悬浮层（.gain-ring），
    不会被 renderZones 重建缩略卡而中途打断；气泡末段 70%→100%（≈300ms）渐隐。 */
@@ -763,7 +763,9 @@ body {
   100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
 }
 
-/* v91：每回合抽牌入场——从屏幕最右侧滑入，落到手牌最右边（该张是手牌末位） */
+/* v91→v95：抽牌入场（每回合/开局抽牌）——浏览器原生 CSS transform“从屏幕右侧滑入”；
+   为避免平移把手牌容器可滚动区域撑大、桌面端闪横向滚动条，
+   动画期间由 JS 给 #hand 加 .draw-anim（overflow-x:hidden）临时抑制 */
 .hand-card.hand-drawn {
   animation: handDrawIn .65s cubic-bezier(.2, .85, .3, 1);
 }
@@ -772,7 +774,14 @@ body {
   70%  { transform: translateX(-1.2vw) scale(1.03); opacity: 1; }
   100% { transform: translateX(0) scale(1); opacity: 1; }
 }
-@keyframes pop { 0% { transform: scale(.6); opacity: .2; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+.hand.draw-anim { overflow-x: hidden; }
+/* v100→v101：暗牌翻开 = 从小到大缩放入场（0.5s，同生成 token 的“凝聚显形”观感） */
+@keyframes flipIn {
+  0%   { transform: scale(.3); opacity: .25; filter: brightness(1.7); }
+  40%  { transform: scale(1.12); opacity: 1; filter: brightness(1.35); }
+  70%  { transform: scale(.97); filter: brightness(1.05); }
+  100% { transform: scale(1); opacity: 1; filter: brightness(1); }
+}
 
 /* ---------- 手牌（居中放置，两侧让位给左下/右下角按钮） ---------- */
 .hand-wrap {
@@ -836,6 +845,19 @@ body {
   text-shadow: 0 0 4px rgba(255,210,63,.5);
 }
 .hand-card .hc-icon { font-size: 30px; text-align: center; margin: 4px 0 2px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+/* v103：手牌尺寸统一——无图（emoji 兜底）的卡也占一块与图片卡同款的正方形艺术区，
+   白板/短文案的卡预留两行效果文字高度，使手牌各卡高度一致、入场不再互相撑高 */
+.hand-card.no-img .hc-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 4px);
+  aspect-ratio: 1 / 1;
+  margin: 4px auto 2px;
+  border-radius: 8px;
+  background: rgba(120, 150, 110, .14);
+  filter: none;
+}
 .hand-card .hc-name { font-size: 12.5px; font-weight: 800; text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 .hand-card .hc-text { font-size: 8.8px; line-height: 1.3; color: rgba(255,255,255,.88); margin-top: 4px; flex: 1; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 /* 手牌区的效果文字：最多两行，超长省略号截断（完整文案可右键手牌或点击放大查看） */
@@ -844,6 +866,7 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  min-height: 2.6em; /* v103：统一预留两行，短文案卡不再矮一截 */
 }
 .hand-card .hc-cost-tag { position: absolute; bottom: -1px; right: -1px; font-size: 9px; background: rgba(0,0,0,.6); border-radius: 6px 0 8px 0; padding: 2px 5px; border: 1px solid rgba(255,255,255,.15); }
 
@@ -1106,6 +1129,15 @@ body {
 .deriv-card .hc-name { font-size: 17px; }
 .deriv-card .hc-text { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 
+/* v102：没有衍生卡的卡牌详情弹窗整体收窄（renderDeriv 加 .no-deriv） */
+.zoom-stage.no-deriv {
+  width: min(520px, 94vw);
+  padding: 22px 26px;
+}
+@media (max-width: 760px) {
+  .zoom-stage.no-deriv { width: 94vw; padding: 18px 12px; }
+}
+
 /* 放大/手牌卡面上的增减益威力配色 */
 .hand-card .p.up { color: #4ade8f; border-color: #4ade8f; }
 .hand-card .p.down { color: #ff6d6d; border-color: #ff6d6d; }
@@ -1315,6 +1347,9 @@ body { -webkit-tap-highlight-color: transparent; }
     body { height: 100dvh; min-height: 0; }
   }
 
+  /* v105：手机端隐藏“双倍下注”按钮（AI 仍可自行加倍） */
+  .top-actions #btnSnap { display: none; }
+
   /* 顶栏：可换行 + 避开刘海/圆角 */
   .topbar {
     flex-wrap: wrap;
@@ -1350,10 +1385,10 @@ body { -webkit-tap-highlight-color: transparent; }
   .board-wrap { flex: 0 0 auto; min-height: 0; }
   .side { order: 2; flex: 0 0 auto; }
 
-  /* 底部手牌区固定不收缩 */
+  /* 底部手牌区固定不收缩（v109：底部留白加大，避开角落“认输/结束回合”按钮） */
   .hand-wrap {
     flex: 0 0 auto;
-    padding-bottom: calc(8px + var(--sa-bottom));
+    padding-bottom: calc(42px + var(--sa-bottom));
   }
   /* 手牌横向滚动：隐藏滚动条，更干净 */
   .hand { scrollbar-width: none; }
@@ -1389,8 +1424,8 @@ body { -webkit-tap-highlight-color: transparent; }
   .layout { gap: 10px; padding: 8px 10px 6px; }
   .board { gap: 10px; min-height: 0; }
 
-  /* 底部手牌：卡片收小、两侧让位给常驻按钮（84px 足够容纳） */
-  .hand-wrap { padding-top: 4px; padding-bottom: calc(6px + var(--sa-bottom)); }
+  /* 底部手牌：卡片收小、两侧让位给常驻按钮（84px 足够容纳）；v109 底部再抬高避开按钮 */
+  .hand-wrap { padding-top: 4px; padding-bottom: calc(48px + var(--sa-bottom)); }
   .energy-pips {
     margin-bottom: 4px;
     padding-left: 84px;
@@ -1423,18 +1458,16 @@ body { -webkit-tap-highlight-color: transparent; }
    每列 ≥112px（屏再窄则整板可横向微滚动），列高由内容撑起，
    头部/中间带/卡位/分数均按窄列收小，保证一屏能同时看到三块区域。 */
 @media (max-width: 640px) {
+  /* v104：三块区域等分占满整宽，不再整板横向滚动；单行网格使三列始终等高 */
   .board {
-    grid-template-columns: repeat(3, minmax(112px, 1fr));
-    grid-template-rows: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
     gap: 6px;
     min-height: 0;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
+    overflow: hidden;
   }
-  .board::-webkit-scrollbar { display: none; }
 
-  .location { border-radius: 12px; min-height: 0; }
+  .location { border-radius: 12px; min-height: 0; height: 100%; }
   .loc-head { padding: 4px 6px 3px; }
   .loc-name { font-size: 12.5px; }
   .loc-name .icon { font-size: 13px; }
@@ -1492,3 +1525,150 @@ body { -webkit-tap-highlight-color: transparent; }
   .hand-card { width: 66px; }
 }
 
+/* v92：图鉴 / 指定卡牌页 —— 费用筛选条（全部 / 0-1 / 2 / 3 / 4 / 5 / 6 费） */
+.card-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 18px 12px;
+}
+.card-filter-bar .chip {
+  appearance: none;
+  font: inherit;
+  border: 1px solid rgba(124, 164, 110, .55);
+  background: #ffffff;
+  color: #3d5a33;
+  border-radius: 999px;
+  padding: 3px 13px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+}
+.card-filter-bar .chip:hover { border-color: #7daa62; background: #f2f9ea; }
+.card-filter-bar .chip.active {
+  background: #3f7a33;
+  color: #ffffff;
+  border-color: #2f5f27;
+  box-shadow: 0 0 0 2px rgba(63, 122, 51, .25);
+}
+.codex-empty {
+  grid-column: 1 / -1;
+  color: #7a8a6f;
+  padding: 28px 0;
+  text-align: center;
+  font-size: 14px;
+}
+/* v97：衍生卡牌（token）在网格里的视觉区分 */
+.codex-grid .codex-card.token-card {
+  outline: 1px dashed rgba(120, 92, 170, .6);
+  outline-offset: -2px;
+}
+
+/* v106→v108：手机端(≤640)地形列收口（v108 更正：效果“讲解说明”仍保留在中间带原位；
+   仅隐藏列底部的“已放 x/4 / 第 N 回合揭晓/开放”小字） */
+@media (max-width: 640px) {
+  .slot-count { display: none; }
+}
+
+/* v110→v111：手机端（≤640px）图鉴 / 指定卡牌弹窗的卡片简略显示——
+   只隐藏效果文字说明（保留卡名），保留 卡名/费用/战力 + 图片（或 emoji） */
+@media (max-width: 640px) {
+  #codexGrid .codex-card .hc-text,
+  #pickGrid .codex-card .hc-text { display: none; }
+  #codexGrid .codex-card,
+  #pickGrid .codex-card {
+    padding: 5px 3px 7px;
+  }
+  #codexGrid,
+  #pickGrid {
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    gap: 8px;
+  }
+  #codexGrid .codex-card .hc-icon,
+  #pickGrid .codex-card .hc-icon { font-size: 30px; }
+  #codexGrid .codex-card .hc-art,
+  #pickGrid .codex-card .hc-art { margin: 3px auto 2px; }
+  #codexGrid .codex-card .cost-orb,
+  #codexGrid .codex-card .p,
+  #pickGrid .codex-card .cost-orb,
+  #pickGrid .codex-card .p { width: 20px; height: 20px; font-size: 10px; }
+}
+
+/* v112：手机端（≤640px）卡牌详情弹窗收小 —— 缩小卡牌本体与立绘，
+   让“场上卡牌 + 战力影响历史”等详情不再过大 */
+@media (max-width: 640px) {
+  .zoom-stage {
+    width: min(440px, 94vw);
+    padding: 14px 10px;
+    gap: 12px;
+  }
+  .zoom-card {
+    width: min(176px, 58vw);
+    padding: 8px 8px 12px;
+    border-radius: 14px;
+  }
+  .zoom-card .hc-art {
+    width: min(140px, 46vw);
+    margin: 4px auto 3px;
+    border-radius: 10px;
+  }
+  .zoom-card .hc-icon,
+  .zoom-card .hc-art .hc-icon { font-size: 34px; }
+  .zoom-card .hc-name { font-size: 15px; }
+  .zoom-card .hc-text { font-size: 12px; line-height: 1.45; margin-top: 8px; }
+  .zoom-card .cost-orb,
+  .zoom-card .p { width: 30px; height: 30px; font-size: 14px; border-width: 2px; }
+  .zoom-info { max-width: 330px; font-size: 12.5px; line-height: 1.7; }
+  .power-panel { width: min(300px, 92vw); padding: 12px 12px 10px; }
+  .pp-row { font-size: 12px; line-height: 1.4; padding: 4px 8px; }
+  .pp-row .pp-num { min-width: 32px; }
+}
+
+/* v113：手机端（≤700px）手牌高度压缩——
+   费用/战力角标不再占独立一行，改为绝对定位于卡片上部并下移约一半、
+   轻微遮挡立绘顶部；省出的行高让卡片整体变矮 */
+@media (max-width: 700px) {
+  .hand-card { padding-top: 2px; }
+  .hand-card .hc-top {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    top: 4px;               /* v113→v114：仅轻压立绘上缘（约为原来的半压程度） */
+    z-index: 3;
+    pointer-events: none;
+  }
+  .hand-card .hc-art { margin-top: 6px; }
+  .hand-card.no-img .hc-icon { margin-top: 6px; }
+}
+
+/* v115：手机端手牌侧边距收窄 —— 角落按钮在 v109 已与手牌垂直分开，
+   不再需要 84px 让位；收窄后手牌内容可居中/贴边，避免左侧空出一张牌的空间 */
+@media (max-width: 900px) {
+  .energy-pips { padding-left: 14px; padding-right: 14px; }
+  .hand { padding-left: 14px; padding-right: 14px; }
+}
+
+/* v118：认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7） */
+.corner-center {
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  align-items: center;
+}
+.hand-count-chip {
+  font-size: 13px;
+  font-weight: 800;
+  color: #2e4527;
+  background: rgba(255, 255, 255, .92);
+  border: 1px solid rgba(124, 164, 112, .45);
+  border-radius: 999px;
+  padding: 6px 16px;
+  box-shadow: 0 6px 16px rgba(46, 78, 40, .3);
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .hand-count-chip { font-size: 12px; padding: 5px 12px; }
+}
