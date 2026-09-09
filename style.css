@@ -524,7 +524,17 @@ body {
   background: rgba(208, 229, 250, .9);
   border: 1px solid rgba(92, 152, 226, .55);
   text-shadow: 0 0 6px rgba(150, 202, 255, .4);
-  transition: color .25s, background .25s, border-color .25s, text-shadow .25s;
+  transition: color .25s, background .25s, border-color .25s, text-shadow .25s, transform .3s ease;
+}
+/* v85→v86：终局演出——胜方总点数横幅 700ms 放大高亮（金色光晕，结束回落平滑） */
+.loc-total.settle-win {
+  animation: settleWin .7s ease-out forwards;
+}
+@keyframes settleWin {
+  0%   { transform: scale(1); filter: brightness(1); }
+  28%  { transform: scale(1.3); filter: brightness(1.55); box-shadow: 0 0 0 6px rgba(255, 205, 70, .55); }
+  62%  { transform: scale(1.1); filter: brightness(1.25); box-shadow: 0 0 0 16px rgba(255, 205, 70, 0); }
+  100% { transform: scale(1.2); filter: brightness(1.22); }
 }
 .loc-total .lt-label { font-size: 11px; font-weight: 700; opacity: .9; }
 .loc-total .lt-num { min-width: 30px; text-align: center; font-size: 22px; }
@@ -657,6 +667,111 @@ body {
 }
 .mini-card.dim { opacity: .5; filter: saturate(.4); }
 .mini-card.played-now { animation: pop .4s ease; box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(46, 78, 40, .3); }
+/* v80→v83：卡牌“永久 +N 战力”的绿色小动画（1000ms）
+   卡面本体只做短暂提亮；绿环扩散与“+N”气泡放在独立 body 悬浮层（.gain-ring），
+   不会被 renderZones 重建缩略卡而中途打断；气泡末段 70%→100%（≈300ms）渐隐。 */
+.mini-card.buff-gain {
+  animation: buffGainGlow 1s ease-out;
+}
+@keyframes buffGainGlow {
+  0%   { filter: brightness(1); }
+  50%  { filter: brightness(1.5) saturate(1.3); }
+  100% { filter: brightness(1); }
+}
+.gain-ring {
+  pointer-events: none;
+  animation: buffGainRing 1s ease-out;
+}
+@keyframes buffGainRing {
+  0%   { box-shadow: 0 0 0 0 rgba(64, 214, 120, .8); }
+  100% { box-shadow: 0 0 0 22px rgba(64, 214, 120, 0); }
+}
+.buff-gain-pop {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  transform: translateX(-50%);
+  color: #3be27c;
+  font-weight: 900;
+  /* v82：气泡字号加大，突出 +N 数值 */
+  font-size: clamp(26px, 3.6vw, 46px);
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: 1px;
+  text-shadow:
+    0 0 6px rgba(80, 235, 140, 1),
+    0 0 18px rgba(64, 224, 120, .9),
+    0 2px 3px rgba(0, 0, 0, .7);
+  pointer-events: none;
+  animation: buffGainPop 1s ease-out forwards;
+}
+@keyframes buffGainPop {
+  0%   { opacity: 0; transform: translate(-50%, 18px) scale(.7); }
+  18%  { opacity: 1; transform: translate(-50%, -6px) scale(1.5); }
+  45%  { opacity: 1; transform: translate(-50%, -14px) scale(1.28); }
+  70%  { opacity: 1; transform: translate(-50%, -22px) scale(1.12); }
+  100% { opacity: 0; transform: translate(-50%, -40px) scale(1); }
+}
+
+/* v84：卡牌“永久 -N 战力”的红色同款动画（结构与绿色版一一对应）
+   卡面短暂泛红压暗；红环 + 红色 -N 气泡同置于 body 悬浮层，末段约 300ms 渐隐 */
+.mini-card.buff-loss {
+  animation: buffLossGlow 1s ease-out;
+}
+@keyframes buffLossGlow {
+  0%   { filter: brightness(1); }
+  50%  { filter: brightness(1.3) saturate(1.5); }
+  100% { filter: brightness(1); }
+}
+.gain-ring.loss {
+  animation: buffLossRing 1s ease-out;
+}
+@keyframes buffLossRing {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 96, 96, .8); }
+  100% { box-shadow: 0 0 0 22px rgba(255, 96, 96, 0); }
+}
+.buff-gain-pop.loss {
+  color: #ff8a8a;
+  text-shadow:
+    0 0 6px rgba(255, 130, 130, 1),
+    0 0 18px rgba(255, 90, 90, .9),
+    0 2px 3px rgba(0, 0, 0, .7);
+}
+
+/* v90：场上“生成/落场”卡牌的诞生演出（1s，节奏同 ±N）——凝聚显形：
+   小到弹大 + 提亮 + 淡青光环扩散，尾段回稳 */
+.mini-card.spawned-now {
+  animation: spawnIn 1s ease-out;
+}
+@keyframes spawnIn {
+  0%   { transform: scale(.45); filter: brightness(1.7); box-shadow: 0 0 0 0 rgba(120, 208, 255, .6); }
+  24%  { transform: scale(1.16); filter: brightness(1.45); box-shadow: 0 0 0 6px rgba(120, 208, 255, .42); }
+  48%  { transform: scale(.99); filter: brightness(1.12); box-shadow: 0 0 0 12px rgba(120, 208, 255, 0); }
+  72%  { transform: scale(1.04); filter: brightness(1.02); }
+  100% { transform: scale(1); filter: brightness(1); box-shadow: 0 0 0 0 rgba(120, 208, 255, 0); }
+}
+
+/* v90：加入手牌的卡“滑入”演出（1s，节奏同 ±N）——底部弹起 + 过冲回稳 + 提亮 */
+.hand-card.hand-new {
+  animation: handIn 1s ease-out;
+}
+@keyframes handIn {
+  0%   { transform: translateY(16px) scale(.7); opacity: 0; filter: brightness(1.6); }
+  24%  { transform: translateY(-4px) scale(1.08); opacity: 1; filter: brightness(1.3); }
+  50%  { transform: translateY(0) scale(.98); opacity: 1; filter: brightness(1.05); }
+  75%  { transform: translateY(0) scale(1.03); }
+  100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+}
+
+/* v91：每回合抽牌入场——从屏幕最右侧滑入，落到手牌最右边（该张是手牌末位） */
+.hand-card.hand-drawn {
+  animation: handDrawIn .65s cubic-bezier(.2, .85, .3, 1);
+}
+@keyframes handDrawIn {
+  0%   { transform: translateX(110vw) scale(.9); opacity: .4; }
+  70%  { transform: translateX(-1.2vw) scale(1.03); opacity: 1; }
+  100% { transform: translateX(0) scale(1); opacity: 1; }
+}
 @keyframes pop { 0% { transform: scale(.6); opacity: .2; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
 
 /* ---------- 手牌（居中放置，两侧让位给左下/右下角按钮） ---------- */

@@ -186,6 +186,7 @@ function restart() {
   state.playerMoves = [];
   state.aiMoves = [];
   state.fieldQueue = []; // 场上放置顺序队列（v55）
+  buffFlashQueue = [];   // v80：清掉上一局遗留的“+N 演出”队列（新一局卡 id 会重新从 0 计）
   state.playHandOrder = [];
   state.players.p.zones = [[], [], []]; state.players.p.hand = [];
   state.players.a.zones = [[], [], []]; state.players.a.hand = [];
@@ -294,6 +295,7 @@ function placeToken(side, locIdx, tkDef, cnt) {
     const card = newCard(tkDef);
     card.side = side;
     card.revealed = true;
+    card.justSpawned = true; // v90：落场生成演出（凝聚显形）
     zone.push(card);
     enqueueField(card); // 落场 token：按落场先后进入放置队列（v55）
     placed++;
@@ -436,7 +438,11 @@ function roundStartStage() {
   const st = state;
   locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
   runTurnStartEffects(); // ①-1 全场“回合开始”效果（按放置队列序）
-  if (st.turn > 1) { drawOne('p'); drawOne('a'); } // ①-2 抽牌（第 1 回合的 3 张已在开局发放）
+  if (st.turn > 1) { // ①-2 抽牌（第 1 回合的 3 张已在开局发放）
+    const drawnP = drawOne('p');
+    if (drawnP) drawnP.justDrawn = true; // v91：玩家抽牌入场演出（屏幕右端滑入）
+    drawOne('a');
+  }
   st.energyTotal = Math.min(st.turn, 6);           // ①-2 能量结算
   st.energyLeft = st.energyTotal;
   st.phase = 'play';
@@ -485,8 +491,11 @@ async function playRound(gen) {
   renderAll();
 
   if (st.turn >= 6) {
-    // 阶段 ⑧：游戏结束效果（按放置队列序）→ 结算胜负（第 6 回合的 ⑤⑥⑦ 同样先于终局执行）
+    // 阶段 ⑧：游戏结束效果（按放置队列序）→ 终局演出 → 结算胜负
+    //（第 6 回合的 ⑤⑥⑦ 同样先于终局执行）
     runGameEndEffects();
+    await playEndHighlights(gen); // v85：等加减动画清空后，依左→右放大胜方总点数
+    if (gen !== state.gen) return;
     finishMatch();
     return;
   }
@@ -553,6 +562,9 @@ function tryMoveFlyTo(locIdx) {
   if (!locOpen(locIdx)) { setStatus(`「${locDef(locIdx).n}」还没开放，不能移过去。`); return true; }
   const dz = st.players.p.zones[locIdx];
   if (sideRoom('p', locIdx) < 1) { setStatus('目标区域已放满，不能移过去。'); return true; }
+  // v89：与八云紫（shift）同款的“滑行 + 缩放”飞行演出——先记录源卡当前位置
+  const srcEl = miniCardElById(card.id);
+  const srcRect = srcEl ? srcEl.getBoundingClientRect() : null;
   st.flyMovedFrom[card.id] = found.j; // 记录回合初所在区域，供“能量重置”退回
   found.zone.splice(found.zone.indexOf(card), 1);
   dz.push(card);
@@ -561,6 +573,7 @@ function tryMoveFlyTo(locIdx) {
   log('p', `⇄ 「${card.def.n}」移动到了「${st.locs[locIdx].def.n}」（本回合不可再移）。`);
   setStatus(`已把「${card.def.n}」移到「${st.locs[locIdx].def.n}」。`);
   renderAll();
+  if (srcRect) flyCardTo(card, srcRect); // 真身已在新格位，克隆飞行演出（不阻塞操作）
   return true;
 }
 
@@ -961,6 +974,116 @@ function addBuffLog(card, d, srcCard, tag) {
   card.powerLog.push({ d, src: srcCard ? { id: srcCard.id, n: srcCard.def.n, t: srcCard.def.t } : null, tag: tag || null });
 }
 
+/* ---- v80→v84：卡牌“永久 ±N 战力”的演出 ----
+   applyPermBuff 是“永久增减战力”的统一收口：改 buff + 记账 + 排队（正→绿 +N，负→红 -N）。
+   演出由 renderZones 末尾 flushBuffFlash 统一触发：对被改力且在场上已翻开的卡，
+   播放 1000ms 动画——正向绿色（+N 气泡），负向红色（-N 气泡），末段约 300ms 渐隐；
+   光环与气泡放在 body 悬浮层，不随卡面重建而中断（v83+）。 */
+let buffFlashQueue = [];
+function applyPermBuff(card, d, srcCard, tag) {
+  if (!card) return;
+  card.buff += d;
+  addBuffLog(card, d, srcCard, tag);
+  if (d !== 0) {
+    const hit = buffFlashQueue.find((q) => q.card === card);
+    if (hit) hit.d += d;
+    else buffFlashQueue.push({ card, d });
+  }
+}
+function flushBuffFlash() {
+  if (!buffFlashQueue.length) return;
+  const items = buffFlashQueue;
+  buffFlashQueue = [];
+  for (const q of items) {
+    const el = miniCardElById(q.card.id);
+    if (!el || !el.isConnected) continue; // 已不在场上（如凤凰重生回手）则不演
+    spawnPowerPop(el, q.d);
+  }
+}
+function spawnPowerPop(el, d) {
+  const gain = d > 0;
+  // 卡面本体只做短暂提亮/压暗（会被后续 renderZones 重建打断也无妨）
+  el.classList.remove('buff-gain', 'buff-loss');
+  void el.offsetWidth; // 强制 reflow，保证连续两次都能重启动画
+  el.classList.add(gain ? 'buff-gain' : 'buff-loss');
+
+  // 光环 + “±N”气泡放到 body 悬浮层：不受缩略卡重建影响，能完整播完 1s 并渐隐
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return; // 不可见（如已回手）则只做卡面闪
+  const box = document.createElement('div');
+  box.className = gain ? 'gain-ring' : 'gain-ring loss';
+  box.style.cssText =
+    `position:fixed;left:${rect.left}px;top:${rect.top}px;` +
+    `width:${rect.width}px;height:${rect.height}px;border-radius:10px;` +
+    `z-index:9400;`;
+  const pop = document.createElement('span');
+  pop.className = gain ? 'buff-gain-pop' : 'buff-gain-pop loss';
+  pop.textContent = gain ? '+' + d : String(d); // 正向 “+N”，负向 “-N”
+  box.appendChild(pop);
+  document.body.appendChild(box);
+  setTimeout(() => {
+    if (box.parentNode) box.parentNode.removeChild(box);
+    el.classList.remove('buff-gain', 'buff-loss');
+  }, 1080); // 1000ms 动画完整播完（含末段 300ms 渐隐）后清理
+}
+
+// 被摧毁时的“分崩离析”演出（v88）：把场上缩略卡切成 3×2 六块碎片，
+// 各自向外迸散、旋转并渐隐（1s，节奏参考 ±N 气泡：迅速爆发 → 缓飞 → 末段渐隐）。
+// 悬浮层放 body，不随 renderZones 重建而中断；真正的移除发生在调用之后。
+function playShatter(card) {
+  const el = miniCardElById(card.id);
+  if (!el || !el.isConnected) return;
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+  const COLS = 3, ROWS = 2;
+  const tw = rect.width / COLS;
+  const th = rect.height / ROWS;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const base = el.cloneNode(true);
+  base.removeAttribute('data-cardid'); // 克隆体不带定位属性，避免干扰按卡查找
+  base.style.width = rect.width + 'px';
+  base.style.height = rect.height + 'px';
+  base.style.margin = '0';
+  const pieces = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const tile = document.createElement('div');
+      tile.style.cssText =
+        `position:fixed;left:${rect.left + c * tw}px;top:${rect.top + r * th}px;` +
+        `width:${tw}px;height:${th}px;overflow:hidden;pointer-events:none;` +
+        `z-index:9400;border-radius:2px;`;
+      const shard = base.cloneNode(true);
+      shard.style.position = 'absolute';
+      shard.style.left = (-c * tw) + 'px';
+      shard.style.top = (-r * th) + 'px';
+      tile.appendChild(shard);
+      document.body.appendChild(tile);
+      // 每块沿“卡片中心指向该块中心”的方向迸散
+      const pcx = rect.left + c * tw + tw / 2;
+      const pcy = rect.top + r * th + th / 2;
+      const nLen = Math.max(1, Math.hypot(pcx - cx, pcy - cy));
+      const dist = 30 + Math.random() * 78;
+      const dx = ((pcx - cx) / nLen) * dist + (Math.random() - 0.5) * 36;
+      const dy = ((pcy - cy) / nLen) * dist + (Math.random() - 0.5) * 40 - 16; // 轻微上抛
+      const rot = (Math.random() - 0.5) * 70;
+      const kf = [
+        { transform: 'translate(0px,0px) rotate(0deg) scale(1)', opacity: 1, offset: 0 },
+        { transform: `translate(${dx * .1}px, ${dy * .1}px) rotate(${rot * .1}deg) scale(1.03)`, opacity: 1, offset: .12 },
+        { transform: `translate(${dx * .5}px, ${dy * .5}px) rotate(${rot * .45}deg) scale(.95)`, opacity: 1, offset: .42 },
+        { transform: `translate(${dx * .82}px, ${dy * .82}px) rotate(${rot * .9}deg) scale(.85)`, opacity: 1, offset: .68 },
+        { transform: `translate(${dx * 1.18}px, ${dy * 1.18}px) rotate(${rot * 1.25}deg) scale(.55)`, opacity: 0, offset: 1 },
+      ];
+      const anim = tile.animate(kf, { duration: 1000, easing: 'cubic-bezier(.22,.7,.3,1)' });
+      anim.finished.catch(() => {}).then(() => {
+        if (tile.parentNode) tile.parentNode.removeChild(tile);
+      });
+      pieces.push(tile);
+    }
+  }
+  return pieces;
+}
+
 // 区域免摧毁（def.prot，现仅蕾蒂）：本区域存在“已翻开且仍在场”的 prot 卡时，
 // 该区域（**双方**）所有在场卡牌均无法被摧毁——针对本区域的任何“摧毁”指向
 // （dw / dwh / 回合末摧毁 purge 等）一律失效；被保护卡不会离场，
@@ -984,8 +1107,7 @@ function locNoDestroy(locIdx) {
 function surviveDestroy(card) {
   const surv = card && card.def && card.def.surv;
   if (!surv) return false;
-  card.buff -= surv;
-  addBuffLog(card, -surv, null, '防摧毁');
+  applyPermBuff(card, -surv, null, '防摧毁'); // 永久 -N（红色 -N 演出）
   const locIdx = fieldLocOf(card);
   log('danger', `💥 「${card.def.n}」被摧毁时触发了防摧毁：没有被摧毁，取而代之永久降低 ${surv} 点战力（现 ${locIdx >= 0 ? cardPowerIn(locIdx, card) : cardPower(card)}）。`);
   return true;
@@ -1005,8 +1127,7 @@ function phoenixRevive(card, locIdx) {
   if (i >= 0) zone.splice(i, 1);
   dequeueField(card); // 离开场上：移出放置队列（回手后再打出时重新入队）
   if (st.players[side].hand.length < 7) {
-    card.buff += phx;
-    addBuffLog(card, phx, null, '凤凰重生');
+    applyPermBuff(card, phx, null, '凤凰重生');
     card.revealed = false; // 回手后再次打出需重新暗出/翻面
     st.players[side].hand.push(card);
     log('danger', `🔥 「${card.def.n}」被摧毁时触发凤凰重生：返回手牌并永久 +${phx} 战力（下次打出威力 ${cardPower(card)}）。`);
@@ -1135,28 +1256,28 @@ function applyEffect(side, locIdx, card, spec) {
     case 'bf': {
       // 只作用于“结算时已翻开”的其他友军：暗牌不会预领增益（后翻开的牌错过本次结算）
       let n = 0;
-      for (const c of mine) if (c !== card && !c.def.un && c.revealed) { c.buff += fx.a; addBuffLog(c, fx.a, card); n++; }
+      for (const c of mine) if (c !== card && !c.def.un && c.revealed) { applyPermBuff(c, fx.a, card); n++; }
       log(side, `✦ ${txt}${n ? `（影响 ${n} 张）` : '（但该区没有已翻开的其他友军）'}`);
       break;
     }
     case 'de': {
       // 只削弱“结算时已翻开”的对方卡牌：对方暗牌不会提前被降
       let n = 0;
-      for (const c of theirs) { if (c.def.un || !c.revealed) continue; c.buff -= fx.a; addBuffLog(c, -fx.a, card); n++; }
+      for (const c of theirs) { if (c.def.un || !c.revealed) continue; applyPermBuff(c, -fx.a, card); n++; }
       log(side, `✦ ${txt}${n ? `（影响 ${n} 张）` : '（但没有已翻开的对方卡牌可影响）'}`);
       break;
     }
     case 'ba': {
       // 双方同增同样只作用于结算时已翻开的卡牌
-      for (const c of mine) if (!c.def.un && c.revealed) { c.buff += fx.a; addBuffLog(c, fx.a, card); }
-      for (const c of theirs) if (!c.def.un && c.revealed) { c.buff += fx.a; addBuffLog(c, fx.a, card); }
+      for (const c of mine) if (!c.def.un && c.revealed) applyPermBuff(c, fx.a, card);
+      for (const c of theirs) if (!c.def.un && c.revealed) applyPermBuff(c, fx.a, card);
       log(side, `✦ ${txt}`);
       break;
     }
     case 'bl': {
       const myT = zoneEff(side, locIdx);
       const opT = zoneEff(other, locIdx);
-      if (myT < opT) { card.buff += fx.a; addBuffLog(card, fx.a, card); log(side, `✦ 落后触发：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`); }
+      if (myT < opT) { applyPermBuff(card, fx.a, card); log(side, `✦ 落后触发：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`); }
       else log(side, `✦ ${def.n} 未落后，效果不触发。`);
       break;
     }
@@ -1173,6 +1294,7 @@ function applyEffect(side, locIdx, card, spec) {
       }
       if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      playShatter(target); // 分崩离析演出（v88）
       theirs.splice(theirs.indexOf(target), 1);
       dequeueField(target); // 被摧毁：移出放置队列（后续时机不再结算它）
       log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${minP}）`);
@@ -1221,6 +1343,7 @@ function applyEffect(side, locIdx, card, spec) {
             const c2 = newCard(tk);
             c2.side = side;
             c2.revealed = true;
+            c2.justSpawned = true; // v90：分身生成演出
             c2.buff += snap - c2.def.p; // 快照对齐本体揭示时战力
             addBuffLog(c2, snap - c2.def.p, null, '分身快照'); // 记入战力影响历史
             zone.push(c2);
@@ -1356,6 +1479,7 @@ function applyEffect(side, locIdx, card, spec) {
           if (hand.length >= 7) break;
           const c2 = newCard(tk);
           c2.side = side;
+          c2.justHandAdded = true; // v90：加入手牌演出
           hand.push(c2);
           added++;
         }
@@ -1376,6 +1500,7 @@ function applyEffect(side, locIdx, card, spec) {
       }
       if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      playShatter(target); // 分崩离析演出（v88）
       theirs.splice(theirs.indexOf(target), 1);
       dequeueField(target); // 被摧毁：移出放置队列（后续时机不再结算它）
       log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${maxP}）`);
@@ -1386,8 +1511,7 @@ function applyEffect(side, locIdx, card, spec) {
       const oppMoves = side === 'p' ? st.aiMoves : st.playerMoves;
       const present = oppMoves.some((m) => m.loc === locIdx);
       if (present) {
-        card.buff += fx.a;
-        addBuffLog(card, fx.a, card);
+        applyPermBuff(card, fx.a, card);
         log(side, `✦ 对方本回合在本区放过牌：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`);
       } else {
         log(side, `✦ 对方本回合没有在本区放牌，${def.n} 效果未触发。`);
@@ -1416,6 +1540,43 @@ function applyEffect(side, locIdx, card, spec) {
 
 /* ---------------- 终局结算 ---------------- */
 
+// v85→v87 终局演出：先等场上遗留的 ±N 加减动画（.gain-ring 悬浮层）全部播完，
+// 再依“左→右”顺序依次把每个区域的【胜方总点数横幅】做 700ms 放大高亮，
+// 区域之间间隔 150ms；全部结束后才允许弹结算弹窗（由调用方 finishMatch 触发）。
+function zoneWinnerSide(j) {
+  const eP = zoneEff('p', j); // 与横幅/结算同口径（反转区按低者胜）
+  const eA = zoneEff('a', j);
+  if (eP > eA) return 'p';
+  if (eA > eP) return 'a';
+  return null; // 平点无胜方
+}
+async function waitBuffFxDone(timeoutMs) {
+  const limit = timeoutMs || 1600;
+  const t0 = Date.now();
+  while (Date.now() - t0 < limit) {
+    if (!document.querySelector('.gain-ring') && buffFlashQueue.length === 0) return;
+    await sleep(40);
+  }
+}
+async function playEndHighlights(gen) {
+  await waitBuffFxDone(); // “所有的动画结束”后再开始
+  if (gen !== state.gen) return;
+  for (let j = 0; j < 3; j++) {
+    const win = zoneWinnerSide(j);
+    if (!win) continue; // 平局区域：无胜方点数可放大
+    const pill = (win === 'p' ? Game._els.totP[j] : Game._els.totA[j]).closest('.loc-total');
+    if (!pill) continue;
+    pill.classList.remove('settle-win');
+    void pill.offsetWidth; // 重启动画
+    pill.classList.add('settle-win');
+    if (gen !== state.gen) return;
+    await sleep(700); // 放大动画 700ms
+    if (gen !== state.gen) return;
+    pill.classList.remove('settle-win');
+    if (j < 2) await sleep(150); // 区域之间间隔 150ms（v87）
+  }
+}
+
 // 回合结束摧毁（purge：如聚变反应炉）：每回合翻牌结算后，把本区域“全场”战力最低的
 // 卡牌摧毁（敌我双方所有已翻开卡混比；并列最低的一并摧毁）。
 // 带防摧毁（def.surv，如灵乌路空）的卡不会离场，改为永久降 N 战力（见 surviveDestroy）。
@@ -1437,6 +1598,7 @@ function reactorPurge() {
     for (const c of doomed) {
       if (phoenixRevive(c, j)) continue; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(c)) continue; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      playShatter(c); // 分崩离析演出（v88）
       const inP = zoneP.indexOf(c) >= 0;
       if (inP) zoneP.splice(zoneP.indexOf(c), 1);
       else zoneA.splice(zoneA.indexOf(c), 1);
@@ -1670,6 +1832,7 @@ function miniCardEl(card, locIdx, side) {
   el.className = 'mini-card' + (card.justRevealed ? ' played-now' : '');
   el.dataset.cardid = String(card.id); // 供“飞行演出”（flyCardTo）按卡定位格位
   if (card.justRevealed) card.justRevealed = false;
+  if (card.justSpawned) { el.classList.add('spawned-now'); card.justSpawned = false; } // v90 生成演出
   const grad = card.revealed ? gradOf(card.def) : BACK_GRAD;
   el.style.setProperty('--cgrad', grad);
   if (!card.revealed) {
@@ -1748,6 +1911,7 @@ function renderZones() {
     // 未开放区域加灰色遮罩（如七夕坂第 5 回合前）
     Game._els.cols[j].classList.toggle('locked', !!locDef(j).minTurn && !locOpen(j));
   }
+  flushBuffFlash(); // v80：本次渲染后触发“永久 +N”绿色动画（bf/ba/bl/oc/phx 等收口排队）
 }
 
 /* 把区域的一侧 2×2 格位按规则填充：
@@ -1824,6 +1988,8 @@ function renderHand() {
     const afford = card.def.c <= st.energyLeft;
     if (!afford) el.classList.add('unaffordable');
     if (st.selected === index) el.classList.add('selected');
+    if (card.justHandAdded) { el.classList.add('hand-new'); card.justHandAdded = false; } // v90 加入手牌演出
+    if (card.justDrawn) { el.classList.add('hand-drawn'); card.justDrawn = false; } // v91 抽牌入场演出
     // 终局复盘（over）时手牌保持原色且可点击查看，其余非出牌阶段置灰
     if (st.phase !== 'play' && st.phase !== 'over') el.classList.add('unaffordable');
     el.style.setProperty('--cgrad', gradOf(card.def));
@@ -1959,6 +2125,7 @@ function uiOnPickConfirm() {
   const name = pickDef.n;
   const card = newCard(pickDef);
   card.side = 'p';
+  card.justHandAdded = true; // v90：加入手牌演出
   pl.hand.push(card);
   log('sys', `🎯 开发者指令：指定「${name}」加入你的手牌（现 ${pl.hand.length}/7）。`);
   setStatus(`已将「${name}」加入手牌（${pl.hand.length}/7）。`);
