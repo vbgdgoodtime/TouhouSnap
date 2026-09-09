@@ -26,7 +26,7 @@
            （双方、特殊卡）威力 +N（常驻实时，见 game.js locAllBonus）。
      purge= 可选：true 表示回合结束摧毁——每回合翻牌结算后，摧毁本区域
            “全场”（敌我混比）战力最低的卡牌，并列最低一并摧毁（见 game.js reactorPurge）。
-   每局会从该池中随机抽取 3 块互不相同的区域（池中种类不足 3 时才可能出现重复）。
+   每局会从该池中按 pick 权重不放回抽 3 块互不相同的区域（池中种类不足 3 时才可能出现重复）。
    新增场地：直接向下方数组追加一条即可，无需改 game.js。
    ========================================================= */
 window.DS_LOCATIONS = {
@@ -37,7 +37,7 @@ window.DS_LOCATIONS = {
     { id: 'rainbow', n: '虹龙洞', icon: '🕳️', wt: 1, dbl: 1, max: 4, eff: '区域出现时：双方各生成 1 张「石块」', spawn: { card: 'stone', n: 1 } },
     { id: 'dragon',  n: '龙神像', icon: '🐉', wt: 1, dbl: 1, max: 4, fill: 5, eff: '放满 4 张的一方：本区战力额外 +5' },
     { id: 'lake',    n: '雾之湖', icon: '🌅', wt: 1, dbl: 1, max: 4, cb: { c: 1, add: 2 }, eff: '此区域所有 1 费卡牌 威力 +2' },
-    { id: 'needle',  n: '辉针城', icon: '🏯', wt: 1, dbl: 1, max: 4, inv: true, eff: '本区域战力更低的一方获胜' },
+    { id: 'needle',  n: '辉针城', icon: '🏯', wt: 1, dbl: 1, max: 4, inv: true, pick: 0.28, eff: '本区域战力更低的一方获胜' },
     { id: 'tanabata', n: '七夕坂', icon: '🌠', wt: 1, dbl: 1, max: 4, minTurn: 5, eff: '第 5 回合起双方才能在此放牌' },
     { id: 'underworld', n: '冥界', icon: '🪦', wt: 1, dbl: 1, max: 4, all: -2, eff: '此区域所有卡牌 威力 -2' },
     { id: 'reactor', n: '聚变反应炉', icon: '🔥', wt: 1, dbl: 1, max: 4, purge: true, eff: '每回合结束：摧毁本区全场战力最低的牌（并列全删）' },

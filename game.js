@@ -169,11 +169,26 @@ function restart() {
   for (let i = 0; i < 3; i++) drawOne('p');
   for (let i = 0; i < 3; i++) drawOne('a');
 
-  // 选 3 块区域：每局从区域池中抽 3 块，保证三块互不相同（不重复）。
+  // 选 3 块区域：按抽选权重（pick，默认 1）不放回抽 3 块，保证互不相同；
+  // 辉针城 pick 0.28 → 每局出现率约 10%（约 10 局 1 次）。
   // 区域池不足 3 种时退回旧逻辑（允许重复、仅避免三块完全相同）作兜底。
   let picks;
   if (LOCATION_POOL.length >= 3) {
-    picks = shuffle(LOCATION_POOL.slice()).slice(0, 3);
+    picks = [];
+    const remain = LOCATION_POOL.slice();
+    while (picks.length < 3 && remain.length > 0) {
+      let total = 0;
+      for (const d of remain) total += d.pick || 1;
+      if (!(total > 0)) break;
+      let r = Math.random() * total;
+      let idx = 0;
+      for (let i = 0; i < remain.length; i++) {
+        const w = remain[i].pick || 1;
+        if (r < w) { idx = i; break; }
+        r -= w;
+      }
+      picks.push(remain.splice(idx, 1)[0]);
+    }
   } else {
     picks = [];
     while (picks.length < 3) {
@@ -573,10 +588,19 @@ function aiThink() {
     if (affordable.length === 0) break;
     const cands = [];
     for (const card of affordable) {
+      // AI 策略：区域变形到辉针城的卡（鬼人正邪）只在自己落后该区 ≥10 点时考虑
+      const isNeedle = card.def.k === 'xform' && card.def.xf === 'needle';
       for (let j = 0; j < 3; j++) {
         if (pl.zones[j].length >= locDef(j).max) continue;
         if (!locOpen(j)) continue;
-        cands.push({ card, loc: j, score: hypotheticScore(card, j) });
+        if (isNeedle) {
+          const myT = zoneTotals('a', j, true);
+          const opT = zoneTotals('p', j, true);
+          if (opT - myT < 10) continue; // 落后不足 10 点：本回合不打
+        }
+        let sc = hypotheticScore(card, j);
+        if (locDef(j).purge) sc *= 0.25; // 聚变反应炉：权重 -75%，尽量少打
+        cands.push({ card, loc: j, score: sc });
       }
     }
     if (cands.length === 0) break;
@@ -646,12 +670,61 @@ async function revealRound() {
     card.justRevealed = true;
     renderZones(); // 翻面后该牌战力才计入区域总点数
     log(mv.side, `「${card.def.n}」翻牌 — 威力 ${cardPowerIn(mv.loc, card)}`);
-    if (card.def.k) applyEffect(mv.side, mv.loc, card);
+    if (card.def.k) {
+      // 只有效果“真的会造成变化”时才停顿展示（如对方/己方没有已翻开卡可被加减时直接结算）
+      if (revealEffectWillChange(mv.side, mv.loc, card)) await sleep(400);
+      applyEffect(mv.side, mv.loc, card);
+    }
     renderZones();
-    await sleep(780);
+    await sleep(500); // 效果结算后停顿，再进入下一张翻牌
   }
   st.playerMoves = [];
   st.aiMoves = [];
+}
+
+// 预判：该牌的“现身”效果是否真的会造成数值/盘面变化
+// （用于跳过“结算前 500ms 停顿”——如对没有已翻开卡的区域打增减、条件不满足等空转情况）
+function revealEffectWillChange(side, locIdx, card) {
+  const st = state;
+  const other = side === 'p' ? 'a' : 'p';
+  const mine = st.players[side].zones[locIdx];
+  const theirs = st.players[other].zones[locIdx];
+  const def = card.def;
+  const vis = theirs.filter((c) => c.revealed && !c.def.un);
+  switch (def.k) {
+    case 'bf': return mine.some((c) => c !== card && !c.def.un && c.revealed);
+    case 'de': return vis.length > 0;
+    case 'ba': return true; // 至少自己已翻开会吃到 +N
+    case 'bl': return zoneEff(side, locIdx) < zoneEff(other, locIdx);
+    case 'dw':
+    case 'dwh': return vis.length > 0;
+    case 'mv': {
+      if (vis.length === 0) return false;
+      for (let j = 0; j < 3; j++) {
+        if (j !== locIdx && locOpen(j) && st.players[other].zones[j].length < locDef(j).max) return true;
+      }
+      return false;
+    }
+    case 'spawn': {
+      const sp = def.spawn;
+      const tk = sp && TOKENS[sp.card];
+      if (!tk) return false;
+      const cnt = sp.n || 1;
+      const room = (s) => Math.min(cnt, locDef(locIdx).max - st.players[s].zones[locIdx].length);
+      return room(side) + room(other) > 0;
+    }
+    case 'give': return st.players[side].hand.length < 7;
+    case 'xform': {
+      const t = LOCATION_POOL.find((l) => l.id === def.xf);
+      if (!t) return false;
+      return !(['p', 'a'].some((s) => st.players[s].zones[locIdx].length > t.max));
+    }
+    case 'oc': {
+      const opp = side === 'p' ? st.aiMoves : st.playerMoves;
+      return opp.some((m) => m.loc === locIdx);
+    }
+    default: return false;
+  }
 }
 
 function applyEffect(side, locIdx, card) {
