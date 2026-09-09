@@ -549,6 +549,13 @@ body {
   transform-origin: center;
   overflow: hidden;
 }
+/* 大体积卡：占满整侧 2×2 格位（occ>1，如伊吹萃香占满 4 格） */
+.mini-card.big-occ {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(46, 78, 40, .4), inset 0 0 0 1px rgba(255,255,255,.3), 0 0 0 3px rgba(242, 201, 76, .35);
+}
 /* 费用（左上角，白色） */
 .mini-card .mc-cost {
   position: absolute; top: 4px; left: 5px;
@@ -911,9 +918,55 @@ body {
   .zoom-deriv { width: min(320px, 92vw); }
 }
 
+/* ===== 衍生卡牌区显示修复（v62）：桌面加宽详情弹窗 + 衍生卡自适配尺寸 ===== */
+/* 衍生小卡不能沿用放大主卡 240px 艺术区（会超出 180px 卡宽被裁/溢出），单独收窄； */
+/* 详情弹窗整体放宽，保证“本体卡 + 衍生卡”两列都能完整展示。 */
+.zoom-stage { width: min(880px, 96vw); }
+.zoom-row { justify-content: center; }
+.zoom-main-col { flex: 1 1 auto; }
+.zoom-deriv { flex-shrink: 0; min-width: 300px; align-self: stretch; }
+.deriv-card { width: 260px; }
+.deriv-card .hc-art { width: 224px; margin: 6px auto 4px; }
+.deriv-card .hc-art .hc-icon { font-size: 46px; }
+.deriv-card .hc-top .cost-orb, .deriv-card .hc-top .p { width: 34px; height: 34px; font-size: 16px; }
+.deriv-card .hc-name { font-size: 17px; }
+.deriv-card .hc-text { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+
 /* 放大/手牌卡面上的增减益威力配色 */
 .hand-card .p.up { color: #4ade8f; border-color: #4ade8f; }
 .hand-card .p.down { color: #ff6d6d; border-color: #ff6d6d; }
+
+/* ===== 战力影响历史面板（v56）：独立于卡牌详情弹窗、同遮罩并排显示 ===== */
+.zoom-mask { gap: 24px; flex-wrap: wrap; align-items: center; align-content: center; padding: 18px; overflow: auto; }
+.power-panel {
+  width: min(360px, 92vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #f8fcf1, #e5efd9);
+  border: 1px solid rgba(126, 168, 118, .55);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(46, 78, 40, .3);
+  padding: 16px 18px 14px;
+  text-align: left;
+  animation: rise .3s ease;
+  align-self: flex-start;
+}
+.power-panel .pp-head { font-size: 14px; font-weight: 800; letter-spacing: 2px; color: #2e4527; }
+.power-panel .pp-name { font-size: 12px; color: #64805c; margin: 4px 0 10px; padding-bottom: 8px; border-bottom: 1px dashed rgba(126, 168, 118, .5); }
+.pp-rows { display: flex; flex-direction: column; gap: 6px; }
+.pp-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 5px 10px; border-radius: 8px;
+  background: rgba(122, 158, 110, .08);
+  font-size: 14px; line-height: 1.5;
+}
+.pp-row .pp-num { font-weight: 800; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.pp-row .pp-lab { color: #4a5f44; flex: 1; }
+.pp-row.up .pp-num { color: #1f9e57; }    /* 提高 +N：绿 */
+.pp-row.down .pp-num { color: #e03131; }  /* 降低 −N：红 */
+.pp-row.base .pp-num { color: #2e4527; }
+.pp-row.pp-total { margin-top: 4px; border-top: 1px dashed rgba(126, 168, 118, .5); border-radius: 0 0 8px 8px; font-weight: 800; background: rgba(122, 158, 110, .16); }
+.pp-row.pp-total .pp-num { color: #2e4527; }
 
 /* ============ 卡牌图片素材（cards-image/） ============ */
 /* 手牌/图鉴/放大卡面：图片占方形艺术区；缺图时垫底 emoji 透出 */

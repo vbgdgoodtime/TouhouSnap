@@ -52,7 +52,7 @@
         <div class="avatar-row">
           <div class="avatar av-ai">🤖</div>
           <div class="mini-stats">
-            <div>已打 <span id="aiCount">0</span> 张</div>
+            <div>手上还有 <span id="aiCount">3</span> 张</div>
             <div>牌库 <span id="aiDeck">12</span> 张</div>
           </div>
         </div>
@@ -63,7 +63,7 @@
         <ul>
           <li>共 6 回合，能量逐回合 +1（上限 6）。</li>
           <li>每回合可把多张牌暗出到各区域，总费用不超能量；出完点「结束回合」。</li>
-          <li>出牌结束后翻牌结算「现身」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>
+          <li>出牌结束后翻牌结算「揭示」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>
           <li>每区域比总战力：若出现平局区域，按三区域总点数高低决胜；无平局时赢下区域多者获胜。</li>
           <li>「双倍下注」可把赌注翻倍（上限 8），回合结算时赢家拿走赌注。</li>
         </ul>
@@ -141,6 +141,13 @@
       </div>
       <button class="btn btn-primary" onclick="Game.ui.closeZoom()">← 返回图鉴</button>
     </div>
+
+    <!-- 战力影响历史：独立于卡牌详情弹窗、同遮罩并排；仅场上已翻开卡查看时显示 -->
+    <section class="power-panel hidden" id="powerPanel">
+      <div class="pp-head">⚡ 战力影响历史</div>
+      <div class="pp-name" id="ppName"></div>
+      <div class="pp-rows" id="ppRows"></div>
+    </section>
   </div>
 
   <!-- 重置本回合暗牌：确认弹窗 -->

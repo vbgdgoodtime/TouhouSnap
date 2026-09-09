@@ -1,7 +1,10 @@
 /* =========================================================
    东方逆转 · 极简演示 —— Marvel Snap 玩法 · 东方 Project 换皮
    3 区域 / 6 回合 / 能量预算多张出牌 / 暗牌翻面 /
-   现身效果 / 区域特效 / 双倍下注(snap) / 认输 / 重置暗牌
+   揭示效果 / 区域特效 / 双倍下注(snap) / 认输 / 重置暗牌
+   流程阶段管线：游戏开始 → 每回合(回合开始效果/能量抽牌/放置移动/
+   翻牌揭示结算/全场回合结束/区域回合末/手牌回合末) → 游戏结束效果 → 结算胜负
+   （v54 拆分显式阶段 / v55 加入场上放置顺序队列 + fx 时机效果；详见 playRound 上方注释）
    ========================================================= */
 'use strict';
 
@@ -70,7 +73,7 @@ function locAllBonus(locIdx, card) {
   if (!card || card.def.un) return 0;
   return locDef(locIdx).all || 0;
 }
-// 在场光环（og，如比那名居天子）：该卡已翻开且仍在己方某区时，
+// 持续效果（og，原「在场光环」，如比那名居天子）：该卡已翻开且仍在己方某区时，
 // 己方所有带匹配 tk 标记的卡牌（如己方石块）常驻 +N。动态读取：源卡被摧毁即消失。
 function cardAuraBonus(card) {
   if (!card || !card.def.tk || !card.side) return 0;
@@ -82,19 +85,25 @@ function cardAuraBonus(card) {
   }
   return b;
 }
-// 卡牌在指定区域的实时战力 = 基础威力 + 永久增益 + 区域加成（阵营/费用/全区）+ 在场光环
+// 卡牌在指定区域的实时战力 = 基础威力 + 永久增益 + 区域加成（阵营/费用/全区）+ 持续效果
 function cardPowerIn(locIdx, card) {
   return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card) + cardAuraBonus(card);
 }
-// 区域总点数：默认只统计“已翻开”的牌（暗牌不计入，翻面后才计入）。
-// includeHidden=true 用于 AI 决策估值（AI 能看到完整盘面）。
-// 放满加成：区域 fill=N 时，某一方在本区实际放满 max 张（含暗牌，即 4/4）则该方
-// 总战力额外 +N；因摧毁/撤回等原因不足 max 张时立即不生效（4→3 不加）。
+// ---- 占格（occ）口径：普通卡占 1 格；大体积卡（如伊吹萃香 occ:4）占满多格 ----
+// 出牌/生成/移动/放满等所有“还能放几张”的判定统一走这里，避免只用 zone.length 误判。
+function occOf(card) { return (card && card.def && card.def.occ) || 1; }
+function sideUsed(side, locIdx) { return state.players[side].zones[locIdx].reduce((s, c) => s + occOf(c), 0); }
+function sideRoom(side, locIdx) { return locDef(locIdx).max - sideUsed(side, locIdx); }
+// 大体积卡只允许放入“上限恰为其占格数”的区域（如 occ4 只能进 max=4）
+function occZoneOk(card, locIdx) { return occOf(card) <= 1 || locDef(locIdx).max === occOf(card); }
+// 放满加成：区域 fill=N 时，某一方在本区实际占满 max 格（含大体积卡，如 4/4）则该方
+// 总战力额外 +N；因摧毁/撤回等原因不足 max 格时立即不生效（4→3 不加）。
 function zoneFillBonus(side, locIdx) {
   const def = locDef(locIdx);
   if (!def.fill) return 0;
-  return state.players[side].zones[locIdx].length >= def.max ? def.fill : 0;
+  return sideUsed(side, locIdx) >= def.max ? def.fill : 0;
 }
+// 区域总点数：默认只统计“已翻开的牌”（暗牌不计入，翻面后才计入）；includeHidden=true 供 AI 估值。
 function zoneTotals(side, locIdx, includeHidden) {
   return state.players[side].zones[locIdx].reduce(
     (s, c) => (includeHidden || c.revealed ? s + cardPowerIn(locIdx, c) : s),
@@ -133,6 +142,7 @@ const state = {
   selected: -1,        // 手牌下标
   playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc}]
   aiMoves: [],         // 本回合对手已暗出的牌
+  fieldQueue: [],      // 场上放置顺序队列：双方卡牌按“放入场上”先后记录（v55），供回合开始/结束/终局按序结算
   playHandOrder: [],   // 本回合开始时玩家手牌 id 顺序（供重置暗牌时恢复）
   moveCardId: null,    // “每回合可移动一次”的牌：当前正在选目标区域的卡 id
   flyMoved: new Set(), // 本回合已自移过的卡 id（如射命丸文）
@@ -157,6 +167,7 @@ function restart() {
   state.selected = -1;
   state.playerMoves = [];
   state.aiMoves = [];
+  state.fieldQueue = []; // 场上放置顺序队列（v55）
   state.playHandOrder = [];
   state.players.p.zones = [[], [], []]; state.players.p.hand = [];
   state.players.a.zones = [[], [], []]; state.players.a.hand = [];
@@ -221,6 +232,7 @@ function restart() {
     }
     log('sys', `${loc.def.icon}「${loc.def.n}」出现：双方各生成 ${cnt} 张「${def.n}」，已落场翻开。`);
   });
+  runGameStartEffects(); // ⓪ 游戏开始效果挂点（现无注册效果）：第 1 回合开始前执行
   renderAll();
   playRound(gen);
 }
@@ -247,14 +259,16 @@ function buildDeckCards() {
 
 function newCard(defProto) {
   const def = { ...defProto };
-  return { id: uid(), def, buff: 0, revealed: false, justRevealed: false };
+  // powerLog：战力影响历史台账（v56）——记录该卡受到的“永久 buff”来源明细，
+  // 由效果结算写入（bf/de/ba/bl/oc 等）；区域加成/持续效果为实时派生，不进台账。
+  return { id: uid(), def, buff: 0, powerLog: [], revealed: false, justRevealed: false };
 }
 
 function drawOne(side) {
   const pl = state.players[side];
   if (pl.deck.length === 0 || pl.hand.length >= 7) return null;
   const card = pl.deck.pop();
-  card.side = side; // 记属方：供“在场光环”等按己方判定
+  card.side = side; // 记属方：供“持续效果”等按己方判定
   pl.hand.push(card);
   return card;
 }
@@ -264,21 +278,118 @@ function placeToken(side, locIdx, tkDef, cnt) {
   let placed = 0;
   const zone = state.players[side].zones[locIdx];
   for (let i = 0; i < cnt; i++) {
-    if (zone.length >= locDef(locIdx).max) break;
+    if (sideRoom(side, locIdx) < 1) break; // 按占格口径（大体积卡占满时无法再落）
     const card = newCard(tkDef);
     card.side = side;
     card.revealed = true;
     zone.push(card);
+    enqueueField(card); // 落场 token：按落场先后进入放置队列（v55）
     placed++;
   }
   return placed;
 }
 
-async function playRound(gen) {
-  if (gen !== state.gen) return;
+/* ========================================================
+   流程阶段管线（v54→v55：主循环按显式阶段执行；v55 加入
+   “场上放置顺序队列”，供时机类效果按双方放置先后结算）：
+   游戏开始 restart：建牌库 → 发初始手牌 → 抽选 3 区域 → 区域“出现时”生成
+     → runGameStartEffects（⓪ 开局效果挂点，现空）→ 第 1 回合
+   每回合 playRound 依次：
+     ① roundStart：runTurnStartEffects（全场“回合开始”效果，按放置队列序结算）
+                   → 能量结算 + 抽牌（回合 2+，第 1 回合的 3 张已在开局发放）
+                   → 清空回合临时状态
+     ② 玩家放置与移动（waitPlayer：出牌 / 移动 / 重置 / 双倍 / 认输均在此阶段）
+     ③ 对手放置（aiThink）
+     ④ revealRound：翻开暗牌，逐张按放置顺序结算「揭示」效果
+     ⑤ runTurnEndEffects：全场“回合结束”效果（按放置队列序结算）
+     ⑥ runZoneEndEffects：区域回合结束效果（现：purge 型，如聚变反应炉）
+     ⑦ runHandEndEffects：手牌回合结束效果（挂点，现空）
+   第 6 回合 ⑤⑥⑦ 之后：
+     ⑧ runGameEndEffects：全场“游戏结束”效果（按放置队列序）→ finishMatch 结算胜负
+   注：①⑤⑧ 结算的都是“带时机效果 fx 的场上卡牌”，先后顺序 = 场上放置顺序队列
+       （双方卡牌放入场上的先后，谁先放谁先结算）；新机制的数值/盘面修改写进对应
+       阶段函数；与暗牌口径、重置(undo)、AI 估值的交互规则随该机制一并定义。
+   ======================================================== */
+
+// fx 时机键：卡牌 def 可用 fx = { turnStart?, turnEnd?, gameEnd? } 声明“回合开始 /
+// 回合结束 / 游戏结束”时触发的效果；每个条目与揭示 def 同构（k/a/spawn/xf/give/t）。
+
+// ---- 场上放置顺序队列（v55）----
+// 记录双方卡牌“放入场上”的先后（含开局/效果生成的落场特殊卡，如石块），供时机类
+// 效果（回合开始/回合结束/游戏结束）按“谁先放谁先结算”遍历。
+// 入队：手牌打出（玩家/AI）、placeToken 落场；出队：被摧毁、重置暗牌撤回手牌。
+// 移动（mv / fly）只是换区域，不改变放置顺序。
+function enqueueField(card) { state.fieldQueue.push(card); }
+function dequeueField(card) {
+  const i = state.fieldQueue.indexOf(card);
+  if (i >= 0) state.fieldQueue.splice(i, 1);
+}
+// 场上某张卡当前所在区域下标（按其属方查）；不在场上返回 -1（防御）
+function fieldLocOf(card) {
+  const pl = state.players[card.side];
+  if (!pl) return -1;
+  for (let j = 0; j < 3; j++) if (pl.zones[j].indexOf(card) >= 0) return j;
+  return -1;
+}
+// 按放置队列先后，结算全场卡牌在指定时机的 fx 效果（只有带该时机效果的卡才触发）
+function resolveTimedEffects(timing) {
+  for (const card of state.fieldQueue.slice()) { // 快照：结算中可能增删卡（spawn/摧毁）
+    const fx = card.def.fx && card.def.fx[timing];
+    if (!fx || !fx.k) continue;
+    const locIdx = fieldLocOf(card);
+    if (locIdx < 0) continue; // 防御：已不在场上
+    applyEffect(card.side, locIdx, card, fx);
+  }
+}
+
+// 阶段挂点 ⓪：游戏开始效果 —— restart 完成建库/发牌/选区/区域生成后、第 1 回合前执行（现无注册效果）
+function runGameStartEffects() {}
+
+// 阶段 ①-a：全场“回合开始”效果 —— 每回合最先执行（先于能量结算与抽牌），
+// 按场上放置顺序队列先后结算各卡 def.fx.turnStart（现无卡注册该时机效果）
+function runTurnStartEffects() {
+  resolveTimedEffects('turnStart');
+}
+
+// 阶段 ⑤：全场“回合结束”效果 —— 每回合翻牌结算后执行，
+// 按场上放置顺序队列先后结算各卡 def.fx.turnEnd（现无卡注册该时机效果）
+function runTurnEndEffects() {
+  resolveTimedEffects('turnEnd');
+}
+
+// 阶段 ⑥：区域回合结束效果 —— 每回合翻牌结算后执行（含第 6 回合、终局结算前）。
+// 现仅「purge」型区域（聚变反应炉，见 reactorPurge）；后续新机制在此追加。
+function runZoneEndEffects() {
+  reactorPurge();
+}
+
+// 阶段 ⑦：手牌回合结束效果 —— 区域回合末之后执行（现无注册效果）
+function runHandEndEffects() {}
+
+// 阶段 ⑧：全场“游戏结束”效果 —— 第 6 回合所有阶段结束后、结算胜负前执行：
+// 1) 按场上放置顺序队列先后结算各卡 def.fx.gameEnd；
+// 2) 带 leave 的卡（如稗田阿求）终局离场：从场上消失（非摧毁，不触发摧毁类机制、
+//    增益随卡一并消失），不再计入终局结算。
+function runGameEndEffects() {
+  resolveTimedEffects('gameEnd');
+  for (const card of state.fieldQueue.slice()) {
+    if (!card.def.leave) continue;
+    const locIdx = fieldLocOf(card);
+    if (locIdx < 0) continue;
+    const zone = state.players[card.side].zones[locIdx];
+    const i = zone.indexOf(card);
+    if (i >= 0) zone.splice(i, 1);
+    dequeueField(card);
+    log('sys', `📖 「${card.def.n}」在游戏结束时从场上消失（增益随之一同消失）。`);
+  }
+}
+
+// 阶段 ①：回合开始 —— 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置
+function roundStartStage() {
   const st = state;
-  if (st.turn > 1) { drawOne('p'); drawOne('a'); }
-  st.energyTotal = Math.min(st.turn, 6);
+  runTurnStartEffects(); // ①-1 全场“回合开始”效果（按放置队列序）
+  if (st.turn > 1) { drawOne('p'); drawOne('a'); } // ①-2 抽牌（第 1 回合的 3 张已在开局发放）
+  st.energyTotal = Math.min(st.turn, 6);           // ①-2 能量结算
   st.energyLeft = st.energyTotal;
   st.phase = 'play';
   st.selected = -1;
@@ -292,13 +403,19 @@ async function playRound(gen) {
   renderAll();
   if (st.turn > 1) log('sys', `—— 第 ${st.turn} 回合 · 双方各抓 1 张 ——`);
   setStatus(`第 ${st.turn} 回合 · 能量 ${st.energyTotal}：可一次暗出多张牌（总费用不超过能量），出完点「结束回合」；点能量框可重置本回合暗牌。`);
+}
 
-  // 等待玩家行动（出牌 / 跳过 / 认输 / 双倍 均在此阶段触发）
+async function playRound(gen) {
+  if (gen !== state.gen) return;
+  const st = state;
+  roundStartStage(); // 阶段 ①：回合开始（回合开始效果 / 能量结算 / 抽牌）
+
+  // 阶段 ②：玩家放置与移动（出牌 / 跳过 / 认输 / 双倍 / 移动 / 重置均在此阶段触发）
   const act = await waitPlayer();
   if (gen !== state.gen) return;
   if (act.type === 'retreat') { doRetreat(); return; }
 
-  // 对手回合
+  // 阶段 ③：对手放置
   state.phase = 'busy';
   renderControls();
   setStatus('对手思考中…');
@@ -309,13 +426,22 @@ async function playRound(gen) {
   await sleep(600);
   if (gen !== state.gen) return;
 
-  // 翻牌结算
+  // 阶段 ④：翻牌结算（翻开暗牌，逐张按放置顺序结算「揭示」效果）
   await revealRound();
   if (gen !== state.gen) return;
-  reactorPurge(); // 回合结束效果（如聚变反应炉），第 6 回合翻面后同样执行
+
+  // 阶段 ⑤ 全场“回合结束”效果（按放置队列序）→ 阶段 ⑥ 区域回合结束 → 阶段 ⑦ 手牌回合结束
+  runTurnEndEffects();
+  runZoneEndEffects();
+  runHandEndEffects();
   renderAll();
 
-  if (st.turn >= 6) { finishMatch(); return; }
+  if (st.turn >= 6) {
+    // 阶段 ⑧：游戏结束效果（按放置队列序）→ 结算胜负（第 6 回合的 ⑤⑥⑦ 同样先于终局执行）
+    runGameEndEffects();
+    finishMatch();
+    return;
+  }
   st.turn++;
   playRound(gen);
 }
@@ -378,7 +504,7 @@ function tryMoveFlyTo(locIdx) {
   if (locIdx === found.j) { setStatus('这张卡本来就在这个区域，选别的区域吧。'); return true; }
   if (!locOpen(locIdx)) { setStatus(`「${locDef(locIdx).n}」还没开放，不能移过去。`); return true; }
   const dz = st.players.p.zones[locIdx];
-  if (dz.length >= locDef(locIdx).max) { setStatus('目标区域已放满，不能移过去。'); return true; }
+  if (sideRoom('p', locIdx) < 1) { setStatus('目标区域已放满，不能移过去。'); return true; }
   st.flyMovedFrom[card.id] = found.j; // 记录回合初所在区域，供“能量重置”退回
   found.zone.splice(found.zone.indexOf(card), 1);
   dz.push(card);
@@ -404,11 +530,16 @@ function tryPlayAt(locIdx) {
     setStatus(`「${locDef(locIdx).n}」还没开放，要到第 ${locDef(locIdx).minTurn} 回合才能放牌。`);
     return false;
   }
-  if (zone.length >= locDef(locIdx).max) {
+  if (occOf(card) > 1 && !occZoneOk(card, locIdx)) {
+    setStatus(`「${card.def.n}」需要占满 ${occOf(card)} 格，只能放在最大可放数为 ${occOf(card)} 的区域（且己方该区为空）。`);
+    return false;
+  }
+  if (sideRoom('p', locIdx) < occOf(card)) {
     setStatus('这个区域已经放满，选别的区域吧。');
     return false;
   }
   zone.push(card);
+  enqueueField(card); // 暗出：进入场上放置顺序队列（v55）
   st.players.p.hand.splice(st.selected, 1);
   st.selected = -1;
   st.energyLeft -= card.def.c;
@@ -492,6 +623,7 @@ function undoPlacedCards() {
     if (ci >= 0) {
       const [card] = zone.splice(ci, 1);
       removed.push(card);
+      dequeueField(card); // 撤回暗牌：移出放置队列（再次打出时重新入队）
     }
   }
   if (removed.length === 0) { st.playerMoves = []; st.selected = -1; renderAll(); return; }
@@ -558,7 +690,7 @@ function hypotheticScore(card, locIdx) {
       mine += cardPowerIn(locIdx, card);
       // 若这一手正好把该区放满，预判计入放满加成
       const def = state.locs[j].def;
-      if (def.fill && state.players.a.zones[j].length + 1 >= def.max) mine += def.fill;
+      if (def.fill && sideUsed('a', j) + occOf(card) >= def.max) mine += def.fill;
     }
     // 反转区域（辉针城）比较口径取负：数值更低反而领先
     const eff = state.locs[j].def.inv ? -1 : 1;
@@ -591,7 +723,7 @@ function aiThink() {
       // AI 策略：区域变形到辉针城的卡（鬼人正邪）只在自己落后该区 ≥10 点时考虑
       const isNeedle = card.def.k === 'xform' && card.def.xf === 'needle';
       for (let j = 0; j < 3; j++) {
-        if (pl.zones[j].length >= locDef(j).max) continue;
+        if (sideRoom('a', j) < occOf(card)) continue; // 占格口径：大体积卡需要整区空位（occ4 只进 max4 空区）
         if (!locOpen(j)) continue;
         if (isNeedle) {
           const myT = zoneTotals('a', j, true);
@@ -609,6 +741,7 @@ function aiThink() {
     const pool = cands.filter((c) => c.score >= best - 3);
     const pick = pool[Math.floor(Math.random() * pool.length)];
     pl.zones[pick.loc].push(pick.card);
+    enqueueField(pick.card); // 对手暗出：进入场上放置顺序队列（v55）
     pl.hand.splice(pl.hand.indexOf(pick.card), 1);
     rem -= pick.card.def.c;
     st.aiMoves.push({ cardId: pick.card.id, loc: pick.loc });
@@ -682,7 +815,7 @@ async function revealRound() {
   st.aiMoves = [];
 }
 
-// 预判：该牌的“现身”效果是否真的会造成数值/盘面变化
+// 预判：该牌的“揭示”效果是否真的会造成数值/盘面变化
 // （用于跳过“结算前 500ms 停顿”——如对没有已翻开卡的区域打增减、条件不满足等空转情况）
 function revealEffectWillChange(side, locIdx, card) {
   const st = state;
@@ -701,7 +834,7 @@ function revealEffectWillChange(side, locIdx, card) {
     case 'mv': {
       if (vis.length === 0) return false;
       for (let j = 0; j < 3; j++) {
-        if (j !== locIdx && locOpen(j) && st.players[other].zones[j].length < locDef(j).max) return true;
+        if (j !== locIdx && locOpen(j) && sideRoom(other, j) >= 1) return true;
       }
       return false;
     }
@@ -710,14 +843,46 @@ function revealEffectWillChange(side, locIdx, card) {
       const tk = sp && TOKENS[sp.card];
       if (!tk) return false;
       const cnt = sp.n || 1;
-      const room = (s) => Math.min(cnt, locDef(locIdx).max - st.players[s].zones[locIdx].length);
+      const room = (s) => Math.min(cnt, sideRoom(s, locIdx));
       return room(side) + room(other) > 0;
+    }
+    case 'spawnO': {
+      const sp = def.spawnO;
+      const tk = sp && TOKENS[sp.card];
+      if (!tk) return false;
+      const cnt = sp.n || 1;
+      // 只投放到“对方一侧”：对方该区有空位才算会真的变化
+      return Math.min(cnt, sideRoom(other, locIdx)) > 0;
+    }
+    case 'clone': {
+      const sp = def.clone;
+      const tk = sp && TOKENS[sp.card];
+      if (!tk) return false;
+      const cnt = sp.n || 1;
+      // 另两区（不含本区）自己一侧：任一区有可放空位（且已开放）才算会变化
+      for (let j = 0; j < 3; j++) {
+        if (j === locIdx || !locOpen(j)) continue;
+        const room = Math.min(cnt, sideRoom(side, j));
+        if (room > 0) return true;
+      }
+      return false;
+    }
+    case 'switch':
+      // 换边只有在“对方该区没放满”时才真的会变化
+      return sideRoom(other, locIdx) >= 1;
+    case 'morph':
+      // 变身只有在“对方手牌有卡”时才会变化（目标是随机的）
+      return st.players[other].hand.length > 0;
+    case 'gift': {
+      // 换边己方最低已翻开卡：需要“本区有其他已翻开的己方卡”且“对方该区有空位”才真会变化
+      if (sideRoom(other, locIdx) < 1) return false;
+      return st.players[side].zones[locIdx].some((c) => c !== card && c.revealed && !c.def.un);
     }
     case 'give': return st.players[side].hand.length < 7;
     case 'xform': {
       const t = LOCATION_POOL.find((l) => l.id === def.xf);
       if (!t) return false;
-      return !(['p', 'a'].some((s) => st.players[s].zones[locIdx].length > t.max));
+      return !(['p', 'a'].some((s) => sideUsed(s, locIdx) > t.max));
     }
     case 'oc': {
       const opp = side === 'p' ? st.aiMoves : st.playerMoves;
@@ -727,39 +892,92 @@ function revealEffectWillChange(side, locIdx, card) {
   }
 }
 
-function applyEffect(side, locIdx, card) {
+// ---- 战力影响历史（v56）----
+// addBuffLog：给目标卡登记一条“永久 buff”来源（d=增减，srcCard=来源卡；
+// 来源=目标自身时视为“卡牌效果”，如 bl/oc）。记录点在 applyEffect 的增减结算处。
+// tag 可选：自定义来源名（如「防摧毁」），在战力影响历史中优先显示。
+function addBuffLog(card, d, srcCard, tag) {
+  if (!card) return;
+  if (!Array.isArray(card.powerLog)) card.powerLog = [];
+  card.powerLog.push({ d, src: srcCard ? { id: srcCard.id, n: srcCard.def.n, t: srcCard.def.t } : null, tag: tag || null });
+}
+
+// 防摧毁（def.surv=N，现仅灵乌路空 surv:2）：该卡被任何“摧毁”指向时不会离场，
+// 取而代之**永久降低 N 点战力**（每次触发再降 N、可多次；若被反应炉类反复点名会反复降低）。
+// 返回 true = 已替代（卡仍在场、由本函数自行记账）；false = 按原样移除摧毁。
+function surviveDestroy(card) {
+  const surv = card && card.def && card.def.surv;
+  if (!surv) return false;
+  card.buff -= surv;
+  addBuffLog(card, -surv, null, '防摧毁');
+  const locIdx = fieldLocOf(card);
+  log('danger', `💥 「${card.def.n}」被摧毁时触发了防摧毁：没有被摧毁，取而代之永久降低 ${surv} 点战力（现 ${locIdx >= 0 ? cardPowerIn(locIdx, card) : cardPower(card)}）。`);
+  return true;
+}
+
+// 凤凰重生（def.phx=N，现仅藤原妹红 phx:2）：被任何“摧毁”指向时**不消失**，
+// 而是从场上移除后**返回自己手牌**并**永久 +N 战力**（每次触发 +N、可重复打出并再次触发）；
+// 手牌已满 7 张则重生失败、按原样被摧毁。
+// 返回 true = 本次摧毁已由本函数处理完毕（调用方不得再移除该卡）；false = 按原样移除摧毁。
+function phoenixRevive(card, locIdx) {
+  const phx = card && card.def && card.def.phx;
+  if (!phx) return false;
+  const st = state;
+  const side = card.side;
+  const zone = st.players[side].zones[locIdx];
+  const i = zone.indexOf(card);
+  if (i >= 0) zone.splice(i, 1);
+  dequeueField(card); // 离开场上：移出放置队列（回手后再打出时重新入队）
+  if (st.players[side].hand.length < 7) {
+    card.buff += phx;
+    addBuffLog(card, phx, null, '凤凰重生');
+    card.revealed = false; // 回手后再次打出需重新暗出/翻面
+    st.players[side].hand.push(card);
+    log('danger', `🔥 「${card.def.n}」被摧毁时触发凤凰重生：返回手牌并永久 +${phx} 战力（下次打出威力 ${cardPower(card)}）。`);
+  } else {
+    log('danger', `🔥 「${card.def.n}」被摧毁时想凤凰重生，但手牌已满（7 张），重生失败、被摧毁。`);
+  }
+  return true;
+}
+
+function applyEffect(side, locIdx, card, spec) {
   const st = state;
   const other = side === 'p' ? 'a' : 'p';
   const mine = st.players[side].zones[locIdx];
   const theirs = st.players[other].zones[locIdx];
   const def = card.def;
+  // 效果规格：揭示（默认，spec 缺省）= 整张卡的 def；时机效果（v55）= def.fx[timing] 条目。
+  // 条目字段与 def 同构（k/a/spawn/xf/give/t），结算逻辑完全复用。
+  const fx = spec || def;
+  // 日志文案：条目自带 t > 卡面效果文案(def.t) > 卡名
+  const txt = fx.t || (fx === def ? def.t : def.n);
 
-  switch (def.k) {
+  switch (fx.k) {
     case 'bf': {
       // 只作用于“结算时已翻开”的其他友军：暗牌不会预领增益（后翻开的牌错过本次结算）
       let n = 0;
-      for (const c of mine) if (c !== card && !c.def.un && c.revealed) { c.buff += def.a; n++; }
-      log(side, `✦ ${def.t}${n ? `（影响 ${n} 张）` : '（但该区没有已翻开的其他友军）'}`);
+      for (const c of mine) if (c !== card && !c.def.un && c.revealed) { c.buff += fx.a; addBuffLog(c, fx.a, card); n++; }
+      log(side, `✦ ${txt}${n ? `（影响 ${n} 张）` : '（但该区没有已翻开的其他友军）'}`);
       break;
     }
     case 'de': {
       // 只削弱“结算时已翻开”的对方卡牌：对方暗牌不会提前被降
       let n = 0;
-      for (const c of theirs) { if (c.def.un || !c.revealed) continue; c.buff -= def.a; n++; }
-      log(side, `✦ ${def.t}${n ? `（影响 ${n} 张）` : '（但没有已翻开的对方卡牌可影响）'}`);
+      for (const c of theirs) { if (c.def.un || !c.revealed) continue; c.buff -= fx.a; addBuffLog(c, -fx.a, card); n++; }
+      log(side, `✦ ${txt}${n ? `（影响 ${n} 张）` : '（但没有已翻开的对方卡牌可影响）'}`);
       break;
     }
     case 'ba': {
       // 双方同增同样只作用于结算时已翻开的卡牌
-      for (const c of mine) if (!c.def.un && c.revealed) c.buff += def.a;
-      for (const c of theirs) if (!c.def.un && c.revealed) c.buff += def.a;
-      log(side, `✦ ${def.t}`);
+      for (const c of mine) if (!c.def.un && c.revealed) { c.buff += fx.a; addBuffLog(c, fx.a, card); }
+      for (const c of theirs) if (!c.def.un && c.revealed) { c.buff += fx.a; addBuffLog(c, fx.a, card); }
+      log(side, `✦ ${txt}`);
       break;
     }
     case 'bl': {
       const myT = zoneEff(side, locIdx);
       const opT = zoneEff(other, locIdx);
-      if (myT < opT) { card.buff += def.a; log(side, `✦ 落后触发：${def.n} 威力 +${def.a}（现 ${cardPowerIn(locIdx, card)}）`); }
+      if (myT < opT) { card.buff += fx.a; addBuffLog(card, fx.a, card); log(side, `✦ 落后触发：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`); }
       else log(side, `✦ ${def.n} 未落后，效果不触发。`);
       break;
     }
@@ -773,27 +991,150 @@ function applyEffect(side, locIdx, card) {
         const p = cardPowerIn(locIdx, c);
         if (p < minP) { minP = p; target = c; }
       }
+      if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
+      if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
       theirs.splice(theirs.indexOf(target), 1);
+      dequeueField(target); // 被摧毁：移出放置队列（后续时机不再结算它）
       log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${minP}）`);
       break;
     }
     case 'spawn': {
-      // 现身：给本区域双方各生成特殊卡（如「比那名居天子」给双方各 1 张石块）
-      const sp = def.spawn;
-      const tk = sp && TOKENS[sp.card];
-      if (sp && tk) {
-        const cnt = sp.n || 1;
+      // 揭示：给本区域双方各生成特殊卡（如「比那名居天子」给双方各 1 张石块）
+      const spc = fx.spawn;
+      const tk = spc && TOKENS[spc.card];
+      if (spc && tk) {
+        const cnt = spc.n || 1;
         const total = cnt * 2;
         const placed = placeToken(side, locIdx, tk, cnt) + placeToken(other, locIdx, tk, cnt);
         log(side, `✦ ${def.n}：本区域双方各生成 ${cnt} 张「${tk.n}」${placed < total ? '（部分区域已放满）' : ''}`);
       }
       break;
     }
+    case 'spawnO': {
+      // 揭示：给本区域“对方一侧”生成特殊卡（如「键山雏」给敌方添 1 张「厄运」）
+      const spc = fx.spawnO;
+      const tk = spc && TOKENS[spc.card];
+      if (spc && tk) {
+        const cnt = spc.n || 1;
+        const placed = placeToken(other, locIdx, tk, cnt);
+        log(side, placed
+          ? `✦ ${def.n}：在对方一侧添加 ${cnt} 张「${tk.n}」`
+          : `✦ ${def.n} 想把「${tk.n}」放到对方一侧，但对方该区已放满，未能落下。`);
+      }
+      break;
+    }
+    case 'clone': {
+      // 揭示：向“另外两个区域”的自己一侧各生成 n 张分身特殊卡（如赫卡提亚 → 分身）；
+      // 目标区自己一侧放满或未开放（locOpen）则跳过该区。分身按本卡**揭示时 cardPower**
+      // （基础 + 永久 buff）快照对齐战力：差值记在分身 buff 上，之后分身可被增益/削弱独立影响。
+      const spc = fx.clone;
+      const tk = spc && TOKENS[spc.card];
+      if (spc && tk) {
+        const cnt = spc.n || 1;
+        const snap = cardPower(card);
+        let added = 0, zones = 0;
+        for (let j = 0; j < 3; j++) {
+          if (j === locIdx || !locOpen(j)) continue;
+          zones++;
+          const zone = st.players[side].zones[j];
+          for (let i = 0; i < cnt && sideRoom(side, j) >= 1; i++) {
+            const c2 = newCard(tk);
+            c2.side = side;
+            c2.revealed = true;
+            c2.buff += snap - c2.def.p; // 快照对齐本体揭示时战力
+            addBuffLog(c2, snap - c2.def.p, null, '分身快照'); // 记入战力影响历史
+            zone.push(c2);
+            enqueueField(c2); // 分身也按落场先后进入放置队列（v55）
+            added++;
+          }
+        }
+        log(side, added
+          ? `✦ ${def.n}：向另外两个区域自己一侧各添加 ${cnt} 张「${tk.n}」（分身快照战力=${snap}${added < cnt * zones ? '，部分区域放不下' : ''}）`
+          : `✦ ${def.n} 想生成「${tk.n}」，但另外两个区域自己一侧都放不下或未开放。`);
+      }
+      break;
+    }
+    case 'switch': {
+      // 揭示：换边——翻开后从自己一侧转移到“对方该区域一侧”（依神紫苑，-7 战力随身上对方侧）；
+      // 对方该区已放满则换边失败、牌留在自己一侧。换边后归属对方（card.side 同步），
+      // 之后作为对方已翻开卡参与结算；场上的放置顺序不变。
+      const dst = st.players[other].zones[locIdx];
+      if (sideRoom(other, locIdx) < occOf(card)) {
+        log('danger', `✦ ${def.n} 想换边到对方一侧，但对方该区已放满，换边失败（仍留在自己一侧）。`);
+        break;
+      }
+      const src = st.players[side].zones[locIdx];
+      const idx = src.indexOf(card);
+      if (idx < 0) break; // 防御：理论不会发生
+      src.splice(idx, 1);
+      dst.push(card);
+      card.side = other; // 归属换边
+      log('danger', `✦ ${def.n} 换边：转移到了对方一侧（${def.p < 0 ? `以 ${-def.p} 负战力计入对方该区` : '该卡现在位于对方一侧'}）。`);
+      break;
+    }
+    case 'morph': {
+      // 揭示：变身（二岩猯藏）——从对方手牌随机取一张，把自身完全变成该卡的**复制体**
+      // （原卡留在对方手牌）。变身后立即按新 def 的效果文本再结算一次：新卡若带 k（揭示）
+      // 则立刻触发该揭示；持续 og / 每回合移动 fly / 时机效果 fx / 防摧毁 surv 等
+      // 由新 def 实时驱动，自动生效。
+      const hand = st.players[other].hand;
+      if (hand.length === 0) { log(side, `✦ ${def.n} 想变身，但对方手牌为空，没有变化。`); break; }
+      const oldN = def.n;
+      const pick = hand[Math.floor(Math.random() * hand.length)];
+      // 大体积目标限制：若随机目标是占多格的大体积卡（如萃香 occ:4），只有本区域 max
+      // 恰为该占格数、且己方该区（明牌+暗牌一起数）有且仅有变身者这一张卡时才能变身，
+      // 否则变身失败、保持原样（避免变身成萃香后与其他卡共存导致占格超限）。
+      if (occOf(pick) > 1) {
+        const ownZone = st.players[side].zones[locIdx];
+        const legal = locDef(locIdx).max === occOf(pick)
+          && ownZone.length === 1 && ownZone[0] === card;
+        if (!legal) {
+          log('danger', `✦ ${def.n} 想变身成「${pick.def.n}」（占 ${occOf(pick)} 格），但本区域不满足条件（需 max=${occOf(pick)} 且己方该区只有 ${def.n} 这一张卡），变身失败、保持原样。`);
+          break;
+        }
+      }
+      card.def = { ...pick.def }; // 变身：整体替换卡面（名称/费用/威力/效果/配图）
+      log('danger', `✦ ${oldN} 变身为对方手牌中的「${card.def.n}」！`);
+      if (card.def.k === 'morph') {
+        // 防死循环：变身目标同样是变身卡则不再次变形
+        log(side, `✦ 变身目标是同样会变形的卡，不再二次变形。`);
+      } else if (card.def.k) {
+        applyEffect(side, locIdx, card); // 重新触发新卡的揭示文本
+      }
+      break;
+    }
+    case 'gift': {
+      // 揭示：把本区己方“战力最低的已翻开卡”换边到对方（因幡帝；不含自己）。
+      // 多张并列最低则随机选一张；对方该区已放满则换边失败。换边后卡归属对方，
+      // 其持续效果（og，如天子）按新归属方生效。
+      const dst = st.players[other].zones[locIdx];
+      if (sideRoom(other, locIdx) < 1) { // 移走的目标为普通占格卡，需对方至少 1 格空位
+        log('danger', `✦ ${def.n} 想把己方卡换边，但对方该区已放满，换边失败。`);
+        break;
+      }
+      const own = st.players[side].zones[locIdx].filter((c) => c !== card && c.revealed && !c.def.un);
+      if (own.length === 0) {
+        log(side, `✦ ${def.n} 想换边己方最低的卡，但本区没有其他已翻开的己方卡。`);
+        break;
+      }
+      let minP = Infinity, poolT = [];
+      for (const c of own) {
+        const p = cardPowerIn(locIdx, c);
+        if (p < minP) { minP = p; poolT = [c]; }
+        else if (p === minP) poolT.push(c);
+      }
+      const target = poolT[Math.floor(Math.random() * poolT.length)]; // 并列最低随机
+      st.players[side].zones[locIdx].splice(st.players[side].zones[locIdx].indexOf(target), 1);
+      dst.push(target);
+      target.side = other; // 归属换边
+      log('danger', `✦ ${def.n}：把己方「${target.def.n}」（威力 ${minP}）换边到了对方一侧。`);
+      break;
+    }
     case 'xform': {
-      // 现身：把本区域变成目标地形（def.xf = locations 池 id，如辉针城 needle）
-      const target = LOCATION_POOL.find((l) => l.id === def.xf);
+      // 揭示：把本区域变成目标地形（fx.xf = locations 池 id，如辉针城 needle）
+      const target = LOCATION_POOL.find((l) => l.id === fx.xf);
       if (!target) break;
-      const over = ['p', 'a'].some((s2) => state.players[s2].zones[locIdx].length > target.max);
+      const over = ['p', 'a'].some((s2) => sideUsed(s2, locIdx) > target.max);
       if (over) { log('danger', `✦ ${def.n} 想把本区变成「${target.n}」，但双方牌数超出其上限，变形失败。`); break; }
       state.locs[locIdx].def = target;
       refreshLocHeader(locIdx); // 更新列名/图标/效果文字/配色（隙间随 max=4 自动消失）
@@ -801,7 +1142,7 @@ function applyEffect(side, locIdx, card) {
       break;
     }
     case 'mv': {
-      // 现身：把本区“对方战力最低”的已翻开卡移到另外两区随机一处；
+      // 揭示：把本区“对方战力最低”的已翻开卡移到另外两区随机一处；
       // 候选区必须该侧未满且已开放（避开锁定的七夕坂等）；全满/全不可达则移动失败。
       const vis = theirs.filter((c) => c.revealed && !c.def.un);
       if (vis.length === 0) { log(side, `✦ ${def.n} 想移走对方卡牌，但对方本区没有已翻开的可移动卡牌。`); break; }
@@ -813,7 +1154,8 @@ function applyEffect(side, locIdx, card) {
       const cands = [];
       for (let j = 0; j < 3; j++) {
         if (j === locIdx) continue;
-        if (locOpen(j) && st.players[other].zones[j].length < locDef(j).max) cands.push(j);
+        // 移入目标侧空余需 ≥ 被移卡的占格数（occ）：萃香(occ4) 只能移入该侧完全空出的 max4 区域
+        if (locOpen(j) && sideRoom(other, j) >= occOf(target)) cands.push(j);
       }
       if (cands.length === 0) { log('danger', `✦ ${def.n} 想把对方「${target.def.n}」移走，但另外两个区域都放不下，移动失败。`); break; }
       const dst = cands.length === 1 ? cands[0] : cands[Math.floor(Math.random() * cands.length)];
@@ -823,8 +1165,8 @@ function applyEffect(side, locIdx, card) {
       break;
     }
     case 'give': {
-      // 现身：把指定特殊卡加入自己手牌（手牌衍生物，如八云紫 → 废弃列车）
-      const gv = def.give;
+      // 揭示：把指定特殊卡加入自己手牌（手牌衍生物，如八云紫 → 废弃列车）
+      const gv = fx.give;
       const tk = gv && TOKENS[gv.card];
       if (gv && tk) {
         const cnt = gv.n || 1;
@@ -837,12 +1179,12 @@ function applyEffect(side, locIdx, card) {
           hand.push(c2);
           added++;
         }
-        log(side, `✦ ${def.t}${added < cnt ? '（手牌已满，部分未能加入）' : ''}`);
+        log(side, `✦ ${txt}${added < cnt ? '（手牌已满，部分未能加入）' : ''}`);
       }
       break;
     }
     case 'dwh': {
-      // 现身：摧毁本区对方一张“已翻开且战力最高”的卡（平局取第一张最高者）
+      // 揭示：摧毁本区对方一张“已翻开且战力最高”的卡（平局取第一张最高者）
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
       const vis = theirs.filter((c) => c.revealed && !c.def.un);
       if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区的牌都还没翻开。`); break; }
@@ -851,17 +1193,21 @@ function applyEffect(side, locIdx, card) {
         const p = cardPowerIn(locIdx, c);
         if (p > maxP) { maxP = p; target = c; }
       }
+      if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
+      if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
       theirs.splice(theirs.indexOf(target), 1);
+      dequeueField(target); // 被摧毁：移出放置队列（后续时机不再结算它）
       log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${maxP}）`);
       break;
     }
     case 'oc': {
-      // 现身：翻开当回合，对方是否在本区域放置过至少一张牌（本回合落牌记录）
+      // 揭示：翻开当回合，对方是否在本区域放置过至少一张牌（本回合落牌记录）
       const oppMoves = side === 'p' ? st.aiMoves : st.playerMoves;
       const present = oppMoves.some((m) => m.loc === locIdx);
       if (present) {
-        card.buff += def.a;
-        log(side, `✦ 对方本回合在本区放过牌：${def.n} 威力 +${def.a}（现 ${cardPowerIn(locIdx, card)}）`);
+        card.buff += fx.a;
+        addBuffLog(card, fx.a, card);
+        log(side, `✦ 对方本回合在本区放过牌：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`);
       } else {
         log(side, `✦ 对方本回合没有在本区放牌，${def.n} 效果未触发。`);
       }
@@ -875,6 +1221,7 @@ function applyEffect(side, locIdx, card) {
 
 // 回合结束摧毁（purge：如聚变反应炉）：每回合翻牌结算后，把本区域“全场”战力最低的
 // 卡牌摧毁（敌我双方所有已翻开卡混比；并列最低的一并摧毁）。
+// 带防摧毁（def.surv，如灵乌路空）的卡不会离场，改为永久降 N 战力（见 surviveDestroy）。
 function reactorPurge() {
   const st = state;
   for (let j = 0; j < 3; j++) {
@@ -888,13 +1235,17 @@ function reactorPurge() {
     let min = Infinity;
     for (const c of all) min = Math.min(min, cardPowerIn(j, c));
     const doomed = all.filter((c) => cardPowerIn(j, c) === min);
-    const desc = doomed.map((c) => (zoneP.includes(c) ? '你方' : '敌方') + '「' + c.def.n + '」(' + cardPowerIn(j, c) + ')').join('、');
+    const removed = [];
     for (const c of doomed) {
-      const pi = zoneP.indexOf(c);
-      if (pi >= 0) zoneP.splice(pi, 1);
+      if (phoenixRevive(c, j)) continue; // 凤凰重生（如藤原妹红）：回手 +N 战力
+      if (surviveDestroy(c)) continue; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      const inP = zoneP.indexOf(c) >= 0;
+      if (inP) zoneP.splice(zoneP.indexOf(c), 1);
       else zoneA.splice(zoneA.indexOf(c), 1);
+      dequeueField(c); // 被摧毁：移出放置队列（后续时机不再结算它）
+      removed.push(`${inP ? '你方' : '敌方'}「${c.def.n}」(${cardPowerIn(j, c)})`);
     }
-    log('danger', `⚡ ${def.n}：摧毁本区全场战力最低的牌（威力 ${min}${doomed.length > 1 ? '，并列共 ' + doomed.length + ' 张' : ''}）→ ${desc}`);
+    if (removed.length) log('danger', `⚡ ${def.n}：摧毁本区全场战力最低的牌（威力 ${min}${doomed.length > 1 ? '，并列共 ' + doomed.length + ' 张' : ''}）→ ${removed.join('、')}`);
   }
 }
 
@@ -1077,7 +1428,8 @@ function canPlaceP(idx) {
   const card = st.players.p.hand[st.selected];
   if (!card || card.def.c > st.energyLeft) return false;
   if (!locOpen(idx)) return false;
-  return st.players.p.zones[idx].length < locDef(idx).max;
+  if (occOf(card) > 1 && !occZoneOk(card, idx)) return false; // 大体积卡需上限恰为占格数
+  return sideRoom('p', idx) >= occOf(card);
 }
 
 function miniCardEl(card, locIdx, side) {
@@ -1152,7 +1504,7 @@ function renderZones() {
     pillA.classList.toggle('lead', eA > eP);
     pillP.classList.toggle('lead', eP > eA);
     const mineZoneEl = Game._els.mineZone[j].parentElement;
-    const count = st.players.p.zones[j].length + '/' + locDef(j).max;
+    const count = sideUsed('p', j) + '/' + locDef(j).max;
     const mt = locDef(j).minTurn;
     mineZoneEl.querySelector('.slot-count').textContent =
       `已放 ${count}${mt && !locOpen(j) ? ` · 🔒 第 ${mt} 回合开放` : ''}`;
@@ -1170,6 +1522,15 @@ function buildZoneChildren(side, locIdx) {
   const def = locDef(locIdx);
   const cards = state.players[side].zones[locIdx];
   const out = [];
+  // 大体积卡（如伊吹萃香 occ:4）独占整侧 2×2：只渲染一张放大卡，区域视为放满
+  const big = cards.length === 1 && occOf(cards[0]) > 1 ? cards[0] : null;
+  if (big) {
+    const el = miniCardEl(big, locIdx, side);
+    el.classList.add('big-occ');
+    el.title = `${big.def.n} · 占满 ${occOf(big)} 格`;
+    out.push(el);
+    return out;
+  }
   for (let i = 0; i < 4; i++) {
     if (i >= def.max) {
       out.push(gapCellEl());
@@ -1227,15 +1588,19 @@ function renderHand() {
     // 终局复盘（over）时手牌保持原色且可点击查看，其余非出牌阶段置灰
     if (st.phase !== 'play' && st.phase !== 'over') el.classList.add('unaffordable');
     el.style.setProperty('--cgrad', gradOf(card.def));
-    el.innerHTML = cardFaceHTML(card.def);
+    // 手牌卡面显示“当前战力”（基础 + 永久 buff）：如凤凰重生回手的妹红 +2 后直接可见，
+    // 不再固定显示基础战力 1。
+    const handPow = cardPower(card);
+    const handSign = handPow > card.def.p ? 'up' : handPow < card.def.p ? 'down' : '';
+    el.innerHTML = cardFaceHTML(card.def, { power: handPow, sign: handSign });
     el.addEventListener('click', () => {
-      if (st.phase === 'over') showZoom(card.def, true); // 终局复盘：点击放大查看卡面
+      if (st.phase === 'over') showHandCard(card); // 终局复盘：点击放大查看卡面（含当前战力）
       else selectHand(index);
     });
-    // 右键手牌：弹出完整卡牌详情（含被省略号截断的完整效果文案）
+    // 右键手牌：弹出完整卡牌详情（含被省略号截断的完整效果文案；显示当前战力）
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showZoom(card.def, true);
+      showHandCard(card);
     });
     hand.appendChild(el);
   });
@@ -1275,7 +1640,8 @@ function buildCodexGrid() {
   const grid = $('codexGrid');
   grid.innerHTML = '';
   let total = 0;
-  for (let c = 1; c <= 6; c++) {
+  for (let c = 0; c <= 6; c++) {
+    if (!POOL[c]) continue;
     for (const def of POOL[c]) {
       total++;
       const el = document.createElement('div');
@@ -1293,6 +1659,7 @@ function buildCodexGrid() {
 function closeCodex() {
   $('zoomMask').classList.add('hidden');
   $('codexMask').classList.add('hidden');
+  hidePowerPanel();
 }
 
 /* ---------------- 开发者：指定卡牌（调试用） ---------------- */
@@ -1307,7 +1674,8 @@ function uiOnPick() {
 function buildPickGrid() {
   const grid = $('pickGrid');
   grid.innerHTML = '';
-  for (let c = 1; c <= 6; c++) {
+  for (let c = 0; c <= 6; c++) {
+    if (!POOL[c]) continue;
     for (const def of POOL[c]) {
       const el = document.createElement('div');
       el.className = 'codex-card hand-card';
@@ -1365,7 +1733,7 @@ function zoomStageBtn(label) {
   if (btn) btn.textContent = label;
 }
 
-// 找出与某张卡“相关联”的衍生特殊卡（SPLIT：give/spawn 生成的、og 在场光环作用的）
+// 找出与某张卡“相关联”的衍生特殊卡（SPLIT：give/spawn 生成的、og 持续效果作用的）
 function tokenLinksForDef(def) {
   const list = [];
   const add = (key) => {
@@ -1375,6 +1743,8 @@ function tokenLinksForDef(def) {
   };
   if (def.give) add(def.give.card);
   if (def.spawn) add(def.spawn.card);
+  if (def.spawnO) add(def.spawnO.card); // 如键山雏 → 厄运
+  if (def.clone) add(def.clone.card);   // 如赫卡提亚 → 分身
   if (def.og && def.og.tk) {
     for (const k in TOKENS) {
       const d = TOKENS[k];
@@ -1405,6 +1775,7 @@ function renderDeriv(def) {
 
 // 卡牌放大查看（图鉴/手牌右键等）：展示静态卡面；standalone=true 时按钮显示“关闭”
 function showZoom(def, standalone) {
+  hidePowerPanel(); // 战力影响历史仅场上已翻开卡查看时展示
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
   const el = document.createElement('div');
@@ -1422,17 +1793,110 @@ function showZoom(def, standalone) {
   $('zoomMask').classList.remove('hidden');
 }
 
-// 场上已翻开卡牌的放大查看：威力为受修正后的当前战力（含区域阵营加成）
+// 手牌卡放大查看：显示该实例的“当前战力”（基础 + 永久 buff，如凤凰重生后的妹红），
+// 而非固定基础战力；仅展示卡面/说明，无战力影响历史面板。
+function showHandCard(card) {
+  hidePowerPanel();
+  const def = card.def;
+  const live = cardPower(card);
+  const diff = live - def.p;
+  const sign = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+  const slot = $('zoomCardSlot');
+  slot.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = 'zoom-card hand-card';
+  el.style.setProperty('--cgrad', gradOf(def));
+  el.innerHTML = cardFaceHTML(def, { power: live, sign });
+  slot.appendChild(el);
+
+  $('zoomInfo').innerHTML = `
+    <div class="zoom-meta"><span class="zm-cost">费用 ${def.c}</span><span class="zm-pow">当前威力 ${live}</span></div>
+    ${diff !== 0 ? `<div class="zm-kind">基础威力 ${def.p} · 永久增益 ${diff > 0 ? '+' : ''}${diff}</div>` : `<div class="zm-kind">基础威力 ${def.p}</div>`}
+    <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
+    <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
+  renderDeriv(def);
+  zoomStageBtn('关闭 ✕');
+  $('zoomMask').classList.remove('hidden');
+}
+
+/* ==================== 战力影响历史（v56） ====================
+   收集某卡“当前所有战力影响来源”的行，各行之和 = 实时战力 cardPowerIn：
+     基础战力 → 永久 buff 台账（按施加先后）→ 持续效果（实时、分来源）→ 区域加成（实时）
+   模块化：未来新来源（新效果键/新区域字段/新持续效果）只需在 powerHistoryRows 追加收集段，
+   并在改动 buff 的结算点调用 addBuffLog 即可，UI 与着色自动覆盖。 */
+function powerHistoryRows(card, locIdx) {
+  const def = card.def;
+  const loc = locDef(locIdx);
+  const rows = [];
+  // 1) 基础战力
+  rows.push({ d: def.p, label: '基础战力', kind: 'base' });
+  // 2) 永久 buff 台账（按施加先后；来源=自身 → 显示“卡牌效果”）
+  for (const e of card.powerLog || []) {
+    const self = e.src && e.src.id === card.id;
+    rows.push({
+      d: e.d,
+      kind: self ? 'self' : 'card',
+      label: self ? '卡牌效果' : (e.tag || (e.src ? e.src.n : '效果')),
+      sub: e.tag || (e.src && e.src.t ? e.src.t : ''),
+    });
+  }
+  // 3) 持续效果（实时、分来源，如天子→己方石块 +2；源卡被摧毁/离场即不再列出）
+  if (def.tk) {
+    for (let j = 0; j < 3; j++) {
+      for (const c of state.players[card.side].zones[j]) {
+        if (c === card || !c.revealed || c.def.un) continue;
+        const og = c.def.og;
+        if (og && og.tk === def.tk) rows.push({ d: og.add, kind: 'aura', label: c.def.n, sub: '持续效果' });
+      }
+    }
+  }
+  // 4) 区域加成（实时）：阵营 aff / 费用 cb / 全区 all
+  if (loc.aff && def.g === loc.aff.group && loc.aff.add) rows.push({ d: loc.aff.add, kind: 'loc', label: loc.n, sub: `区域加成（${GROUPS[loc.aff.group] || loc.aff.group}）` });
+  if (loc.cb && def.c === loc.cb.c && loc.cb.add) rows.push({ d: loc.cb.add, kind: 'loc', label: loc.n, sub: `区域加成（费用 ${loc.cb.c}）` });
+  if (loc.all) rows.push({ d: loc.all, kind: 'loc', label: loc.n, sub: '区域效果' });
+  return rows;
+}
+
+// 渲染独立“战力影响历史”面板（位于卡牌详情弹窗外部、同遮罩并排）
+function renderPowerHistory(card, locIdx) {
+  const rows = powerHistoryRows(card, locIdx);
+  const sum = rows.reduce((s, r) => s + r.d, 0);
+  $('ppName').textContent = `${card.def.n}（${card.side === 'p' ? '你方' : '敌方'}）· 当前战力 ${cardPowerIn(locIdx, card)}`;
+  const box = $('ppRows');
+  box.innerHTML = '';
+  for (const r of rows) {
+    const el = document.createElement('div');
+    el.className = 'pp-row ' + (r.kind === 'base' ? 'base' : r.d > 0 ? 'up' : r.d < 0 ? 'down' : '');
+    const num = document.createElement('span');
+    num.className = 'pp-num';
+    num.textContent = (r.kind === 'base' ? '' : r.d > 0 ? '+' : '') + r.d;
+    const lab = document.createElement('span');
+    lab.className = 'pp-lab';
+    lab.textContent = r.label;
+    el.appendChild(num);
+    el.appendChild(lab);
+    if (r.sub) el.title = r.sub;
+    box.appendChild(el);
+  }
+  const total = document.createElement('div');
+  total.className = 'pp-row pp-total';
+  total.innerHTML = `<span class="pp-num">${sum > 0 ? '+' : ''}${sum}</span><span class="pp-lab">合计战力（= 场上显示）</span>`;
+  box.appendChild(total);
+  $('powerPanel').classList.remove('hidden');
+}
+
+function hidePowerPanel() {
+  const p = $('powerPanel');
+  if (p) p.classList.add('hidden');
+}
+
+// 场上已翻开卡牌的放大查看：卡面威力为受修正后的当前战力；修正明细移入
+// 独立的“战力影响历史”面板（避免挤在卡牌详情内），详情区只留基础信息。
 function showFieldCard(card, locIdx) {
   const def = card.def;
   const live = cardPowerIn(locIdx, card);
   const diff = live - def.p;
   const sign = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
-  const aff = locDef(locIdx).aff;
-  const rb = aff && card.def.g === aff.group ? aff.add : 0;
-  const cb = locDef(locIdx).cb;
-  const cbb = cb && card.def.c === cb.c ? cb.add : 0;
-  const ab = locDef(locIdx).all || 0;
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
   const el = document.createElement('div');
@@ -1443,28 +1907,24 @@ function showFieldCard(card, locIdx) {
 
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${def.c}</span><span class="zm-pow">场上威力 ${live}</span></div>
-    <div class="zm-kind">${diff !== 0
-      ? `场上修正 ${diff > 0 ? '+' : ''}${diff}（基础威力 ${def.p}）`
-      : `基础威力 ${def.p} · 场上无修正`}</div>
-    ${rb !== 0 ? `<div class="zm-kind">区域加成：所属「${GROUPS[aff.group] || aff.group}」在此区域 威力 ${rb > 0 ? '+' : ''}${rb}</div>` : ''}
-    ${cbb !== 0 ? `<div class="zm-kind">区域加成：费用 ${cb.c} 的卡牌在此区域 威力 ${cbb > 0 ? '+' : ''}${cbb}</div>` : ''}
-    ${ab !== 0 ? `<div class="zm-kind">区域效果：本区域所有卡牌 威力 ${ab > 0 ? '+' : ''}${ab}</div>` : ''}
+    <div class="zm-kind">基础威力 ${def.p}</div>
     <div class="zm-kind">${KIND_LABEL[def.k] || ''}</div>
     <div class="zm-desc">${def.t || '平平无奇的白板卡，纯靠身材作战。'}</div>`;
   renderDeriv(def);
+  renderPowerHistory(card, locIdx); // 独立“战力影响历史”面板（同遮罩并排、弹窗外部）
   zoomStageBtn('关闭 ✕');
   $('zoomMask').classList.remove('hidden');
 }
 
 function closeZoom() {
   $('zoomMask').classList.add('hidden');
+  hidePowerPanel(); // 独立“战力影响历史”面板随详情弹窗一起关闭
 }
 
 function renderSide() {
   const st = state;
-  let pCount = 0, aCount = 0;
-  for (let j = 0; j < 3; j++) { pCount += st.players.p.zones[j].length; aCount += st.players.a.zones[j].length; }
-  $('aiCount').textContent = aCount;
+  // 侧栏对手信息：显示对方“当前手牌剩余张数”（而非已打出张数）
+  $('aiCount').textContent = st.players.a.hand.length;
   $('aiDeck').textContent = st.players.a.deck.length;
   $('aiSnapTag').classList.toggle('hidden', !st.aSnapped);
 }
