@@ -10,7 +10,165 @@
 <title>东方逆转 · 极简演示</title>
 <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="in-home">
+
+  <!-- v120：body 默认带 in-home（主页面态）——首帧即为主页面：
+       CSS 隐藏游戏区、#homeScreen 全屏显示；点「开始对战」由 home.js 移除该类并调
+       Game.restart() 进入对局。放在 HTML 上而非等 JS 执行，可避免首帧闪一下游戏画面。 -->
+
+  <!-- ============ 主页面（v120）============
+       打开游戏先显示本页（静态标记，不依赖 JS）。三个入口：
+         - 开始对战 → home.js 隐藏本页并调用既有入口 window.Game.restart()（与顶部
+           「重新开始」同一个函数，游戏主逻辑未改动）；
+         - 卡组设置 → deck-page.js 的卡组设置页面（v121，见下方 #deckScreen）；
+         - 开发调试 → 后续页面，现为占位提示（扩展点见 home.js 的 PAGES）。
+       游戏引擎自身仍在后台完成首局初始化（未改动 game.js），点击开始对战时重开一局。 -->
+  <section class="home-screen" id="homeScreen">
+    <div class="home-decor" id="homeDecor" aria-hidden="true"></div>
+    <div class="home-inner">
+      <div class="home-brand">
+        <span class="home-logo">⚡</span>
+        <h1 class="home-title">东方逆转</h1>
+        <p class="home-sub">Marvel Snap 玩法 · 东方 Project 主题 · 极简网页 Demo</p>
+      </div>
+      <nav class="home-menu" id="homeMenu">
+        <button type="button" class="home-btn primary" id="homeBtnBattle">
+          <span class="hb-icon">⚔️</span>
+          <span class="hb-text">
+            <span class="hb-main">开始对战</span>
+            <span class="hb-sub">选择满编卡组出战 · 6 回合 / 3 块地形 / 双倍下注</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
+        <button type="button" class="home-btn" id="homeBtnDev">
+          <span class="hb-icon">🎛️</span>
+          <span class="hb-text">
+            <span class="hb-main">开发调试</span>
+            <span class="hb-sub">能量修改 / 指定卡牌 / 盘面调试工具</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
+        <button type="button" class="home-btn" id="homeBtnDeck">
+          <span class="hb-icon">🃏</span>
+          <span class="hb-text">
+            <span class="hb-main">卡组设置</span>
+            <span class="hb-sub">查看与编辑出战卡组、费用曲线</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
+      </nav>
+      <div class="home-toast hidden" id="homeToast" role="status" aria-live="polite"></div>
+      <p class="home-foot">纯前端演示 · 无网络请求</p>
+    </div>
+  </section>
+
+  <!-- ============ 卡组设置页面（v121~v125）============
+       入口：主页面「卡组设置」→ home.js 的 PAGES.deck → window.DeckBuilder.open()。
+       布局：整页纵向 flex —— 上方卡组栏 flex:1（≈ 1/3）、下方卡牌区 flex:2（≈ 2/3）。
+       卡组栏两种形态：浏览态 =「＋ 新建卡组」+ 已创建卡组位（动态列表、无固定空位、
+             新建即扩展；显示顺序 = 创建时间倒序，越晚创建越靠左）；
+             编辑态（点卡组位上的 ✏️）= 该卡组的 12 个卡槽（已放卡面 / 未放虚线空位）。
+       卡牌区为 POOL 全部人物卡（不含衍生卡牌 token）：
+             浏览态点卡 = 放大查看；编辑态左键 = 加入 / 移出卡组、右键 = 放大查看。
+       骨架为静态标记，卡组位与卡牌网格由 deck-page.js 渲染；
+       新建 / 修改（加入·移出·清空）/ 删除 / 改名 / **保存（排序+本地持久化，v135）**已可用；对局使用自建卡组后续加入。 -->
+  <section class="deck-screen hidden" id="deckScreen">
+    <!-- 上方 1/3：标题 + 卡组栏 -->
+    <section class="deck-bar">
+      <header class="deck-top">
+        <div class="deck-title">
+          <span class="dt-icon">🃏</span>
+          <div>
+            <h2>卡组设置</h2>
+            <p class="dt-sub">卡组栏容量 <b id="deckCap">20</b> 套 · 每套 <b id="deckSize">12</b> 张</p>
+          </div>
+        </div>
+        <!-- v134：bar-head 放进 deck-top，手机端编辑态可与按钮同一行 -->
+        <div class="deck-bar-head">
+          <span class="db-title" id="deckBarTitle">我的卡组</span>
+          <span class="db-count" id="deckUsed">0 / 20</span>
+          <span class="db-tip" id="deckBarTip">新建的卡组排在最左（越早创建的越靠右）· 点卡组位直接进入修改</span>
+        </div>
+        <div class="deck-top-actions">
+          <span class="deck-hint" id="deckHint">点卡组位直接进入修改；缩略图上的 🗑️ 删除卡组；「＋ 新建卡组」随建随扩展</span>
+          <!-- 手机端只显示 .bt-ico 图标（.bt-txt 由 CSS 隐藏），title 保留说明 -->
+          <button type="button" class="btn btn-ghost hidden" id="deckRenameBtn" title="修改当前卡组名称"><span class="bt-ico">✏️</span><span class="bt-txt">改名</span></button>
+          <button type="button" class="btn btn-ghost hidden" id="deckClearBtn" title="清空当前卡组里的所有卡牌"><span class="bt-ico">🧹</span><span class="bt-txt">清空卡组</span></button>
+          <button type="button" class="btn btn-primary hidden" id="deckDoneBtn" title="保存卡组到本地"><span class="bt-ico">💾</span><span class="bt-txt">保存</span></button>
+          <button type="button" class="btn btn-ghost" id="deckBackBtn" title="返回主页面"><span class="bt-ico">←</span><span class="bt-txt">返回主页</span></button>
+        </div>
+      </header>
+      <div class="deck-slots" id="deckSlots"></div>
+    </section>
+
+    <!-- 下方 2/3：全部卡牌。浏览态点卡牌=放大查看；
+         编辑态（点卡组位）左键=加入卡组、右键=放大查看。
+         v131：费用筛选条与游戏图鉴同款（全部 / 0-1 / 2~6 费 / 衍生卡牌）。 -->
+    <section class="deck-pool">
+      <div class="deck-pool-head">
+        <span class="dp-title">全部卡牌</span>
+        <span class="dp-count" id="deckPoolCount"></span>
+        <span class="dp-active" id="deckActiveLabel"></span>
+        <span class="dp-tip" id="deckPoolTip">点击卡牌可放大查看</span>
+      </div>
+      <div class="card-filter-bar deck-filter-bar" id="deckFilter"></div>
+      <div class="deck-grid" id="deckGrid"></div>
+    </section>
+
+    <div class="deck-toast hidden" id="deckToast" role="status" aria-live="polite"></div>
+  </section>
+
+  <!-- v137：开始对战前选卡组（仅满 12 张可选）；主页面态需单独放开显示（见 style.css） -->
+  <div class="modal-mask hidden" id="battleDeckMask">
+    <div class="modal battle-deck-modal">
+      <div class="modal-emblem">⚔️</div>
+      <h2>选择出战卡组</h2>
+      <p class="modal-sub" id="battleDeckSub">请选择一套已凑满 12 张的卡组后再开战</p>
+      <div class="battle-deck-list" id="battleDeckList" role="listbox" aria-label="出战卡组列表"></div>
+      <div class="battle-deck-empty hidden" id="battleDeckEmpty">
+        还没有满 12 张的卡组。<br />请先去「卡组设置」凑满一套再来开战。
+      </div>
+      <div class="undo-btns">
+        <button type="button" class="btn" id="battleDeckCancel">取消</button>
+        <button type="button" class="btn btn-ghost hidden" id="battleDeckGoto">去卡组设置</button>
+        <button type="button" class="btn btn-primary" id="battleDeckOk" disabled>开始战斗</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡组改名弹窗（v129）：由编辑态顶部「✏️ 改名」打开（`#deckRenameBtn`）；
+       输入框预填原名并全选，回车 = 确定、Esc / 点遮罩 = 取消；
+       校验（非空 / 最长 12 字 / 不与其它卡组重名）与写入见 deck-page.js。
+       位于 body 层级（复用游戏弹窗样式，z-index 50，盖在卡组页 45 之上）。 -->
+  <div class="modal-mask hidden" id="deckRenameMask">
+    <div class="modal undo-modal deck-rename-modal">
+      <div class="modal-emblem">✏️</div>
+      <h2>修改卡组名称</h2>
+      <input type="text" id="deckRenameInput" class="deck-rename-input" maxlength="12" placeholder="输入卡组名称" autocomplete="off" />
+      <div class="deck-rename-tip" id="deckRenameTip"></div>
+      <div class="undo-btns">
+        <button type="button" class="btn" id="deckRenameCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="deckRenameOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡组页确认弹窗（v124 删除卡组用；v125 通用化，删除 / 清空卡组共用）：
+       由 deck-page.js 的 openConfirm() 填充标题/图标/文案/按钮并绑定动作；
+       位于 body 层级（复用游戏弹窗样式与 z-index 50，盖在卡组页 45 之上）；
+       确认 / 取消 / 点遮罩空白 / Esc 均可关闭。 -->
+  <div class="modal-mask hidden" id="deckConfirmMask">
+    <div class="modal undo-modal deck-confirm-modal">
+      <div class="modal-emblem" id="deckConfirmEmblem">❓</div>
+      <h2 id="deckConfirmTitle">确认操作？</h2>
+      <p class="undo-text" id="deckConfirmText"></p>
+      <div class="undo-btns">
+        <button type="button" class="btn" id="deckConfirmCancel">取消</button>
+        <button type="button" class="btn btn-danger" id="deckConfirmOk">确认</button>
+      </div>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="logo">⚡</span>
@@ -184,5 +342,11 @@
   <script src="game.js"></script>
   <script src="ai.js"></script>
   <script src="card-browser.js"></script>
+  <!-- v120：主页面脚本（在游戏脚本之后加载，只调用 window.Game.restart() 等既有入口） -->
+  <script src="home.js"></script>
+  <!-- v135：卡组本地持久化（须在 deck-page.js 之前） -->
+  <script src="deck-storage.js"></script>
+  <!-- v121：卡组设置页面（主页面「卡组设置」入口 → window.DeckBuilder） -->
+  <script src="deck-page.js"></script>
 </body>
 </html>

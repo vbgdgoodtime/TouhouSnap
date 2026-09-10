@@ -1672,3 +1672,675 @@ body { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 700px) {
   .hand-count-chip { font-size: 12px; padding: 5px 12px; }
 }
+
+/* ============================================================
+   v120：主页面（打开游戏先显示本页）／v121：卡组设置页面共用本段规则
+   - 标记在 index.html（#homeScreen / #deckScreen 静态结构），
+     <body class="in-home"> / <body class="in-deck"> 时对应页面显示；
+   - 独立页面均为全屏不透明层（主页面 z-index 200、卡组页 45），
+     同时 body:is(.in-home, .in-deck) 期间把游戏区整体 display:none——
+     游戏侧 fixed 悬浮层演出（gain-ring 9400 / fly-card / 碎片）在元素尺寸为 0 时
+     本就会自行退出，隐藏后更不会串到页面上；
+   - 配色沿用幻想乡淡绿主题（:root 变量），背景漂浮图标同 v75「未揭示」列手法。
+   ============================================================ */
+body:is(.in-home, .in-deck) { overflow: hidden; }
+/* v121：进入独立页面（主页面 / 卡组设置页）时隐藏整个游戏区；
+   卡组页**不**隐藏 .modal-mask——放大查看卡牌复用游戏的 #zoomMask（z-index 60），
+   需盖在卡组页（z-index 45）之上。 */
+body:is(.in-home, .in-deck) .topbar,
+body:is(.in-home, .in-deck) .layout,
+body:is(.in-home, .in-deck) .mob-status,
+body:is(.in-home, .in-deck) .hand-wrap,
+body:is(.in-home, .in-deck) .foot,
+body:is(.in-home, .in-deck) .corner-actions { display: none; }
+/* 主页面态：连游戏弹窗一起隐藏（主页面不承载任何游戏弹窗） */
+body.in-home .modal-mask { display: none; }
+/* v137：出战卡组选择弹窗挂在主页流程上，需盖过首页（z-index 200） */
+body.in-home #battleDeckMask:not(.hidden) {
+  display: flex;
+  z-index: 210;
+}
+
+.home-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(1000px 560px at 50% -12%, rgba(255, 248, 205, .92), transparent 62%),
+    radial-gradient(860px 540px at 6% 110%, rgba(146, 216, 150, .5), transparent 62%),
+    radial-gradient(780px 500px at 98% 106%, rgba(208, 240, 255, .58), transparent 62%),
+    linear-gradient(168deg, #f2f8e6 0%, #dfeecd 48%, #d2e7bf 100%);
+}
+
+/* 背景装饰：随机散布的地形/道具图标，缓慢漂浮（不挡交互） */
+.home-decor { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.home-decor span {
+  position: absolute;
+  opacity: .28;
+  filter: saturate(.85);
+  animation: homeFloat 7s ease-in-out infinite;
+  will-change: transform;
+}
+@keyframes homeFloat {
+  0%, 100% { transform: translateY(0) rotate(var(--rot, 0deg)); }
+  50% { transform: translateY(-14px) rotate(calc(var(--rot, 0deg) + 8deg)); }
+}
+
+.home-inner {
+  position: relative;
+  z-index: 1;
+  width: min(520px, 94vw);
+  max-height: 94vh;
+  overflow-y: auto;
+  padding: 30px 30px 20px;
+  text-align: center;
+  border-radius: 22px;
+  border: 1px solid rgba(126, 168, 118, .55);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .93), rgba(243, 250, 233, .9));
+  box-shadow: 0 24px 70px rgba(46, 78, 40, .28);
+  animation: rise .34s ease;
+}
+
+.home-brand { margin-bottom: 22px; }
+.home-logo { display: block; font-size: 54px; line-height: 1; filter: drop-shadow(0 0 12px rgba(214, 166, 20, .6)); }
+.home-title { font-size: 34px; letter-spacing: 8px; margin: 8px 0 6px; color: #2e4527; }
+.home-sub { font-size: 12.5px; color: #64805c; }
+
+/* 三个入口按钮 */
+.home-menu { display: flex; flex-direction: column; gap: 12px; }
+.home-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: #2e4527;
+  cursor: pointer;
+  border: 1px solid rgba(108, 148, 100, .45);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .72);
+  transition: transform .08s, background .2s, border-color .2s, box-shadow .2s;
+}
+.home-btn:hover {
+  background: #fff;
+  border-color: rgba(124, 168, 110, .75);
+  box-shadow: 0 10px 24px rgba(46, 78, 40, .16);
+  transform: translateY(-1px);
+}
+.home-btn:active { transform: scale(.985); }
+.home-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-btn.primary {
+  border: none;
+  color: #3d2c00;
+  background: linear-gradient(135deg, #e0a316, #f4c948);
+  box-shadow: 0 12px 26px rgba(201, 148, 0, .34);
+}
+.home-btn.primary:hover { background: linear-gradient(135deg, #eab022, #ffd85e); }
+.hb-icon { flex: 0 0 auto; width: 34px; font-size: 26px; text-align: center; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .12)); }
+.hb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hb-main { font-size: 17px; font-weight: 800; letter-spacing: 1px; }
+.hb-sub { font-size: 11.5px; line-height: 1.35; color: #64805c; }
+.home-btn.primary .hb-sub { color: rgba(61, 44, 0, .74); }
+.hb-arrow { flex: 0 0 auto; margin-left: auto; font-size: 20px; color: rgba(46, 69, 39, .45); }
+.home-btn.primary .hb-arrow { color: rgba(61, 44, 0, .5); }
+
+/* 占位页面提示（后续页面实装前的反馈） */
+.home-toast {
+  margin-top: 16px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #8a6500;
+  background: rgba(255, 248, 214, .96);
+  border: 1px solid rgba(201, 148, 0, .45);
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(46, 78, 40, .16);
+}
+.home-toast.pop { animation: rise .26s ease; }
+
+.home-foot { margin-top: 18px; font-size: 11px; color: #6f8a68; }
+
+/* 手机端：收紧主页面卡片，保证三个按钮一屏可见 */
+@media (max-width: 640px) {
+  .home-screen { padding: 16px; }
+  .home-inner { padding: 24px 18px 16px; border-radius: 18px; }
+  .home-logo { font-size: 44px; }
+  .home-title { font-size: 27px; letter-spacing: 5px; }
+  .home-sub { font-size: 11.5px; }
+  .home-btn { padding: 12px 13px; gap: 11px; }
+  .hb-icon { width: 28px; font-size: 22px; }
+  .hb-main { font-size: 15.5px; }
+  .hb-sub { font-size: 11px; }
+}
+@media (max-height: 620px) {
+  .home-brand { margin-bottom: 14px; }
+  .home-logo { font-size: 38px; }
+  .home-title { font-size: 26px; margin: 4px 0 4px; }
+  .home-btn { padding: 10px 14px; }
+}
+
+/* ============================================================
+   v121：卡组设置页面
+   - 结构：index.html 的 #deckScreen（静态骨架）+ deck-page.js（卡组位/卡牌网格）；
+   - 版面：整页纵向 flex —— 上方 .deck-bar flex:1、下方 .deck-pool flex:2
+     （≈ 1/3 : 2/3，与参考图一致）；
+   - 层级：.deck-screen z-index 45（游戏弹窗 modal-mask 50 / zoom-mask 60 之上仍可见，
+     所以点卡牌可复用 showZoom() 放大查看）；进入本页时 body.in-deck 隐藏游戏区；
+   - 卡面复用游戏手牌样式（.hand-card + cardFaceHTML），仅覆盖宽度以适配网格。
+   ============================================================ */
+.deck-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+  color: var(--txt);
+  background:
+    radial-gradient(900px 460px at 50% -10%, rgba(255, 248, 205, .85), transparent 62%),
+    radial-gradient(760px 460px at 4% 108%, rgba(146, 216, 150, .45), transparent 62%),
+    linear-gradient(168deg, #f2f8e6 0%, #dfeecd 46%, #d2e7bf 100%);
+}
+
+/* ---------- 上方 1/3：标题 + 卡组栏 ---------- */
+.deck-bar {
+  flex: 1 1 0;
+  min-height: 172px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .62);
+  box-shadow: 0 14px 34px rgba(46, 78, 40, .14);
+}
+.deck-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.deck-title { display: flex; align-items: center; gap: 10px; }
+.dt-icon { font-size: 26px; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .12)); }
+.deck-title h2 { font-size: 18px; letter-spacing: 2px; margin: 0; color: #2e4527; }
+.dt-sub { font-size: 11px; color: #64805c; }
+.dt-sub b { color: #a97e00; }
+.deck-top-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.deck-top-actions .bt-ico { margin-right: 4px; }
+.deck-hint { font-size: 11px; color: #78906f; }
+
+/* v134：bar-head 放在 deck-top 内；桌面默认整行占满（仍在标题/按钮下方单独一行） */
+.deck-bar-head {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.db-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #2e4527;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* v130：编辑态标题行只显示正在编辑的卡组名，用金色与浏览态的「我的卡组」区分 */
+.deck-screen.edit-mode .db-title { color: #a97e00; }
+.db-count { flex: 0 0 auto; font-size: 12px; font-weight: 800; color: #a97e00; font-variant-numeric: tabular-nums; }
+.db-count.full { color: var(--green); } /* v125：编辑态卡组满 12 / 12 时转绿 */
+.db-tip { flex: 0 1 auto; font-size: 11px; color: #78906f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 卡组位横向滚动条：容量 20 套，最左为「＋ 新建卡组」 */
+.deck-slots {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+.deck-slot {
+  position: relative; /* v124：缩略图右上角悬浮操作按钮的定位基准 */
+  flex: 0 0 auto;
+  width: 120px;
+  padding: 8px;
+  color: #2e4527;
+  border: 1px solid rgba(108, 148, 100, .42);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .88), rgba(240, 248, 231, .72));
+  transition: transform .08s, box-shadow .2s, border-color .2s, background .2s;
+}
+.deck-slot:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(46, 78, 40, .18); border-color: rgba(124, 168, 110, .8); }
+.deck-slot:active { transform: scale(.98); }
+.deck-slot.active { border-color: #e0a316; box-shadow: 0 0 0 2px rgba(224, 163, 22, .45), 0 10px 22px rgba(46, 78, 40, .18); }
+.deck-slot.new { border-style: dashed; border-color: rgba(201, 148, 0, .6); background: rgba(255, 248, 214, .62); }
+.deck-slot.new.full { opacity: .6; }
+/* v122：新建卡组时，新卡组位播一次入场动画（动态列表扩展的观感） */
+.deck-slot.just-added { animation: deckSlotIn .34s cubic-bezier(.2, .8, .3, 1.1); }
+@keyframes deckSlotIn {
+  from { opacity: 0; transform: translateY(8px) scale(.82); }
+  to { opacity: 1; transform: none; }
+}
+
+/* v124：卡组位主体（缩略图 + 名称 + 张数）——点击 = 选中该卡组。
+   卡组位本身改成容器 div，主体放进内部 button：这样缩略图上的「修改 / 删除」
+   两个悬浮按钮与主体同层、既合法嵌套又互不串点击。 */
+.ds-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+.ds-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+
+/* v124：缩略图右上角悬浮的操作按钮（v129 起**只剩 🗑️ 删除卡组**——
+   修改卡组改为点卡组位任意位置直接进入，故不再有 ✏️）。
+   默认隐藏（不占点击热区），鼠标悬停或键盘聚焦时淡入；触屏无 hover → 常驻显示。 */
+.ds-actions {
+  position: absolute;
+  top: 10px;
+  right: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .15s, visibility .15s;
+}
+.deck-slot:hover .ds-actions,
+.deck-slot:focus-within .ds-actions { opacity: 1; visibility: visible; pointer-events: auto; }
+.ds-act {
+  width: 25px;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  background: rgba(255, 255, 255, .96);
+  border: 1px solid rgba(108, 148, 100, .45);
+  border-radius: 50%;
+  box-shadow: 0 3px 8px rgba(46, 78, 40, .22);
+  transition: transform .08s, background .15s, border-color .15s;
+}
+.ds-act:hover { transform: scale(1.1); }
+.ds-act.del:hover { background: #ffe9e9; border-color: #d04848; }
+.ds-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (hover: none) { /* 触屏设备没有 hover：常驻显示悬浮按钮 */
+  .ds-actions { opacity: 1; visibility: visible; pointer-events: auto; }
+}
+
+/* ---------- v125：编辑卡组（点卡组位上的 ✏️ 后，卡组栏变成该卡组的 12 个卡槽）
+   v126：卡槽改为**自适应网格**（不再横向滚动）——宽屏 1 行 12 格，≤1000px 变 2 行 × 6 格，
+   每格按可用宽度自动缩放，因此任何宽度都能一次看全 12 个空位。 ---------- */
+.deck-slots.edit-mode {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  align-content: start;
+  gap: 8px;
+  padding: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* 编辑态上栏按**内容自适应高度**（v126）：12 格填满后不再多出一片空白，
+   省下的高度全部让给下方卡池；极端矮屏（横屏手机）才用 max-height 兜底、
+   由 .deck-slots 纵向滚动。 */
+.deck-screen.edit-mode .deck-bar { flex: 0 0 auto; max-height: 62%; }
+/* 已放卡槽 = 卡面（.hand-card 提供卡面外观，这里覆盖宽度 / 悬停位移 / 卡名截断） */
+.deck-card-slot { width: 100%; }
+.deck-card-slot .hc-text { display: none; } /* 卡槽紧凑：只留 费用 / 战力 / 立绘 / 卡名 */
+.deck-card-slot .hc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-card-slot:hover:not(.unaffordable) { transform: translateY(-2px); }
+/* 空卡槽 = 与卡面同构的“幽灵卡”（尺寸与已放卡槽完全一致，见 deck-page.js 注释）：
+   角标行(.dcs-top) / 正方形立绘区(.dcs-art) / 卡名行(.dcs-hint)，三段的尺寸与边距
+   均与 .cost-orb、.hand-card .hc-art、.hc-name 对齐。 */
+.deck-card-slot.empty {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 6px 6px 8px;
+  color: #7d947a;
+  border: 2px dashed rgba(108, 148, 100, .5); /* 与 .hand-card 的 2px 实线边框同宽 */
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .34);
+}
+.dcs-top { flex: 0 0 auto; height: 26px; } /* = .cost-orb / .p 高度 */
+.dcs-art {
+  flex: 0 0 auto;
+  width: calc(100% - 4px); /* = .hand-card .hc-art 宽度 */
+  aspect-ratio: 1 / 1;
+  margin: 4px auto 2px;    /* = .hc-art 边距 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(120, 150, 110, .13);
+}
+.dcs-idx { font-size: 22px; font-weight: 800; opacity: .75; }
+.dcs-hint { font-size: 12.5px; font-weight: 800; } /* = .hc-name 字号/字重，行高一致 */
+
+/* v126：编辑态下“已在卡组里”的卡牌 = 灰色遮罩 + 不可点击（移出请点上方卡槽） */
+.deck-pool-card.in-deck { cursor: default; }
+.deck-pool-card.in-deck::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  background: rgba(58, 68, 58, .52); /* 灰色遮罩 */
+  pointer-events: none;
+}
+.deck-pool-card.in-deck .hc-art,
+.deck-pool-card.in-deck .hc-icon { filter: grayscale(1); }
+.deck-pool-card.in-deck:hover:not(.unaffordable) {
+  transform: none; /* 已选卡不再上浮，明确“不可操作” */
+  box-shadow: 0 6px 14px rgba(46, 78, 40, .35), inset 0 0 0 1px rgba(255, 255, 255, .14);
+}
+
+/* ≤1000px：一行摆不下 12 格 → 2 行 × 6 格（手机端即用户要求的 2×6） */
+@media (max-width: 1000px) {
+  .deck-slots.edit-mode { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+}
+/* ≤700px（手机）：卡槽适当缩小，保证 12 格在卡组栏里一屏看全；顶部按钮只留图标省高度。
+   空位(.empty)与卡面(.filled)的每一段尺寸都同步缩小，两者仍保持完全一致的高度。
+   v134：编辑态把「卡组名 N/12」与一排操作按钮收进同一行（隐藏「卡组设置」页标题腾位）。 */
+@media (max-width: 700px) {
+  .deck-slots.edit-mode { gap: 5px; }
+  .deck-card-slot { padding: 3px 3px 4px; border-radius: 8px; }
+  .deck-card-slot .hc-art { margin: 2px auto 1px; }
+  .deck-card-slot .hc-name { font-size: 8.5px; }
+  .deck-card-slot .cost-orb,
+  .deck-card-slot .p { width: 16px; height: 16px; font-size: 8.5px; border-width: 1px; }
+  .deck-card-slot.empty { padding: 3px 3px 4px; border-radius: 8px; }
+  .dcs-top { height: 16px; }
+  .dcs-art { margin: 2px auto 1px; border-radius: 8px; }
+  .dcs-idx { font-size: 15px; }
+  .dcs-hint { font-size: 8.5px; }
+  .deck-top-actions .bt-txt { display: none; }        /* 顶部按钮只留图标（title 仍可悬停查看） */
+  .deck-top-actions .bt-ico { margin-right: 0; }
+  .deck-top-actions .btn { padding: 6px 10px; font-size: 14px; }
+
+  /* 编辑态：一行 = 卡组名 N/12 + ✏️🧹✓← */
+  .deck-screen.edit-mode .deck-top {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .deck-screen.edit-mode .deck-title { display: none; }
+  .deck-screen.edit-mode .deck-bar-head {
+    flex: 1 1 auto;
+    min-width: 0;
+    align-items: center;
+  }
+  .deck-screen.edit-mode .db-tip { display: none; }
+  .deck-screen.edit-mode .deck-top-actions {
+    flex: 0 0 auto;
+    margin-left: 0;
+    gap: 6px;
+  }
+}
+
+/* 卡组缩略：三张卡背叠放（占位卡组为空，故中央显示「＋」）
+   height: min(100%, 133px) —— 卡位够高时按 5:7 卡形（133 ≈ 95×7/5，正好等于
+   卡位内宽 92%），卡位偏矮时退回 100% 高度，两种情况都保持卡牌宽高比不拉伸。 */
+.ds-thumb { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.ds-stack { position: relative; height: min(100%, 133px); aspect-ratio: 5 / 7; }
+.ds-back {
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, .34);
+  background: linear-gradient(160deg, #2b314a, #151929); /* 同游戏暗牌卡背 */
+  box-shadow: 0 5px 12px rgba(0, 0, 0, .3);
+}
+.ds-back:nth-child(1) { transform: translateX(-11px) rotate(-8deg); }
+.ds-back:nth-child(2) { transform: translateY(-2px); }
+.ds-back:nth-child(3) { transform: translateX(11px) rotate(8deg); }
+.ds-emblem {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  font-weight: 800;
+  color: #ffe9a8;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .6);
+}
+.ds-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: min(100%, 133px);
+  aspect-ratio: 5 / 7;
+  font-size: 30px;
+  font-weight: 700;
+  color: rgba(90, 120, 84, .5);
+  border: 1px dashed rgba(108, 148, 100, .5);
+  border-radius: 10px;
+}
+.ds-plus.big { font-size: 38px; color: rgba(201, 148, 0, .75); border-color: rgba(201, 148, 0, .5); }
+.ds-name { max-width: 100%; font-size: 12px; font-weight: 800; letter-spacing: .5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-count { font-size: 10.5px; color: #64805c; font-variant-numeric: tabular-nums; }
+.ds-count.full { font-weight: 800; color: var(--green); }
+
+/* ---------- 下方 2/3：全部卡牌（不含衍生卡牌） ---------- */
+.deck-pool {
+  flex: 2 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .5);
+  box-shadow: 0 14px 34px rgba(46, 78, 40, .12);
+}
+.deck-pool-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dp-title { font-size: 13px; font-weight: 800; letter-spacing: 1px; color: #2e4527; }
+.dp-count { font-size: 11.5px; color: #64805c; }
+.dp-active { font-size: 11.5px; font-weight: 700; color: #a97e00; }
+.dp-tip { margin-left: auto; font-size: 11px; color: #78906f; }
+
+/* v131：卡组页费用筛选条（复用图鉴 .card-filter-bar / .chip，内边距适配卡池区） */
+.deck-filter-bar { padding: 0 2px 4px; flex-shrink: 0; }
+.deck-grid .deck-pool-card.token-card {
+  outline: 1px dashed rgba(120, 92, 170, .6);
+  outline-offset: -2px;
+}
+
+.deck-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  align-content: start; /* 卡少时不把行纵向撑满整块卡池 */
+  align-items: start;   /* 卡片按内容高度，不被单元格拉长 */
+  overflow-y: auto;
+  padding: 6px 2px 10px;
+  scrollbar-width: thin;
+}
+.deck-pool-card { width: 100%; height: auto; }
+/* v133：卡池卡面高度统一（对齐手牌 v103）——效果文字固定两行；卡名单行省略；
+   无图卡由 JS 加 .no-img，emoji 占正方形立绘区，与有图卡同高 */
+.deck-pool-card .hc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.deck-pool-card .hc-text {
+  flex: 0 0 auto;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.6em; /* 短文案 / 白板「—」也占两行，避免矮一截 */
+}
+.deck-pool-card:hover { border-color: rgba(242, 201, 76, .85); box-shadow: 0 0 0 2px rgba(242, 201, 76, .45); }
+
+/* 卡组改名弹窗（v129）：复用 .undo-modal 尺寸，中间一个居中的文本输入框 */
+.deck-rename-modal { max-width: 380px; width: 92vw; }
+.deck-rename-modal h2 { color: #2e4527; }
+.deck-rename-input {
+  width: 100%;
+  margin: 10px 0 6px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 16px;   /* ≥16px：iOS 上聚焦时不会自动放大页面 */
+  font-weight: 700;
+  color: #2e4527;
+  text-align: center;
+  background: #fff;
+  border: 2px solid rgba(108, 148, 100, .45);
+  border-radius: 10px;
+  outline: none;
+}
+.deck-rename-input::placeholder { color: #9aae94; font-weight: 400; }
+.deck-rename-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224, 163, 22, .22); }
+.deck-rename-tip { min-height: 17px; margin-bottom: 14px; font-size: 11.5px; color: #78906f; }
+.deck-rename-tip.warn { font-weight: 700; color: #d04848; }
+
+/* v137：开始对战 · 选出战卡组 */
+.battle-deck-modal { max-width: 420px; width: 92vw; padding: 26px 24px 22px; text-align: left; }
+.battle-deck-modal h2,
+.battle-deck-modal .modal-emblem,
+.battle-deck-modal .modal-sub { text-align: center; }
+.battle-deck-modal .modal-sub { margin-bottom: 12px; }
+.battle-deck-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(42vh, 320px);
+  overflow-y: auto;
+  margin-bottom: 16px;
+  padding: 2px;
+  scrollbar-width: thin;
+}
+.battle-deck-item {
+  appearance: none;
+  font: inherit;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  color: #2e4527;
+  background: rgba(255, 255, 255, .82);
+  border: 2px solid rgba(108, 148, 100, .4);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.battle-deck-item:hover { border-color: rgba(124, 168, 110, .85); background: #f2f9ea; }
+.battle-deck-item.selected {
+  border-color: #e0a316;
+  background: #fff8e6;
+  box-shadow: 0 0 0 2px rgba(224, 163, 22, .35);
+}
+.bd-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-count { flex: 0 0 auto; font-size: 12px; font-weight: 800; color: var(--green); font-variant-numeric: tabular-nums; }
+.bd-curve { flex: 0 0 auto; font-size: 10.5px; color: #64805c; font-variant-numeric: tabular-nums; }
+.battle-deck-empty {
+  text-align: center;
+  color: #78906f;
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 18px 8px 22px;
+}
+.battle-deck-modal .undo-btns { justify-content: center; flex-wrap: wrap; gap: 8px; }
+
+/* 卡组页确认弹窗（v124 删除卡组 / v125 清空卡组共用）：复用 .undo-modal 尺寸，
+   标题/图标带一点危险色（文案与按钮由 deck-page.js openConfirm() 动态填充） */
+.deck-confirm-modal h2 { color: #b23b3b; }
+.deck-confirm-modal .modal-emblem { filter: drop-shadow(0 4px 10px rgba(208, 72, 72, .35)); }
+/* 危险度较低的确认（danger:false）时按钮改回主色，标题保持普通绿字 */
+.deck-confirm-modal h2.safe { color: #2e4527; }
+
+/* 占位交互提示条 */
+.deck-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 46;
+  max-width: 88vw;
+  padding: 10px 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: center;
+  color: #8a6500;
+  background: rgba(255, 248, 214, .97);
+  border: 1px solid rgba(201, 148, 0, .45);
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(46, 78, 40, .22);
+}
+.deck-toast.pop { animation: rise .26s ease; }
+
+/* 手机端：卡组位收窄、卡牌网格紧凑（与图鉴 ≤640px 口径一致） */
+@media (max-width: 640px) {
+  .deck-screen { padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 10px; }
+  .deck-bar { min-height: 148px; padding: 10px; border-radius: 14px; }
+  .deck-title h2 { font-size: 16px; letter-spacing: 1px; }
+  .dt-icon { font-size: 22px; }
+  .deck-hint, .db-tip, .dp-tip { display: none; }
+  .deck-slot { width: 96px; padding: 6px; border-radius: 12px; }
+  .ds-main { gap: 4px; }
+  .ds-actions { top: 7px; right: 1px; gap: 4px; }
+  .ds-act { width: 22px; height: 22px; font-size: 11px; }
+  .ds-stack, .ds-plus { height: min(100%, 108px); } /* 96px 卡位内宽 84×92% ≈ 77 → 77×7/5 ≈ 108 */
+  .ds-name { font-size: 10.5px; }
+  .ds-count { font-size: 9.5px; }
+  .deck-pool { padding: 10px; border-radius: 14px; }
+  /* v128：手机端卡池卡片缩小 —— 最小列宽 84px → 74px，每行由 3 张提升到**至少 4 张**
+     （360~430px 宽手机 ≈ 4 张 / 480px ≈ 5 张 / 640px ≈ 7 张；更宽窗口仍由基础
+      minmax(104px) 控制，保证每行 ≥4 张） */
+  .deck-grid { grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
+  /* 手机端卡片简略显示：隐藏效果文字（同图鉴 #codexGrid 的 ≤640px 口径） */
+  .deck-grid .deck-pool-card .hc-text { display: none; }
+  .deck-grid .deck-pool-card .cost-orb,
+  .deck-grid .deck-pool-card .p { width: 19px; height: 19px; font-size: 9.5px; }
+  /* 小卡下长卡名（如「帕秋莉·诺蕾姬」）改为省略号，避免溢出到相邻卡上 */
+  .deck-grid .deck-pool-card .hc-name { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-height: 620px) and (min-width: 641px) {
+  .deck-bar { min-height: 150px; }
+  .deck-slot { width: 104px; }
+}
+/* v128：极窄屏（≤420px，如 320px 的老机型）兜底 —— 固定 4 列，
+   保证「每行至少 4 张卡」在任何手机宽度下都成立 */
+@media (max-width: 420px) {
+  .deck-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

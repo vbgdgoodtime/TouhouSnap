@@ -49,17 +49,9 @@ const HIDDEN_LOC_DEF = { id: 'unreveal', n: '未揭示', icon: '❓', wt: 1, dbl
 // 卡面渐变：有自定义 cg（如特殊卡牌「石块」的土黄色）则优先，否则按费用档位取色
 const gradOf = (def) => (def && def.cg) || GRADS[def.c];
 
-const DECK_CURVE = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 6];
-// 兜底抽牌顺序：费用平滑，保证前几回合有牌可打
-const FALLBACK_DRAW = [1, 2, 1, 3, 1, 2, 4, 2, 3, 5, 6, 6];
-
-// 抽牌顺序是否“开局友好”：前 3 抽必有 1 费，前 4 抽至少 2 张 ≤2 费
-function goodOpen(seq) {
-  const is1 = (v) => v === 1;
-  const cheap = (v) => v <= 2;
-  return (is1(seq[0]) || is1(seq[1]) || is1(seq[2]))
-    && (cheap(seq[0]) + cheap(seq[1]) + cheap(seq[2]) + cheap(seq[3]) >= 2);
-}
+const DECK_CURVE = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 6]; // 玩家兜底随机牌库（无自建卡组时）
+// v138：AI 开局随机卡组费用结构 1×2 / 2×3 / 3×3 / 4×1 / 5×1 / 6×2
+const AI_DECK_CURVE = [1, 1, 2, 2, 2, 3, 3, 3, 4, 5, 6, 6];
 
 /* ---------------- 工具 ---------------- */
 function shuffle(arr) {
@@ -173,7 +165,8 @@ let pendingSwitchFly = null; // v96：换边演出待播 {card, srcRect}（由 s
 // pickDef（开发者“指定卡牌”选中）已随页面实现一并拆分到 card-browser.js（v92）
 
 /* ---------------- 流程主循环 ---------------- */
-async function restart() {
+async function restart(opts) {
+  opts = opts || {};
   state.gen++;
   const gen = state.gen;
 
@@ -192,9 +185,18 @@ async function restart() {
   state.players.p.zones = [[], [], []]; state.players.p.hand = [];
   state.players.a.zones = [[], [], []]; state.players.a.hand = [];
 
-  // 造牌库：费用曲线随机 + 起手友好保证（同费用内不重复）
-  state.players.p.deck = buildDeckCards();
-  state.players.a.deck = buildDeckCards();
+  // v137：玩家可用自建满编卡组（opts.playerDeckDefs）；否则沿用上一局自建卡组；都没有则随机曲线
+  const custom = (opts.playerDeckDefs && opts.playerDeckDefs.length === 12)
+    ? opts.playerDeckDefs
+    : (lastPlayerDeckDefs && lastPlayerDeckDefs.length === 12 ? lastPlayerDeckDefs : null);
+  if (custom) {
+    lastPlayerDeckDefs = custom.slice();
+    state.players.p.deck = buildDeckFromDefs(custom);
+  } else {
+    state.players.p.deck = buildDeckCards(DECK_CURVE);
+  }
+  // v138：对手每局按 AI 费用结构从卡池随机组一套 12 张（同费用不重复）
+  state.players.a.deck = buildDeckCards(AI_DECK_CURVE);
 
   // v94：对手初始 3 张先在数据层发放（无展示动画）；玩家初始 3 张由 playOpening
   // 逐张播放“从右滑入”入场演出，第 1 回合开始双方再各抓 1 张（起手共 4 张）。
@@ -266,24 +268,30 @@ async function playOpening(gen) {
   await sleep(500); // 三张抽完 → 间隔 500ms（v119）
 }
 
-function buildDeckCards() {
-  // 每种费用的卡牌随机分配（同费用内不重复）
+function buildDeckCards(curve) {
+  // curve：费用序列（默认玩家兜底曲线）；每种费用从 POOL 随机抽、同费用不重复
+  // v139：抽牌顺序纯随机，不再做起手友好拒绝采样 / 兜底序列
+  curve = curve || DECK_CURVE;
   const buckets = {};
-  for (const c of [1, 2, 3, 4, 5, 6]) buckets[c] = shuffle(POOL[c].slice());
-  // 反复洗费用序列，直到满足「开局友好」；极限次数后使用平滑兜底序列
-  let draw = null;
-  for (let t = 0; t < 300 && !draw; t++) {
-    const seq = shuffle(DECK_CURVE.slice());
-    if (goodOpen(seq)) draw = seq;
-  }
-  if (!draw) draw = FALLBACK_DRAW.slice();
+  for (const c of [1, 2, 3, 4, 5, 6]) buckets[c] = shuffle((POOL[c] || []).slice());
+  const draw = shuffle(curve.slice());
   // 按抽牌顺序生成卡牌；drawOne() 从队尾取牌，因此反转存储
   const inDrawOrder = draw.map((c) => {
     const def = buckets[c].pop();
-    return newCard(def || POOL[c][0]);
+    return newCard(def || (POOL[c] && POOL[c][0]) || POOL[1][0]);
   });
   inDrawOrder.reverse();
   return inDrawOrder;
+}
+
+/* v137→v139：用玩家自建卡组（12 张 def）造牌库——纯随机洗牌；drawOne 从队尾取，故反转存储 */
+let lastPlayerDeckDefs = null;
+function buildDeckFromDefs(defs) {
+  const base = (defs || []).slice(0, 12);
+  if (base.length !== 12) return buildDeckCards(DECK_CURVE);
+  const cards = shuffle(base.slice()).map((d) => newCard(d));
+  cards.reverse();
+  return cards;
 }
 
 function newCard(defProto) {
