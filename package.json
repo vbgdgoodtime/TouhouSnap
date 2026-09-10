@@ -1,0 +1,12 @@
+{
+  "name": "touhou2",
+  "version": "0.0.0",
+  "private": true,
+  "description": "东方逆转 · 纯前端卡牌网页 Demo（Marvel Snap 玩法 / 东方 Project 主题）",
+  "scripts": {
+    "test": "node tests/smoke-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

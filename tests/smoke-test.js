@@ -1,9 +1,10 @@
 /* =========================================================
-   东方逆转 · 运行时冒烟测试（smoke-test.js）
+   东方逆转 · 运行时冒烟测试（tests/smoke-test.js）
    ---------------------------------------------------------
-   运行方式（无依赖构建工具，直接 node）：
-     node smoke-test.js
-     MATCHES=5 DECKS=3 SEED=12345 node smoke-test.js   # 环境变量可选
+   运行方式（项目根目录，无构建工具，直接 node）：
+     node tests/smoke-test.js        # 或 npm test
+     MATCHES=5 DECKS=3 SEED=12345 node tests/smoke-test.js   # 环境变量可选
+   依赖：jsdom（见根目录 package.json 的 devDependencies；npm install 安装）。
    环境变量：
      MATCHES  随机对局局数（默认 3）
      DECKS    随机构造的卡组套数（默认 2，最少 2 套才能覆盖浏览器选择流程）
@@ -11,10 +12,10 @@
      COVERAGE_BIAS=0  关闭「优先打出本局没出过的卡」的覆盖率引导（默认开启）
 
    测试环境（jsdom 30）：
-     - 以 http://touhou.local/ 为源加载 index.html，并用 requestInterceptor 把
-       该源下的请求映射到项目目录的本地文件 —— 这样脚本/CSS 正常加载，
-       同时 localStorage 可用（file:// 是 opaque origin，jsdom 会禁用 localStorage，
-       卡组持久化（v135）就没法测）。
+     - 以 http://touhou.local/ 为源加载根目录 index.html，并用 requestInterceptor 把
+       该源下的请求映射到项目目录的本地文件 —— 这样 js/、data/、assets/ 下的脚本、
+       样式与图片都正常加载，同时 localStorage 可用（file:// 是 opaque origin，
+       jsdom 会禁用 localStorage，卡组持久化（v135）就没法测）。
      - beforeParse 里把 window.Math.random 换成种子化 PRNG：
        游戏内随机（抽卡/地形/翻牌先后/AI）与测试驱动随机全部由 SEED 决定，失败可复现。
 
@@ -46,7 +47,7 @@ const path = require('path');
 const { JSDOM, VirtualConsole, requestInterceptor } = require('jsdom');
 
 /* ==================== 配置 ==================== */
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname, '..'); // 项目根目录（测试文件在 tests/ 下，资源按根目录相对路径解析）
 const ORIGIN = 'http://touhou.local/';
 const MATCHES = intEnv('MATCHES', 3);
 const DECKS_TO_BUILD = Math.max(2, intEnv('DECKS', 2));

@@ -56,7 +56,27 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
+        <!-- v174：设置入口 —— 紧接「卡组设置」下方（主入口的第 4 项）。
+             打开 #settingsMask：目前用于切换**对手 AI 强度**（v175 起四档：简单 / 普通 / 困难 / 月狂，
+             默认「简单」），选项与文案统一来自 js/ai.js 的 window.AI.LEVELS（本页不另写一份），
+             交互见 js/home.js（openSettings / closeSettings / setAiLevel）。
+             按钮副标题由 home.js 同步成「对手 AI 强度：<当前档位>」。 -->
+        <button type="button" class="home-btn" id="homeBtnSettings">
+          <span class="hb-icon">⚙️</span>
+          <span class="hb-text">
+            <span class="hb-main">设置</span>
+            <span class="hb-sub" id="homeSettingsSub">对手 AI 强度 · 简单 / 普通 / 困难 / 月狂</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
       </nav>
+      <!-- v172：新手引导 —— 主页面最下方的次级入口（四个主入口之下的轻量按钮）。
+           打开只读的机制速览弹窗（#guideMask，纯静态文案）；交互见 js/home.js，
+           样式见 style.css 的 .home-guide-btn / .guide-modal。 -->
+      <button type="button" class="home-guide-btn" id="homeBtnGuide">
+        <span class="hg-ico">📖</span>
+        <span class="hg-txt">新手引导 · 30 秒看懂怎么玩</span>
+      </button>
       <div class="home-toast hidden" id="homeToast" role="status" aria-live="polite"></div>
       <p class="home-foot">纯前端演示 · 无网络请求</p>
     </div>
@@ -136,6 +156,140 @@
     </div>
   </div>
 
+  <!-- v174：设置弹窗（主页面「⚙️ 设置」按钮打开，#homeBtnSettings）
+       目前只有一项：**对手 AI 强度**（v175 起四档：简单（默认）/ 普通 / 困难 / 月狂）。
+       - 四档的选项、名称、说明全部由 js/home.js 从 window.AI.LEVELS（js/ai.js）渲染，
+         本文件只留空容器，避免中文说明出现两份、口径漂移；
+         **v176：玩家可见文案只写难度感受（压力大小 / 适合谁），不写算法与深浅**
+         ——本文件这段的「关于对手」也只保留必要说明；技术口径见 LEVELS[key].tech（控制台/文档用）；
+       - 点选即生效（对手下一回合就用新强度），并写入 localStorage: touhou2.ai.level；
+       - 复用游戏弹窗样式（.modal-mask + .codex-modal 尺寸）；主页面态下由
+         style.css 的 `body.in-home #settingsMask:not(.hidden)` 放开显示（同 #battleDeckMask / #guideMask）。 -->
+  <div class="modal-mask hidden" id="settingsMask">
+    <div class="modal codex-modal settings-modal">
+      <div class="codex-head">
+        <h2>⚙️ 设置</h2>
+        <span class="codex-tip" id="settingsTip">对手 AI 强度</span>
+        <button type="button" class="btn btn-ghost codex-close" id="settingsCloseBtn">关闭 ✕</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-sec">
+          <h3><span class="ss-ico">🤖</span>对手 AI 强度</h3>
+          <p class="settings-note">四档只影响对手的<b>出牌水平</b>，不影响规则、卡牌与你自己的操作。点选即生效，并记住在你的浏览器里（之后开战也沿用）。</p>
+          <div class="ai-level-list" id="aiLevelList" role="radiogroup" aria-label="对手 AI 强度"></div>
+          <p class="settings-note" id="aiLevelDetail"></p>
+        </div>
+        <div class="settings-sec">
+          <h3><span class="ss-ico">💡</span>关于对手</h3>
+          <ul class="settings-list">
+            <li><b>简单 → 普通 → 困难 → 月狂</b> 逐级变强：觉得赢得太轻松就往上调一档，只想轻松打一局就留在「简单」。</li>
+            <li>难度只影响对手<b>出牌的水平</b>，它的牌库、你的卡组与全部对局规则都不变。</li>
+            <li>对手<b>每局都会随机组牌</b>，所以同一档也会遇到不同的牌路，多打几局再判断强度更准。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="pick-actions settings-actions">
+        <button type="button" class="btn btn-primary" id="settingsOkBtn">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v172：新手引导弹窗（主页面最下方「📖 新手引导」按钮打开，#homeBtnGuide）
+       只读的机制速览：全部为静态标记（无需 JS 渲染），交互只在 js/home.js
+       （开关 / Esc / 点遮罩空白 / 「⚔️ 开始对战」直接进选出战卡组）。
+       复用游戏弹窗样式（.modal-mask + .codex-modal 尺寸 + .guide-body 滚动区）；
+       主页面态下由 style.css 的 `body.in-home #guideMask:not(.hidden)` 放开显示（同 #battleDeckMask）。 -->
+  <div class="modal-mask hidden" id="guideMask">
+    <div class="modal codex-modal guide-modal">
+      <div class="codex-head">
+        <h2>📖 新手引导</h2>
+        <span class="codex-tip">3 分钟读完，马上能打一局</span>
+        <button type="button" class="btn btn-ghost codex-close" id="guideCloseBtn">关闭 ✕</button>
+      </div>
+
+      <div class="guide-body">
+        <div class="guide-sec">
+          <h3><span class="gs-ico">🎯</span>一句话目标</h3>
+          <ul>
+            <li>一局 <b>6 回合</b>、场上固定 <b>3 块区域</b>：终局<b>赢下区域更多</b>的一方获胜。</li>
+            <li>若存在<b>平局区域</b>，改为比<b>三个区域的总点数</b>（高者胜，仍相同才是平局）——所以「大赢两区」和「小赢三区」要自己权衡。</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">⚡</span>回合与能量</h3>
+          <ul>
+            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
+            <li>一回合可以<b>暗出任意多张牌</b>，只要费用总和不超过能量。</li>
+            <li>出完点右下角「<b>结束回合</b>」把回合交给对手（对手是 AI，会尽量把能量花完）。</li>
+            <li>出牌阶段点顶部<b>能量框</b>可重置：本回合暗出的牌按原顺序放回手牌、<b>能量全额返还</b>（本回合移动过的卡也移回原位）。</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">🂠</span>暗出 → 翻牌 → 揭示</h3>
+          <ul>
+            <li>先点手牌选中，再点区域即<b>暗出</b>：牌背朝上、<b>不计点数</b>，双方都看不见。</li>
+            <li>双方出完后<b>逐张翻开</b>：翻面那一刻结算这张牌写的「<b>揭示</b>」效果（加成 / 削弱 / 摧毁 / 生成 / 换边 / 变身……），并且<b>翻面后才把战力计入该区点数</b>。</li>
+            <li>翻牌先后：<b>第 1 回合随机</b>；之后由<b>当前领先的一方先翻</b>（持平则随机）；同一方内部严格按<b>放置先后</b>翻。</li>
+            <li>每块区域每方最多放 <b>4 张</b>（个别地形更少；画着「<b>隙间</b> ≋」的格子不能放牌）。</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">🗺️</span>地形（区域）</h3>
+          <ul>
+            <li>开局三块地形都是「<b>未揭示</b> ❓」，在<b>第 1 / 2 / 3 回合开始</b>依次揭晓（左 → 中 → 右），揭晓当刻结算它的「出现时」效果。</li>
+            <li>地形效果举例：出现时给双方生成卡牌（虹龙洞 → 石块）、每回合结束成长 / 衰减 / 摧毁、<b>反转区</b>（点数低的一方反而赢下该区）、限制放牌张数、第 N 回合起才开放……</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">✦</span>卡牌效果的两类口径</h3>
+          <ul>
+            <li><b>揭示</b>：只在<b>翻开的这一次</b>结算，之后不再触发（例：「同区你的其他卡 +2」「摧毁同区对方最低战力」「把本区变成辉针城」）。</li>
+            <li><b>持续 / 常驻</b>：翻开后<b>一直有效</b>，卡一离场立即失效（例：「此区域双方卡牌都不会被摧毁」「己方石块 +2」）。</li>
+            <li><b>法术</b>（带「✦ 法术」标记）：<b>没有战力</b>，只花能量、只结算揭示效果，结算完<b>自行消散</b>、不占格位。</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">🎲</span>赌注、认输与复盘</h3>
+          <ul>
+            <li>初始赌注 <b>1 立方</b>；「<b>双倍下注</b>」把赌注翻倍（1 → 2 → 4 → 8，上限 8），<b>赌注只由你推动</b>（对手不会加倍、也不会跟进）。终局赢家拿走当前赌注，输家扣掉同样的数量。</li>
+            <li>「<b>认输</b>」立即判负，输掉当前赌注。</li>
+            <li>结算弹窗点「确认」会保留终局盘面，可以点场上 / 手牌里的卡放大复盘。</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">🧭</span>主页面各入口怎么用</h3>
+          <ul>
+            <li><b>开始对战</b>：先选一套<b>满 12 张</b>的出战卡组再开打（对手每局随机组牌）。</li>
+            <li><b>卡组设置</b>：组建 / 改名 / 删除卡组（上限 20 套、每套 12 张、同名卡限 1 张），自动存在本地。</li>
+            <li><b>设置</b>（⚙️，v174）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
+            <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
+          </ul>
+        </div>
+
+        <div class="guide-sec">
+          <h3><span class="gs-ico">💡</span>几个小提示</h3>
+          <ul>
+            <li>点场上<b>已翻开</b>的卡可以放大查看，并弹出「<b>战力影响历史</b>」逐条列出它当前的战力来源（基础 / 增益台账 / 持续效果 / 区域加成）。</li>
+            <li>卡面<b>左上角是费用</b>、<b>右上角是当前战力</b>：战力比基础高显示绿色、低显示红色；费用被改高后显示红字。</li>
+            <li>「图鉴」（对局中顶栏）可查看全部卡牌与说明；手牌<b>右键</b>也能直接放大查看。</li>
+            <li>区域中间带会实时显示双方点数，领先的一方亮黄；同区谁先翻牌看的是这个实时盘面。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="pick-actions guide-actions">
+        <button type="button" class="btn btn-ghost" id="guideStartBtn">⚔️ 开始对战</button>
+        <button type="button" class="btn btn-primary" id="guideOkBtn">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 卡组改名弹窗（v129）：由编辑态顶部「✏️ 改名」打开（`#deckRenameBtn`）；
        输入框预填原名并全选，回车 = 确定、Esc / 点遮罩 = 取消；
        校验（非空 / 最长 12 字 / 不与其它卡组重名）与写入见 deck-page.js。
@@ -183,12 +337,13 @@
       </button>
       <div class="hud-item" id="turnBox"><span class="hud-label">回合</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit">/ 6</span></div>
       <div class="hud-item clickable" id="energyBox" title="点击可重置本回合已暗出的牌（能量全额返还）" onclick="Game.ui.onEnergyReset()">
-        <span class="hud-label">能量</span><span class="hud-value" id="energyVal">1</span><span class="hud-unit" id="energyUnit">/ 6</span><span class="reset-mark">↺</span>
+        <span class="hud-label">能量</span><span class="hud-value" id="energyVal">1</span><span class="hud-unit" id="energyUnit">/ 6</span><span class="energy-bonus hidden" id="energyBonus">+1</span><span class="reset-mark">↺</span>
       </div>
       <div class="hud-item cubes"><span class="hud-label">赌注</span><span class="cube" id="cubeVal">1</span><span class="cube-pips" id="cubePips"></span></div>
     </div>
     <div class="top-actions">
       <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()">⚡ 修改能量</button>
+      <button id="btnPickLoc" class="btn btn-ghost hidden" onclick="Game.ui.onPickLoc()" title="开发调试：指定并替换区域地形">🗻 指定地形</button>
       <button id="btnPick" class="btn btn-ghost" onclick="Game.ui.onPick()">🎯 指定卡牌</button>
       <button id="btnSwitchSide" class="btn btn-ghost hidden" onclick="Game.ui.onSwitchSide()" title="开发调试：切换落牌立场">⇄ 切换立场</button>
       <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
@@ -219,7 +374,7 @@
       <div class="rules">
         <h3>玩法速览</h3>
         <ul>
-          <li>共 6 回合，能量逐回合 +1（上限 6）。</li>
+          <li>共 6 回合，能量逐回合 +1（上限 6）；「额外能量」（如斯塔萨菲雅）会让下一回合上限临时 +1，顶栏能量框显示绿色「+N」。</li>
           <li>开局三块地形皆为「未揭示」，第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。</li>
           <li>每回合可把多张牌暗出到各区域，总费用不超能量；出完点「结束回合」。</li>
           <li>出牌结束后翻牌结算「揭示」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>
@@ -300,6 +455,33 @@
     </div>
   </div>
 
+  <!-- 开发者：指定地形（先选区域 1/2/3，再点选地形 → 替换）
+       v149：区域选择条从弹窗底部移到标题下方（底部在矮屏/手机端会被 88vh 裁掉导致点不到），
+             并改为三等分按钮组，目标区域始终可见。 -->
+  <div class="modal-mask hidden" id="pickLocMask">
+    <div class="modal codex-modal pick-loc-modal">
+      <div class="codex-head">
+        <h2>🗻 指定地形（开发者）</h2>
+        <span class="codex-tip" id="pickLocTip">先选区域，再点选一种地形，最后点「替换地形」</span>
+        <button class="btn btn-ghost codex-close" onclick="Game.ui.onPickLocClose()">取消 ✕</button>
+      </div>
+      <div class="pick-loc-zone-row" id="pickLocZones" role="group" aria-label="选择要替换的区域">
+        <span class="plz-label">替换区域</span>
+        <button type="button" class="btn btn-ghost plz-btn" data-loc="0" aria-pressed="false">区域 1（左）</button>
+        <button type="button" class="btn btn-ghost plz-btn" data-loc="1" aria-pressed="false">区域 2（中）</button>
+        <button type="button" class="btn btn-ghost plz-btn" data-loc="2" aria-pressed="false">区域 3（右）</button>
+      </div>
+      <div class="codex-grid loc-pick-grid" id="pickLocGrid"></div>
+      <div class="pick-actions">
+        <label class="plz-check" title="勾选后：替换地形等同于真实「揭晓」，立即结算该地形的「出现时」效果（如虹龙洞 → 双方各 1 张石块）；取消勾选则只换地形、不生成卡牌">
+          <input type="checkbox" id="pickLocSpawn" checked />
+          <span>结算「出现时」效果（如虹龙洞生成石块）</span>
+        </label>
+        <button class="btn btn-primary" id="btnPickLocConfirm" onclick="Game.ui.onPickLocConfirm()">替换地形</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 开发者：指定卡牌（点选 1 张 → 确认加入手牌） -->
   <div class="modal-mask hidden" id="pickMask">
     <div class="modal codex-modal">
@@ -362,18 +544,19 @@
     <button id="btnPass" class="btn btn-pass" onclick="Game.ui.onPass()">跳过回合</button>
   </div>
 
+  <!-- 加载顺序即依赖顺序：数据 → 引擎 → 拆分子模块 → 页面入口（纯前端无模块化，勿调整次序） -->
   <script src="data/cards.js"></script>
   <script src="data/locations.js"></script>
-  <script src="game.js"></script>
-  <script src="ai.js"></script>
-  <script src="card-browser.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/card-browser.js"></script>
   <!-- v120：主页面脚本（在游戏脚本之后加载，只调用 window.Game.restart() 等既有入口） -->
-  <script src="home.js"></script>
+  <script src="js/home.js"></script>
   <!-- v135：卡组本地持久化（须在 deck-page.js 之前） -->
-  <script src="deck-storage.js"></script>
+  <script src="js/deck-storage.js"></script>
   <!-- v121：卡组设置页面（主页面「卡组设置」入口 → window.DeckBuilder） -->
-  <script src="deck-page.js"></script>
+  <script src="js/deck-page.js"></script>
   <!-- v142：开发调试入口（主页面「开发调试」→ window.DevTools；空玩家牌库直接开战） -->
-  <script src="dev-page.js"></script>
+  <script src="js/dev-page.js"></script>
 </body>
 </html>

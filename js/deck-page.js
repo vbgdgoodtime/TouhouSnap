@@ -108,6 +108,10 @@
     }
     return false;
   }
+  // v170：法术卡（def.spell）没有战力——标题等文案里不要写成“威力 0”
+  function powerText(def) {
+    return (def && def.spell) ? '法术 · 无战力' : ('威力 ' + def.p);
+  }
 
   function defByName(name) {
     if (!name) return null;
@@ -381,7 +385,7 @@
     btn.className = 'hand-card deck-card-slot filled';
     btn.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色
     btn.innerHTML = cardFaceHTML(def);             // 复用 game.js 的卡面结构
-    btn.title = '第 ' + (index + 1) + ' 张：' + def.n + '（' + def.c + ' 费 / 威力 ' + def.p + '）· 点击移出卡组';
+    btn.title = '第 ' + (index + 1) + ' 张：' + def.n + '（' + def.c + ' 费 / ' + powerText(def) + '）· 点击移出卡组';
     btn.addEventListener('click', function () { removeFromDeck(deck.id, def); });
     return btn;
   }
@@ -477,7 +481,7 @@
       el.setAttribute('aria-disabled', 'true');
       el.title = def.n + '（已在卡组中）· 点上方卡槽可移出 · 右键放大查看';
     } else {
-      el.title = def.n + '（' + def.c + ' 费 / 威力 ' + def.p + '）· ' + (deck ? '点击加入卡组' : '点击放大查看');
+      el.title = def.n + '（' + def.c + ' 费 / ' + powerText(def) + '）· ' + (deck ? '点击加入卡组' : '点击放大查看');
     }
     el.addEventListener('click', function () {
       if (token) { // 衍生卡：任何状态都只放大查看

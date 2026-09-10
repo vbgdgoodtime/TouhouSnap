@@ -2,7 +2,7 @@
    东方逆转 · card-browser.js（v92→v97）
    图鉴 / 开发者“指定卡牌”页面的费用筛选与卡牌网格渲染。
    筛选档：全部 / 0-1 费 / 2 费 / 3 费 / 4 费 / 5 费 / 6 费 / 衍生卡牌。
-   —— 衍生卡牌：展示所有特殊卡 token（石块/厄运/赫卡提亚的分身/废弃列车），
+   —— 衍生卡牌：展示所有特殊卡 token（石块/厄运/赫卡提亚的分身/废弃列车/河童），
       静态占位「隙间」不列入；图鉴中可点击放大查看；
       “指定卡牌”页里衍生卡仅可查看（不参与“加入手牌”选择）。
    依赖（运行时）：window.DS_CARDS.POOL / .SPECIAL 与 game.js 暴露的
@@ -108,13 +108,18 @@
     }
     defs.forEach(function (def) {
       var el = document.createElement('div');
-      el.className = 'codex-card hand-card' + (isTokenDef(def) ? ' token-card' : '');
+      // 无图卡加 .no-img：emoji 占正方形立绘区，与有图卡同高同宽（对齐手牌 v103 / 卡组池 v133）
+      el.className = 'codex-card hand-card'
+        + (def.img ? '' : ' no-img')
+        + (isTokenDef(def) ? ' token-card' : '');
       el.style.setProperty('--cgrad', gradOf(def));
       el.innerHTML = cardFaceHTML(def);
-      el.title = def.n + (isTokenDef(def) ? '（衍生卡牌）' : '');
+      // v170：法术 token（def.spell）在「指定卡牌」页可以加入手牌（便于调试机制），
+      // 其余衍生卡仍维持“仅可查看、不加入手牌”的口径
+      el.title = def.n + (isTokenDef(def) ? (def.spell ? '（法术 · 衍生卡牌）' : '（衍生卡牌）') : '');
       if (isCodex) {
         el.addEventListener('click', function () { showZoom(def); });
-      } else if (isTokenDef(def)) {
+      } else if (isTokenDef(def) && !def.spell) {
         // 衍生卡在“指定卡牌”页仅可查看，防止误选加入手牌
         el.addEventListener('click', function () { showZoom(def); });
         el.title = def.n + '（衍生卡牌 · 仅可查看）';
@@ -123,7 +128,8 @@
           page.pick.picked = def;
           if (grid) grid.querySelectorAll('.pick-picked').forEach(function (x) { x.classList.remove('pick-picked'); });
           el.classList.add('pick-picked');
-          $('pickTip').textContent = '已选：「' + def.n + '」（' + def.c + ' 费 / 威力 ' + def.p + '）';
+          $('pickTip').textContent = '已选：「' + def.n + '」（' + def.c + ' 费 / '
+            + ((def && def.spell) ? '法术 · 无战力' : ('威力 ' + def.p)) + '）';
         });
       }
       if (grid) grid.appendChild(el);
@@ -133,7 +139,7 @@
     if (isCodex) {
       $('codexCount').textContent = defs.length + ' 种' + (f.key !== 'all' ? '（' + f.label + '）' : '');
     } else {
-      var extra = f.token ? ' · 衍生卡仅可查看，不加入手牌' : '';
+      var extra = f.token ? ' · 衍生卡仅可查看，不加入手牌（法术 token 除外）' : '';
       $('pickTip').textContent = '当前手牌 ' + state.players.p.hand.length + '/7 — 点选 1 张后确认（当前：' + f.label + '）' + extra;
     }
   }
@@ -173,7 +179,7 @@
   function confirmPick() {
     var def = page.pick.picked;
     if (!def) { setStatus('请先在弹窗里点选一张卡牌。'); return; }
-    if (isTokenDef(def)) { setStatus('衍生卡牌仅可查看，不能加入手牌。'); return; }
+    if (isTokenDef(def) && !def.spell) { setStatus('衍生卡牌仅可查看，不能加入手牌（法术 token 除外）。'); return; }
     var pl = state.players.p;
     if (pl.hand.length >= 7) {
       setStatus('手牌已满（' + pl.hand.length + '/7），无法加入「' + def.n + '」。');

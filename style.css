@@ -172,12 +172,23 @@ body {
 .location.weight    { border-color: rgba(201, 148, 0, .6); }
 .location.slot2     { border-color: rgba(138, 112, 206, .55); }
 .location.rainbow   { border-color: rgba(196, 150, 72, .6); }
+.location.cucumber  { border-color: rgba(120, 176, 96, .55); }
 .location.dragon    { border-color: rgba(88, 176, 198, .6); }
 .location.lake      { border-color: rgba(116, 168, 224, .6); }
 .location.needle    { border-color: rgba(168, 132, 214, .6); }
 .location.tanabata  { border-color: rgba(196, 108, 150, .55); }
 .location.underworld { border-color: rgba(108, 120, 140, .6); }
 .location.reactor   { border-color: rgba(255, 122, 72, .6); }
+.location.geyser    { border-color: rgba(47, 143, 136, .6); }
+.location.terakoya  { border-color: rgba(168, 118, 60, .6); }
+.location.komakusa  { border-color: rgba(226, 186, 84, .65); }
+.location.dicetable { border-color: rgba(214, 180, 92, .6); }
+.location.ghostmansion { border-color: rgba(150, 190, 215, .55); }
+.location.concert      { border-color: rgba(255, 122, 196, .6); }
+.location.magicstorm   { border-color: rgba(96, 200, 220, .6); }
+.location.barrier      { border-color: rgba(111, 154, 138, .6); }
+.location.dormouse     { border-color: rgba(143, 131, 184, .6); }
+.location.fairyshrine  { border-color: rgba(207, 95, 74, .6); }
 /* 聚变反应炉：暗红色为主的主题底 */
 .location.reactor {
   background: linear-gradient(180deg, #47100b 0%, #5c1509 100%);
@@ -202,6 +213,271 @@ body {
 .location.reactor .slot-count { color: #ffe3d0; background: rgba(58, 12, 8, .78); }
 .location.reactor .cell-guide { border-color: rgba(255, 200, 170, .28); }
 .location.reactor .zone .slot-row.quad::before { background: rgba(255, 190, 160, .22); }
+
+/* 间歇泉：成套青绿水汽主题（主底浅青；边框/表头深青）；
+   效果＝每回合结束本区双方已翻开卡牌永久 −1 战力（decay） */
+.location.geyser {
+  background: #e3f4f2;
+  border-color: #2f8f88;
+}
+.location.geyser .loc-head {
+  background: linear-gradient(180deg, #2f8f88, #1f6f6a);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.geyser .loc-name { color: #ffffff; }
+.location.geyser .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(214, 240, 237, .58));
+  border-bottom-color: rgba(47, 143, 136, .3);
+}
+.location.geyser .loc-effect { color: #1f625e; }
+.location.geyser .zone.opp {
+  background: rgba(47, 143, 136, .10);
+  border-bottom-color: rgba(47, 143, 136, .25);
+}
+.location.geyser .zone.player-zone {
+  background: linear-gradient(180deg, rgba(47, 143, 136, .07), transparent 70%);
+}
+.location.geyser .cell-guide { border-color: rgba(47, 143, 136, .4); }
+.location.geyser .zone .slot-row.quad::before { background: rgba(47, 143, 136, .3); }
+.location.geyser .slot-count { color: #1f625e; background: rgba(255, 255, 255, .85); }
+
+/* 寺子屋：成套和纸米色 + 木质棕主题（主底和纸米白；边框/表头木棕）；
+   效果＝每回合结束本区双方已翻开卡牌永久 +1 战力（grow，间歇泉的正向镜像） */
+.location.terakoya {
+  background: #f7efdf;
+  border-color: #a8763c;
+}
+.location.terakoya .loc-head {
+  background: linear-gradient(180deg, #a8763c, #87592a);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.terakoya .loc-name { color: #ffffff; }
+.location.terakoya .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(243, 230, 206, .6));
+  border-bottom-color: rgba(168, 118, 60, .3);
+}
+.location.terakoya .loc-effect { color: #7a5320; }
+.location.terakoya .zone.opp {
+  background: rgba(168, 118, 60, .10);
+  border-bottom-color: rgba(168, 118, 60, .25);
+}
+.location.terakoya .zone.player-zone {
+  background: linear-gradient(180deg, rgba(168, 118, 60, .07), transparent 70%);
+}
+.location.terakoya .cell-guide { border-color: rgba(168, 118, 60, .4); }
+.location.terakoya .zone .slot-row.quad::before { background: rgba(168, 118, 60, .3); }
+.location.terakoya .slot-count { color: #7a5320; background: rgba(255, 255, 255, .85); }
+
+/* 驹草赌场：暗紫 + 金 的赌场主题（暗底浅字，风格同聚变反应炉）；
+   效果＝在此区域翻开的卡牌永久随机 +1 / −1 战力（gamble） */
+.location.komakusa {
+  background: linear-gradient(180deg, #2a1c41 0%, #3b2657 100%);
+}
+.location.komakusa .loc-head {
+  background: linear-gradient(180deg, rgba(96, 62, 140, .94), rgba(69, 43, 105, .9));
+  border-bottom-color: rgba(240, 208, 122, .45);
+}
+.location.komakusa .loc-name { color: #ffeec2; }
+.location.komakusa .loc-mid {
+  background: linear-gradient(180deg, rgba(58, 36, 92, .55), rgba(44, 27, 71, .68));
+  border-bottom-color: rgba(240, 208, 122, .3);
+}
+.location.komakusa .loc-effect { color: #f2d79a; }
+.location.komakusa .zone.opp {
+  background: rgba(88, 56, 138, .3);
+  border-bottom-color: rgba(240, 208, 122, .22);
+}
+.location.komakusa .zone.player-zone {
+  background: linear-gradient(180deg, rgba(180, 140, 240, .16), transparent 70%);
+}
+.location.komakusa .slot-count { color: #ffeec2; background: rgba(38, 24, 62, .8); }
+.location.komakusa .cell-guide { border-color: rgba(240, 208, 122, .3); }
+.location.komakusa .zone .slot-row.quad::before { background: rgba(240, 208, 122, .22); }
+
+/* 骰子赌桌：绿呢赌桌 + 金边主题（暗底浅字，风格同驹草赌场/聚变反应炉）；
+   效果＝第 4 回合结束时本区所有卡牌各自随机永久 +1 / −1 战力（dice） */
+.location.dicetable {
+  background: linear-gradient(180deg, #10362a 0%, #1a4c38 100%);
+}
+.location.dicetable .loc-head {
+  background: linear-gradient(180deg, rgba(30, 96, 70, .94), rgba(21, 68, 49, .9));
+  border-bottom-color: rgba(226, 196, 120, .45);
+}
+.location.dicetable .loc-name { color: #eaf7e6; }
+.location.dicetable .loc-mid {
+  background: linear-gradient(180deg, rgba(20, 66, 48, .55), rgba(14, 46, 34, .68));
+  border-bottom-color: rgba(226, 196, 120, .3);
+}
+.location.dicetable .loc-effect { color: #ecd9a4; }
+.location.dicetable .zone.opp {
+  background: rgba(30, 92, 66, .32);
+  border-bottom-color: rgba(226, 196, 120, .22);
+}
+.location.dicetable .zone.player-zone {
+  background: linear-gradient(180deg, rgba(150, 226, 180, .14), transparent 70%);
+}
+.location.dicetable .slot-count { color: #eaf7e6; background: rgba(12, 40, 30, .8); }
+.location.dicetable .cell-guide { border-color: rgba(226, 196, 120, .3); }
+.location.dicetable .zone .slot-row.quad::before { background: rgba(226, 196, 120, .22); }
+
+/* 幽灵洋馆：暗夜石板蓝 + 幽蓝微光主题（暗底浅字）；
+   效果＝区域出现时双方各生成 1 张「幽灵」（spawn），幽灵每回合开始会飘走 */
+.location.ghostmansion {
+  background: linear-gradient(180deg, #1b2230 0%, #2a3345 100%);
+}
+.location.ghostmansion .loc-head {
+  background: linear-gradient(180deg, rgba(52, 66, 92, .95), rgba(38, 49, 70, .92));
+  border-bottom-color: rgba(178, 214, 236, .4);
+}
+.location.ghostmansion .loc-name { color: #dceaf7; }
+.location.ghostmansion .loc-mid {
+  background: linear-gradient(180deg, rgba(38, 48, 68, .55), rgba(26, 34, 50, .68));
+  border-bottom-color: rgba(178, 214, 236, .28);
+}
+.location.ghostmansion .loc-effect { color: #a9c6de; }
+.location.ghostmansion .zone.opp {
+  background: rgba(120, 160, 195, .14);
+  border-bottom-color: rgba(178, 214, 236, .2);
+}
+.location.ghostmansion .zone.player-zone {
+  background: linear-gradient(180deg, rgba(160, 200, 235, .12), transparent 70%);
+}
+.location.ghostmansion .slot-count { color: #dceaf7; background: rgba(18, 24, 36, .8); }
+.location.ghostmansion .cell-guide { border-color: rgba(178, 214, 236, .26); }
+.location.ghostmansion .zone .slot-row.quad::before { background: rgba(178, 214, 236, .2); }
+
+/* 演唱会：暗紫舞台 + 霓虹粉主题（暗底浅字）；
+   效果＝第 5 回合结束时本区双方所有已翻开卡牌永久 +2 战力（rally） */
+.location.concert {
+  background: linear-gradient(180deg, #3a1440 0%, #5a1a52 100%);
+}
+.location.concert .loc-head {
+  background: linear-gradient(180deg, rgba(180, 44, 120, .95), rgba(130, 30, 92, .92));
+  border-bottom-color: rgba(255, 190, 226, .45);
+}
+.location.concert .loc-name { color: #ffe6f5; }
+.location.concert .loc-mid {
+  background: linear-gradient(180deg, rgba(120, 30, 92, .5), rgba(80, 20, 66, .62));
+  border-bottom-color: rgba(255, 190, 226, .3);
+}
+.location.concert .loc-effect { color: #ffc9e6; }
+.location.concert .zone.opp {
+  background: rgba(200, 60, 140, .22);
+  border-bottom-color: rgba(255, 190, 226, .22);
+}
+.location.concert .zone.player-zone {
+  background: linear-gradient(180deg, rgba(255, 140, 200, .16), transparent 70%);
+}
+.location.concert .slot-count { color: #ffe6f5; background: rgba(60, 12, 44, .8); }
+.location.concert .cell-guide { border-color: rgba(255, 190, 226, .3); }
+.location.concert .zone .slot-row.quad::before { background: rgba(255, 190, 226, .22); }
+
+/* 魔力风暴：暗青蓝风暴 + 电光青主题（暗底浅字）；
+   效果＝在此区域翻开的卡牌，揭示效果结算后被吹到另一个随机区域（gust） */
+.location.magicstorm {
+  background: linear-gradient(180deg, #14293a 0%, #1d4052 100%);
+}
+.location.magicstorm .loc-head {
+  background: linear-gradient(180deg, rgba(38, 92, 116, .95), rgba(26, 68, 88, .92));
+  border-bottom-color: rgba(150, 232, 246, .42);
+}
+.location.magicstorm .loc-name { color: #dff6fb; }
+.location.magicstorm .loc-mid {
+  background: linear-gradient(180deg, rgba(26, 68, 88, .55), rgba(16, 46, 62, .68));
+  border-bottom-color: rgba(150, 232, 246, .3);
+}
+.location.magicstorm .loc-effect { color: #a8dcea; }
+.location.magicstorm .zone.opp {
+  background: rgba(90, 180, 205, .16);
+  border-bottom-color: rgba(150, 232, 246, .22);
+}
+.location.magicstorm .zone.player-zone {
+  background: linear-gradient(180deg, rgba(140, 225, 245, .13), transparent 70%);
+}
+.location.magicstorm .slot-count { color: #dff6fb; background: rgba(14, 34, 46, .82); }
+.location.magicstorm .cell-guide { border-color: rgba(150, 232, 246, .28); }
+.location.magicstorm .zone .slot-row.quad::before { background: rgba(150, 232, 246, .2); }
+
+/* 幽明结界：清透青玉雾主题（浅底深字，与「冥界」的灰暗主题区分）；
+   效果＝每回合结束双方总卡牌数 ≥6 时本区崩塌成「冥界」（collapse） */
+.location.barrier {
+  background: #e6f0ea;
+  border-color: #6f9a8a;
+}
+.location.barrier .loc-head {
+  background: linear-gradient(180deg, #6f9a8a, #54806f);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.barrier .loc-name { color: #ffffff; }
+.location.barrier .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(214, 234, 226, .6));
+  border-bottom-color: rgba(111, 154, 138, .3);
+}
+.location.barrier .loc-effect { color: #35604f; }
+.location.barrier .zone.opp {
+  background: rgba(111, 154, 138, .10);
+  border-bottom-color: rgba(111, 154, 138, .25);
+}
+.location.barrier .zone.player-zone {
+  background: linear-gradient(180deg, rgba(111, 154, 138, .07), transparent 70%);
+}
+.location.barrier .cell-guide { border-color: rgba(111, 154, 138, .4); }
+.location.barrier .zone .slot-row.quad::before { background: rgba(111, 154, 138, .3); }
+.location.barrier .slot-count { color: #35604f; background: rgba(255, 255, 255, .85); }
+
+/* 睡鼠神祠：淡紫灰「安眠」主题（浅底深字）；
+   效果＝此区域双方卡牌都不会被摧毁（prot，与「蕾蒂」同一判定入口） */
+.location.dormouse {
+  background: #eeeaf6;
+  border-color: #8f83b8;
+}
+.location.dormouse .loc-head {
+  background: linear-gradient(180deg, #8f83b8, #6f6497);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.dormouse .loc-name { color: #ffffff; }
+.location.dormouse .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(226, 221, 242, .6));
+  border-bottom-color: rgba(143, 131, 184, .3);
+}
+.location.dormouse .loc-effect { color: #554b7d; }
+.location.dormouse .zone.opp {
+  background: rgba(143, 131, 184, .10);
+  border-bottom-color: rgba(143, 131, 184, .25);
+}
+.location.dormouse .zone.player-zone {
+  background: linear-gradient(180deg, rgba(143, 131, 184, .07), transparent 70%);
+}
+.location.dormouse .cell-guide { border-color: rgba(143, 131, 184, .4); }
+.location.dormouse .zone .slot-row.quad::before { background: rgba(143, 131, 184, .3); }
+.location.dormouse .slot-count { color: #554b7d; background: rgba(255, 255, 255, .85); }
+
+/* 妖精神社：奶油底 + 朱红灯笼主题（浅底深字）；
+   效果＝区域出现时双方各生成 1 张随机 1 费人物卡（spawn.cost） */
+.location.fairyshrine {
+  background: #fbeee3;
+  border-color: #cf5f4a;
+}
+.location.fairyshrine .loc-head {
+  background: linear-gradient(180deg, #cf5f4a, #a8462f);
+  border-bottom-color: rgba(255, 255, 255, .28);
+}
+.location.fairyshrine .loc-name { color: #ffffff; }
+.location.fairyshrine .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(247, 226, 214, .62));
+  border-bottom-color: rgba(207, 95, 74, .3);
+}
+.location.fairyshrine .loc-effect { color: #8f3a26; }
+.location.fairyshrine .zone.opp {
+  background: rgba(207, 95, 74, .10);
+  border-bottom-color: rgba(207, 95, 74, .25);
+}
+.location.fairyshrine .zone.player-zone {
+  background: linear-gradient(180deg, rgba(207, 95, 74, .07), transparent 70%);
+}
+.location.fairyshrine .cell-guide { border-color: rgba(207, 95, 74, .4); }
+.location.fairyshrine .zone .slot-row.quad::before { background: rgba(207, 95, 74, .3); }
+.location.fairyshrine .slot-count { color: #8f3a26; background: rgba(255, 255, 255, .85); }
 
 /* 辉针城：反转区意象——上下各半（上黑下白） */
 .location.needle {
@@ -356,6 +632,32 @@ body {
 .location.rainbow .cell-guide { border-color: rgba(183, 138, 48, .4); }
 .location.rainbow .zone .slot-row.quad::before { background: rgba(183, 138, 48, .3); }
 .location.rainbow .slot-count { color: #7a5b0a; background: rgba(255, 255, 255, .85); }
+
+/* 黄瓜田：淡绿色主题（浅绿主底 + 草绿边框/表头） */
+.location.cucumber {
+  background: #e8f5df;
+  border-color: #6aa84f;
+}
+.location.cucumber .loc-head {
+  background: linear-gradient(180deg, #6aa84f, #558a3f);
+  border-bottom-color: rgba(255, 255, 255, .3);
+}
+.location.cucumber .loc-name { color: #ffffff; }
+.location.cucumber .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(228, 242, 216, .55));
+  border-bottom-color: rgba(106, 168, 79, .32);
+}
+.location.cucumber .loc-effect { color: #3f6b2e; }
+.location.cucumber .zone.opp {
+  background: rgba(106, 168, 79, .10);
+  border-bottom-color: rgba(106, 168, 79, .26);
+}
+.location.cucumber .zone.player-zone {
+  background: linear-gradient(180deg, rgba(106, 168, 79, .08), transparent 70%);
+}
+.location.cucumber .cell-guide { border-color: rgba(106, 168, 79, .4); }
+.location.cucumber .zone .slot-row.quad::before { background: rgba(106, 168, 79, .3); }
+.location.cucumber .slot-count { color: #3f6b2e; background: rgba(255, 255, 255, .85); }
 
 /* 七夕坂：淡粉纯色主题（浅粉主底 + 深粉边框/表头） */
 .location.tanabata {
@@ -671,6 +973,17 @@ body {
 }
 .mini-card .p.up { color: #4ade8f; border-color: #4ade8f; text-shadow: 0 0 6px rgba(70,222,143,.65); }
 .mini-card .p.down { color: #ff6d6d; border-color: #ff6d6d; text-shadow: 0 0 6px rgba(255,109,109,.65); }
+/* v170：法术卡（def.spell）——只显示能量花费，不显示战力；战力位改为「✦ 法术」小标 */
+.mini-card .mc-spell {
+  position: absolute; top: 4px; right: 5px; left: auto;
+  padding: 1px 6px; border-radius: 6px;
+  font-size: 11px; font-weight: 800; letter-spacing: .3px;
+  color: #d9c9ff; background: rgba(38,26,72,.82);
+  border: 1px solid rgba(168,140,255,.65);
+  box-shadow: 0 1px 3px rgba(0,0,0,.5), 0 0 8px rgba(140,110,255,.35);
+  z-index: 2;
+}
+.mini-card.spell { box-shadow: inset 0 0 0 1px rgba(168,140,255,.45), 0 2px 8px rgba(30,20,60,.45); }
 .mini-card .mc-icon { font-size: clamp(20px, 3.4vh + 1vw, 42px); line-height: 1; text-shadow: 0 2px 4px rgba(0,0,0,.5); }
 .mini-card .mc-name { font-size: clamp(11px, 1.1vw + .4vh, 16px); line-height: 1.2; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 .mini-card .mc-mod {
@@ -759,6 +1072,242 @@ body {
     0 0 6px rgba(255, 130, 130, 1),
     0 0 18px rgba(255, 90, 90, .9),
     0 2px 3px rgba(0, 0, 0, .7);
+}
+
+/* v169：卡牌“费用修改”的数字着色与演出（现由桑尼米尔克 k='costUp' 触发）
+   口径与战力数字一致：费用数字**变高=红、变低=绿**（白色=印刷费用）。
+   场上缩略卡（.mc-cost）与卡面费用宝珠（.cost-orb）各自独立着色，
+   因此战力/费用可以同时是红色而不会互相干扰。 */
+.mini-card .mc-cost.up { color: #ff6d6d; border-color: #ff6d6d; text-shadow: 0 0 6px rgba(255,109,109,.7); }
+.mini-card .mc-cost.down { color: #4ade8f; border-color: #4ade8f; text-shadow: 0 0 6px rgba(70,222,143,.7); }
+.cost-orb.up { color: #ff8a8a; border-color: #ff6d6d; box-shadow: 0 0 6px rgba(255,109,109,.55); }
+.cost-orb.down { color: #7bf0b0; border-color: #4ade8f; box-shadow: 0 0 6px rgba(70,222,143,.55); }
+/* 卡位上的费用变化小光环（白→橙）。文字气泡复用 .buff-gain-pop 的浮起动画，
+   但字号缩小——它写的是「卡名 费用 +1」这种长文案，不是单个数字。 */
+.gain-ring.cost-ring {
+  animation: costHiRing 1s ease-out;
+}
+@keyframes costHiRing {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 196, 92, .85); }
+  100% { box-shadow: 0 0 0 14px rgba(255, 196, 92, 0); }
+}
+.buff-gain-pop.cost-pop {
+  font-size: clamp(13px, 1.5vw, 19px);
+  letter-spacing: 0;
+  max-width: none;
+}
+.mini-card.cost-changed { box-shadow: 0 0 0 2px rgba(255, 196, 92, .9), 0 2px 10px rgba(255, 170, 60, .5); }
+/* 放大/详情弹窗里的“印刷费用 → 现在”提示行 */
+.zm-kind.cost-mod-note { color: #ffb454; }
+
+/* v169（修订）：桑尼米尔克加费的**完整卡牌揭示演出**——
+   中央弹出被加费那张手牌的**完整卡面**（配图 / 卡名 / 战力）+ 费用从 N 涨到 N+1（可读的三段式），
+   解决“小气泡文字太小、看不出是谁被加费”的问题。整段约 2.4s：
+   弹入(scale) → 抖动一下 → 停留展示 → 整体上浮淡出，期间金色光环脉动两下。
+   元素放 body 悬浮层（z-index 9500），不受盘面重渲染影响，也不挡操作（pointer-events:none）。 */
+.cost-reveal {
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  z-index: 9500;
+  pointer-events: none;
+  animation: costRevealAnim 2.4s cubic-bezier(.2,.8,.3,1) forwards;
+}
+.cost-reveal-ring {
+  position: absolute;
+  inset: -16px;
+  border-radius: 22px;
+  animation: costRevealRing 2.4s ease-out forwards;
+}
+@keyframes costRevealRing {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 196, 92, .85); }
+  30%  { box-shadow: 0 0 0 16px rgba(255, 196, 92, .30); }
+  55%  { box-shadow: 0 0 0 4px rgba(255, 196, 92, .55); }
+  100% { box-shadow: 0 0 0 30px rgba(255, 196, 92, 0); }
+}
+@keyframes costRevealAnim {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(.5) rotate(-3deg); }
+  10%  { opacity: 1; transform: translate(-50%, -50%) scale(1.1) rotate(1.5deg); }
+  15%  { transform: translate(-50%, -50%) scale(.97) rotate(-3deg); }
+  20%  { transform: translate(-50%, -50%) scale(1.04) rotate(2.5deg); }
+  25%  { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+  78%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-50%, calc(-50% - 30px)) scale(.95) rotate(0deg); }
+}
+.cost-reveal-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.cost-reveal-tag {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(20, 14, 4, .88);
+  border: 1px solid rgba(255, 196, 92, .8);
+  color: #ffd08a;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .45);
+}
+.cost-reveal-card {
+  position: relative;
+  width: 138px;
+  height: 190px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 2px solid #ffc45c;
+  background: var(--cgrad, #26304a);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .55), 0 0 0 4px rgba(255, 196, 92, .18);
+}
+.cost-reveal-card.no-img { background: var(--cgrad, linear-gradient(150deg, #2e5f96, #7cc0ff)); }
+.cost-reveal-card .rc-art {
+  width: 108px;
+  height: 108px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cost-reveal-card .rc-art img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cost-reveal-card .rc-art .rc-emoji { font-size: 54px; line-height: 1; filter: drop-shadow(0 3px 5px rgba(0, 0, 0, .5)); }
+.cost-reveal-card.has-img .rc-art .rc-emoji { display: none; }
+.cost-reveal-card .rc-name {
+  max-width: 124px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 费用横幅：印刷费用（旧，划掉）→ 修正后的费用（新，涨红 / 降绿）——只展示费用的变化 */
+.cost-reveal-cost {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 10px;
+  background: rgba(12, 10, 20, .92);
+  border: 1px solid rgba(255, 196, 92, .7);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.cost-reveal-cost .rc-label { font-size: 11px; font-weight: 700; color: #ffd08a; }
+.rc-old { color: #e8ecf5; font-size: 22px; opacity: .8; }
+.rc-old s { text-decoration-thickness: 2px; text-decoration-color: #ff6d6d; }
+.rc-arrow { color: #ffc45c; font-size: 17px; }
+.rc-new { font-size: 26px; color: #ff6d6d; text-shadow: 0 0 8px rgba(255, 109, 109, .85); }
+.rc-new.down { color: #4ade8f; text-shadow: 0 0 8px rgba(70, 222, 143, .85); }
+.cost-reveal-note {
+  font-size: 11.5px;
+  color: #ffe6b8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .85);
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .cost-reveal-card { width: 110px; height: 152px; }
+  .cost-reveal-card .rc-art { width: 84px; height: 84px; }
+  .cost-reveal-card .rc-art .rc-emoji { font-size: 42px; }
+  .cost-reveal-card .rc-name { font-size: 12px; max-width: 100px; }
+  .cost-reveal-cost { gap: 5px; padding: 3px 8px; }
+  .rc-old { font-size: 18px; }
+  .rc-new { font-size: 22px; }
+  .cost-reveal-tag { font-size: 11px; padding: 2px 9px; }
+  .cost-reveal-note { font-size: 10.5px; }
+}
+
+/* v169：额外能量（斯塔萨菲雅 k='energyNext'）的两段演出
+   ① 登记段（揭示当刻、卡位上）：卡位金光闪一下 + 金色光环扩散 + 星光迸发 + 「能量 +1」气泡；
+   ② 到账段（下回合开始、顶栏能量框上）：同款但锚点换成能量框，并配合 #energyBonus 的绿色角标。
+   所有元素都在 body 悬浮层（z-index 9400）且 pointer-events:none，不挡操作。 */
+.energy-card-flash { animation: energyCardFlash 1.4s ease-out; pointer-events: none; }
+@keyframes energyCardFlash {
+  0%   { background: rgba(255, 226, 140, 0); box-shadow: 0 0 0 0 rgba(255, 214, 92, .85); }
+  18%  { background: rgba(255, 236, 170, .45); box-shadow: 0 0 22px 8px rgba(255, 214, 92, .75); }
+  45%  { background: rgba(255, 236, 170, .16); box-shadow: 0 0 10px 3px rgba(255, 214, 92, .4); }
+  100% { background: rgba(255, 226, 140, 0); box-shadow: 0 0 0 0 rgba(255, 214, 92, 0); }
+}
+.energy-box-flash { animation: energyBoxFlash 1.4s ease-out; pointer-events: none; }
+@keyframes energyBoxFlash {
+  0%   { background: rgba(90, 235, 150, 0); box-shadow: 0 0 0 0 rgba(90, 235, 150, .9); }
+  20%  { background: rgba(150, 255, 195, .45); box-shadow: 0 0 22px 9px rgba(90, 235, 150, .8); }
+  50%  { background: rgba(150, 255, 195, .15); box-shadow: 0 0 10px 3px rgba(90, 235, 150, .45); }
+  100% { background: rgba(90, 235, 150, 0); box-shadow: 0 0 0 0 rgba(90, 235, 150, 0); }
+}
+.energy-ring { animation: energyRingPulse 1.4s ease-out; pointer-events: none; }
+@keyframes energyRingPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 214, 92, .8); }
+  60%  { box-shadow: 0 0 0 16px rgba(255, 214, 92, .28); }
+  100% { box-shadow: 0 0 0 30px rgba(255, 214, 92, 0); }
+}
+/* 星光迸发粒子：起点由 JS 写入 left/top，终点由 --edx/--edy 给出 */
+.energy-star {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  z-index: 9400;
+  pointer-events: none;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(255, 214, 92, .95), 0 2px 4px rgba(0, 0, 0, .5);
+  animation: energyStarFly .95s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+@keyframes energyStarFly {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(.4) rotate(0deg); }
+  22%  { opacity: 1; transform: translate(-50%, -50%) scale(1.35) rotate(20deg); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--edx, 0px)), calc(-50% + var(--edy, -40px))) scale(.7) rotate(80deg); }
+}
+/* v170：法术消散的星光（复用 .energy-star 的飞行关键帧，只把辉光换成淡紫） */
+.energy-star.spell-star { text-shadow: 0 0 9px rgba(178, 150, 255, .95), 0 2px 4px rgba(0, 0, 0, .5); }
+/* 「能量 +N」气泡（主行大号金字 + 副行小字说明），锚点坐标由 JS 写入 */
+.energy-pop {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  z-index: 9410;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+  white-space: nowrap;
+  animation: energyPop 1.6s ease-out forwards;
+}
+.energy-pop .ep-main {
+  font-size: clamp(20px, 2.6vw, 30px);
+  font-weight: 900;
+  color: #ffe08a;
+  letter-spacing: .5px;
+  text-shadow: 0 0 10px rgba(255, 200, 60, .95), 0 0 22px rgba(255, 168, 40, .8), 0 2px 4px rgba(0, 0, 0, .7);
+}
+.energy-pop .ep-sub {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff6da;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(20, 14, 4, .8);
+  border: 1px solid rgba(255, 214, 92, .6);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+}
+@keyframes energyPop {
+  0%   { opacity: 0; transform: translate(-50%, -30%) scale(.55); }
+  16%  { opacity: 1; transform: translate(-50%, -60%) scale(1.18); }
+  34%  { opacity: 1; transform: translate(-50%, -72%) scale(1); }
+  74%  { opacity: 1; transform: translate(-50%, -96%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -130%) scale(.94); }
+}
+@media (max-width: 700px) {
+  .energy-pop .ep-main { font-size: 20px; }
+  .energy-pop .ep-sub { font-size: 11px; }
 }
 
 /* v90：场上“生成/落场”卡牌的诞生演出（1s，节奏同 ±N）——凝聚显形：
@@ -868,6 +1417,15 @@ body {
   text-shadow: 0 0 4px rgba(255,210,63,.5);
 }
 .hand-card .hc-icon { font-size: 30px; text-align: center; margin: 4px 0 2px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+/* v170：法术卡（def.spell）——卡框不显示战力，右上角战力位改显「✦ 法术」小标 */
+.hand-card .hc-spell {
+  font-size: 10px; font-weight: 800; letter-spacing: .3px;
+  padding: 2px 7px; border-radius: 999px;
+  color: #d9c9ff; background: rgba(38,26,72,.85);
+  border: 1px solid rgba(168,140,255,.65);
+  text-shadow: 0 0 6px rgba(160,130,255,.5);
+  white-space: nowrap;
+}
 /* v103：手牌尺寸统一——无图（emoji 兜底）的卡也占一块与图片卡同款的正方形艺术区，
    白板/短文案的卡预留两行效果文字高度，使手牌各卡高度一致、入场不再互相撑高 */
 .hand-card.no-img .hc-icon {
@@ -1063,6 +1621,28 @@ body {
   font-size: 15px;
   opacity: .85;
 }
+/* v169：能量框上的「额外能量」角标（斯塔萨菲雅 → 下回合 +1 能量）——
+   显示本回合能量里由「额外能量」机制多出来的点数，回合结束随下次能量结算归零。 */
+.energy-bonus {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: linear-gradient(150deg, #1f6f4a, #48d68a);
+  border: 1px solid #8af0b6;
+  color: #eaffef;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  box-shadow: 0 0 8px rgba(72, 214, 138, .55);
+  animation: energyBonusPop .5s ease-out;
+}
+/* 隐藏时优先级要压过 display:flex，故显式覆盖全局 .hidden（v169） */
+.energy-bonus.hidden { display: none !important; }
+@keyframes energyBonusPop {
+  0%   { transform: scale(.5); opacity: 0; }
+  60%  { transform: scale(1.22); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
 
 /* ============ 重置确认弹窗 ============ */
 .undo-modal { max-width: 360px; width: 90vw; padding: 26px 30px; }
@@ -1073,6 +1653,122 @@ body {
 /* 开发者“指定卡牌”弹窗 */
 .pick-actions { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
 .codex-card.pick-picked { border-color: #f2c94c; box-shadow: 0 0 0 3px rgba(242, 201, 76, .85), 0 8px 18px rgba(46, 78, 40, .4); transform: translateY(-4px); }
+
+/* v148：开发者「指定地形」弹窗
+   v149 修复「区域 2 / 区域 3 点不到」：
+     - 区域选择条移到标题下方并作为**三等分按钮组**，始终在弹窗可见区内（不再被 88vh 裁掉）；
+     - 只有地形网格滚动（flex:1 + min-height:0 + max-height），选择条与「替换」按钮设为 flex:0 0 auto 不被压缩；
+     - 该弹窗所在遮罩允许滚动，矮屏/手机端也能滚到「替换」按钮。 */
+.pick-loc-modal .loc-pick-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 46vh;
+}
+.pick-loc-modal .pick-loc-zone-row,
+.pick-loc-modal .pick-actions { flex: 0 0 auto; }
+.pick-loc-modal .codex-tip.warn { color: #c0392b; font-weight: 700; }
+/* 「指定地形」与「指定卡牌」两个调试弹窗：内容超高时遮罩可滚动，控件永不被 88vh 裁掉 */
+#pickLocMask, #pickMask { overflow-y: auto; align-items: flex-start; padding: 10px; }
+#pickLocMask > .pick-loc-modal, #pickMask > .codex-modal { margin: auto; }
+/* 弹窗内只有卡牌/地形网格滚动，底部按钮条固定可见（v149） */
+.codex-modal .codex-grid { flex: 1 1 auto; min-height: 0; }
+.pick-actions { flex: 0 0 auto; flex-wrap: wrap; align-items: center; }
+/* v150：「出现时」效果开关（开发者「指定地形」） */
+.plz-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #3d5535;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 10px;
+  border: 1px dashed rgba(108, 148, 100, .5);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .5);
+}
+.plz-check input { width: 14px; height: 14px; accent-color: #3d6b3a; cursor: pointer; }
+.plz-check:hover { border-color: rgba(242, 201, 76, .9); background: rgba(255, 250, 226, .9); }
+.loc-pick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 12px 10px;
+  border: 2px solid rgba(70, 100, 60, .35);
+  border-radius: 12px;
+  background: linear-gradient(160deg, #f4f8ef, #e4eed9);
+  color: #2e4527;
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.loc-pick-card:hover {
+  border-color: rgba(242, 201, 76, .85);
+  box-shadow: 0 0 0 2px rgba(242, 201, 76, .45);
+  transform: translateY(-2px);
+}
+.loc-pick-card.pick-picked {
+  border-color: #f2c94c;
+  box-shadow: 0 0 0 3px rgba(242, 201, 76, .85), 0 8px 18px rgba(46, 78, 40, .35);
+  transform: translateY(-3px);
+}
+.loc-pick-card .lpc-icon { font-size: 28px; line-height: 1; }
+.loc-pick-card .lpc-name { font-size: 15px; font-weight: 800; letter-spacing: .5px; }
+.loc-pick-card .lpc-eff {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #5a7352;
+  min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.loc-pick-card .lpc-meta { font-size: 10px; color: #7a9070; margin-top: 2px; }
+/* 区域选择条：三等分按钮组（v149） */
+.pick-loc-zone-row {
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px dashed rgba(108, 148, 100, .35);
+  position: relative;
+  z-index: 2; /* 保险：永远盖在地形网格之上，避免被滚动内容压住 */
+}
+.pick-loc-zone-row .plz-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #3d5535;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.pick-loc-zone-row .plz-btn {
+  width: 100%;
+  padding: 9px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.pick-loc-zone-row .plz-btn:hover:not(.active) {
+  border-color: rgba(242, 201, 76, .9);
+  background: rgba(255, 250, 226, .95);
+}
+.pick-loc-zone-row .plz-btn.active {
+  background: #3d6b3a;
+  color: #f4ffe8;
+  border-color: #2e4527;
+  font-weight: 700;
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(242, 201, 76, .6);
+}
+@media (max-width: 520px) {
+  .pick-loc-zone-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pick-loc-zone-row .plz-label { grid-column: 1 / -1; margin: 0 0 2px; }
+}
 
 /* ============ 图鉴 / 放大卡牌 ============ */
 .codex-modal {
@@ -1229,7 +1925,7 @@ body {
 .pp-row.pp-total { margin-top: 4px; border-top: 1px dashed rgba(126, 168, 118, .5); border-radius: 0 0 8px 8px; font-weight: 800; background: rgba(122, 158, 110, .16); }
 .pp-row.pp-total .pp-num { color: #2e4527; }
 
-/* ============ 卡牌图片素材（cards-image/） ============ */
+/* ============ 卡牌图片素材（assets/cards/） ============ */
 /* 手牌/图鉴/放大卡面：图片占方形艺术区；缺图时垫底 emoji 透出 */
 .hc-art {
   position: relative;
@@ -1412,7 +2108,7 @@ body { -webkit-tap-highlight-color: transparent; }
     padding: calc(8px + var(--sa-top)) calc(10px + var(--sa-right)) 8px calc(10px + var(--sa-left));
   }
 
-  /* 状态条常驻：同步更新见 game.js setStatus() */
+  /* 状态条常驻：同步更新见 js/game.js setStatus() */
   .mob-status {
     display: block;
     flex: 0 0 auto;
@@ -1880,11 +2576,13 @@ body.in-home #battleDeckMask:not(.hidden) {
   .home-logo { font-size: 38px; }
   .home-title { font-size: 26px; margin: 4px 0 4px; }
   .home-btn { padding: 10px 14px; }
+  /* v172：矮屏时把最下方的「新手引导」入口再压紧一点（卡片本身可纵向滚动，不会裁掉） */
+  .home-guide-btn { margin-top: 8px; padding: 8px 12px; font-size: 12px; }
 }
 
 /* ============================================================
    v121：卡组设置页面
-   - 结构：index.html 的 #deckScreen（静态骨架）+ deck-page.js（卡组位/卡牌网格）；
+   - 结构：index.html 的 #deckScreen（静态骨架）+ js/deck-page.js（卡组位/卡牌网格）；
    - 版面：整页纵向 flex —— 上方 .deck-bar flex:1、下方 .deck-pool flex:2
      （≈ 1/3 : 2/3，与参考图一致）；
    - 层级：.deck-screen z-index 45（游戏弹窗 modal-mask 50 / zoom-mask 60 之上仍可见，
@@ -2073,7 +2771,7 @@ body.in-home #battleDeckMask:not(.hidden) {
 .deck-card-slot .hc-text { display: none; } /* 卡槽紧凑：只留 费用 / 战力 / 立绘 / 卡名 */
 .deck-card-slot .hc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deck-card-slot:hover:not(.unaffordable) { transform: translateY(-2px); }
-/* 空卡槽 = 与卡面同构的“幽灵卡”（尺寸与已放卡槽完全一致，见 deck-page.js 注释）：
+/* 空卡槽 = 与卡面同构的“幽灵卡”（尺寸与已放卡槽完全一致，见 js/deck-page.js 注释）：
    角标行(.dcs-top) / 正方形立绘区(.dcs-art) / 卡名行(.dcs-hint)，三段的尺寸与边距
    均与 .cost-orb、.hand-card .hc-art、.hc-name 对齐。 */
 .deck-card-slot.empty {
@@ -2326,8 +3024,8 @@ body.in-home #battleDeckMask:not(.hidden) {
   box-shadow: 0 0 0 2px rgba(224, 163, 22, .35);
 }
 .bd-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bd-count { flex: 0 0 auto; font-size: 12px; font-weight: 800; color: var(--green); font-variant-numeric: tabular-nums; }
-.bd-curve { flex: 0 0 auto; font-size: 10.5px; color: #64805c; font-variant-numeric: tabular-nums; }
+/* v154：卡组位不再显示费用构成（.bd-curve）与「12 / 12」徽标（.bd-count）——整行只留卡组名，
+   手机端与电脑端一致；12 张信息保留在卡组位的悬停提示（title）里 */
 .battle-deck-empty {
   text-align: center;
   color: #78906f;
@@ -2338,7 +3036,7 @@ body.in-home #battleDeckMask:not(.hidden) {
 .battle-deck-modal .undo-btns { justify-content: center; flex-wrap: wrap; gap: 8px; }
 
 /* 卡组页确认弹窗（v124 删除卡组 / v125 清空卡组共用）：复用 .undo-modal 尺寸，
-   标题/图标带一点危险色（文案与按钮由 deck-page.js openConfirm() 动态填充） */
+   标题/图标带一点危险色（文案与按钮由 js/deck-page.js openConfirm() 动态填充） */
 .deck-confirm-modal h2 { color: #b23b3b; }
 .deck-confirm-modal .modal-emblem { filter: drop-shadow(0 4px 10px rgba(208, 72, 72, .35)); }
 /* 危险度较低的确认（danger:false）时按钮改回主色，标题保持普通绿字 */
@@ -2398,4 +3096,204 @@ body.in-home #battleDeckMask:not(.hidden) {
    保证「每行至少 4 张卡」在任何手机宽度下都成立 */
 @media (max-width: 420px) {
   .deck-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ============================================================
+   v172：主页面「📖 新手引导」（#homeBtnGuide 按钮 + #guideMask 弹窗）
+   - 按钮 = 主页面三个主入口**下方**的次级入口：虚线描边、更矮更轻，
+     与 .home-btn 同宽同圆角，保证主页面的按钮列仍然对齐；
+     文案与图标都写在 index.html 里（本段只管样式）。
+   - 弹窗 = 复用 .modal-mask + .codex-modal（已带 z-index 50 / max-height:88vh /
+     纵向 flex），.guide-modal 把宽度收窄到 680px；正文放 .guide-body
+     （flex:1 + min-height:0 + overflow-y:auto）→ **只有正文滚动，
+     标题与底部按钮常驻可见**（矮屏与手机端同口径）。
+   - 主页面态：`body.in-home .modal-mask { display: none }`（本文件上方主页面段）
+     会连弹窗一起隐藏，故照 #battleDeckMask 的写法单独放开显示，
+     z-index 212 盖过首页层（#homeScreen 为 200）。
+   ============================================================ */
+body.in-home #guideMask:not(.hidden) {
+  display: flex;
+  z-index: 212;
+}
+
+/* 主页面最下方的新手引导入口（放在三个主入口之下） */
+.home-guide-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: #4d6b46;
+  cursor: pointer;
+  border: 1px dashed rgba(108, 148, 100, .62);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .5);
+  transition: transform .08s, background .2s, border-color .2s, box-shadow .2s, color .2s;
+}
+.home-guide-btn:hover {
+  color: #2e4527;
+  background: #fff;
+  border-color: rgba(124, 168, 110, .9);
+  box-shadow: 0 8px 20px rgba(46, 78, 40, .14);
+  transform: translateY(-1px);
+}
+.home-guide-btn:active { transform: scale(.985); }
+.home-guide-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-guide-btn .hg-ico { font-size: 16px; line-height: 1; }
+
+/* 新手引导弹窗：正文可滚动，标题与底部按钮固定 */
+.guide-modal { width: min(680px, 94vw); max-width: min(680px, 94vw); }
+.guide-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 6px 6px 2px;
+  scrollbar-width: thin;
+}
+.guide-sec { margin-bottom: 15px; }
+.guide-sec:last-child { margin-bottom: 4px; }
+.guide-sec h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #2e4527;
+}
+.guide-sec h3 .gs-ico { font-size: 17px; line-height: 1; }
+.guide-sec ul { margin: 0; padding-left: 18px; }
+.guide-sec li { margin-bottom: 4px; font-size: 12.8px; line-height: 1.72; color: #3f5b39; }
+.guide-sec li b { color: #24401f; }
+.guide-actions { flex: 0 0 auto; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .home-guide-btn { margin-top: 10px; padding: 9px 12px; font-size: 12px; }
+  .guide-modal { width: 94vw; max-width: 94vw; padding: 14px 14px 12px; }
+  .guide-sec h3 { font-size: 13.5px; }
+  .guide-sec li { font-size: 12.2px; line-height: 1.68; }
+  .guide-actions .btn { flex: 1 1 auto; min-width: 0; }
+}
+
+/* ============================================================
+   v174：主页面「⚙️ 设置」（#homeBtnSettings 按钮 + #settingsMask 弹窗）
+   - 按钮 = 主入口列里紧接「卡组设置」的第 4 项，样式复用 .home-btn（不加新样式），
+     副标题由 home.js 同步为「对手 AI 强度：<当前档位>」，故这里只需要给弹窗写样式；
+   - 弹窗 = 复用 .modal-mask + .codex-modal（z-index 50 / max-height:88vh / 纵向 flex），
+     .settings-modal 收窄到 520px；正文 .settings-body 可滚动（同 .guide-body 口径），
+     标题与底部按钮常驻；
+   - 三档难度选项由 home.js 从 window.AI.LEVELS 渲染成 .ai-level-opt 按钮，
+     选中项加 .on（描边 + 勾标 + 浅绿底），保证一眼看出当前强度；
+   - 主页面态：`body.in-home .modal-mask { display: none }` 会把弹窗一起隐藏，
+     照 #battleDeckMask(210) / #guideMask(212) 的写法单独放开显示，
+     z-index 211 —— 低于新手引导（212），高于出战卡组弹窗（210）。
+   ============================================================ */
+body.in-home #settingsMask:not(.hidden) {
+  display: flex;
+  z-index: 211;
+}
+
+.settings-modal { width: min(520px, 94vw); max-width: min(520px, 94vw); }
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 6px 6px 2px;
+  scrollbar-width: thin;
+}
+.settings-sec { margin-bottom: 15px; }
+.settings-sec:last-child { margin-bottom: 4px; }
+.settings-sec h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #2e4527;
+}
+.settings-sec h3 .ss-ico { font-size: 17px; line-height: 1; }
+.settings-note { margin: 0 0 10px; font-size: 12.2px; line-height: 1.6; color: #64805c; }
+.settings-list { margin: 0; padding-left: 18px; }
+.settings-list li { margin-bottom: 4px; font-size: 12.8px; line-height: 1.72; color: #3f5b39; }
+.settings-list li b { color: #24401f; }
+.settings-actions { flex: 0 0 auto; justify-content: flex-end; }
+
+/* 三档难度选项（单选式按钮组） */
+.ai-level-list { display: flex; flex-direction: column; gap: 8px; }
+.ai-level-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 13px;
+  font-family: inherit;
+  text-align: left;
+  color: #2e4527;
+  cursor: pointer;
+  border: 1px solid rgba(108, 148, 100, .45);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .72);
+  transition: transform .08s, background .2s, border-color .2s, box-shadow .2s;
+}
+.ai-level-opt:hover {
+  background: #fff;
+  border-color: rgba(124, 168, 110, .8);
+  box-shadow: 0 8px 20px rgba(46, 78, 40, .14);
+  transform: translateY(-1px);
+}
+.ai-level-opt:active { transform: scale(.99); }
+.ai-level-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-level-opt .alo-mark {
+  flex: 0 0 auto;
+  width: 20px;
+  font-size: 15px;
+  text-align: center;
+  color: transparent;
+}
+.ai-level-opt.on {
+  border-color: rgba(212, 160, 22, .95);
+  background: linear-gradient(180deg, #fffbef, #fff5d8);
+  box-shadow: 0 8px 20px rgba(201, 148, 0, .18);
+}
+.ai-level-opt.on .alo-mark { color: #c8901a; }
+.ai-level-opt .alo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ai-level-opt .alo-name { font-size: 14.5px; font-weight: 800; letter-spacing: .5px; }
+.ai-level-opt .alo-desc { font-size: 11.5px; line-height: 1.45; color: #64805c; }
+.ai-level-opt.on .alo-desc { color: #6d5a1c; }
+.ai-level-opt .alo-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  color: #3d2c00;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #e0a316, #f4c948);
+}
+/* v175：默认档的灰色「默认」徽标（当该项不是当前选中档时显示） */
+.ai-level-opt .alo-badge.soft {
+  color: #4d6b46;
+  font-weight: 700;
+  background: rgba(126, 168, 118, .22);
+  border: 1px solid rgba(108, 148, 100, .35);
+}
+
+@media (max-width: 640px) {
+  .settings-modal { width: 94vw; max-width: 94vw; padding: 14px 14px 12px; }
+  .settings-sec h3 { font-size: 13.5px; }
+  .settings-list li { font-size: 12.2px; line-height: 1.68; }
+  .ai-level-opt { padding: 10px 11px; }
+  .ai-level-opt .alo-name { font-size: 13.5px; }
+  .ai-level-opt .alo-desc { font-size: 11px; }
+  .settings-actions .btn { flex: 1 1 auto; min-width: 0; }
 }
