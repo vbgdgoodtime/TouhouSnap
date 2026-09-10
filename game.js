@@ -137,8 +137,6 @@ const state = {
   gen: 0,
   cardSeq: 0,
   turn: 1,
-  energyTotal: 1,
-  energyLeft: 1,
   phase: 'idle',       // idle | play | busy | over
   stakes: 1,
   pSnapped: false,
@@ -146,12 +144,14 @@ const state = {
   locs: [],
   locPlan: [],        // 本局三块“真实地形”按揭晓顺序预存（v74：列 0/1/2 在第 1/2/3 回合开始揭晓）
   players: {
-    p: { key: 'p', name: '你', zones: [[], [], []], deck: [], hand: [] },
-    a: { key: 'a', name: '对手', zones: [[], [], []], deck: [], hand: [] },
+    // v145：能量分边（energyTotal / energyLeft 各自独立；回合开始写入相同基数，之后可单独改）
+    p: { key: 'p', name: '你', zones: [[], [], []], deck: [], hand: [], energyTotal: 1, energyLeft: 1 },
+    a: { key: 'a', name: '对手', zones: [[], [], []], deck: [], hand: [], energyTotal: 1, energyLeft: 1 },
   },
   selected: -1,        // 手牌下标
-  playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc}]
+  playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc, side?}]；side 缺省为 'p'（v144 切换立场可记为 'a'）
   aiMoves: [],         // 本回合对手已暗出的牌
+  playAsSide: 'p',     // v144：开发调试「切换立场」——'a' 时玩家落牌进敌方区且归属对手
   fieldQueue: [],      // 场上放置顺序队列：双方卡牌按“放入场上”先后记录（v55），供回合开始/结束/终局按序结算
   playHandOrder: [],   // 本回合开始时玩家手牌 id 顺序（供重置暗牌时恢复）
   moveCardId: null,    // “每回合可移动一次”的牌：当前正在选目标区域的卡 id
@@ -179,6 +179,7 @@ async function restart(opts) {
   state.selected = -1;
   state.playerMoves = [];
   state.aiMoves = [];
+  state.playAsSide = 'p'; // v144：新一局默认己方立场
   state.fieldQueue = []; // 场上放置顺序队列（v55）
   buffFlashQueue = [];   // v80：清掉上一局遗留的“+N 演出”队列（新一局卡 id 会重新从 0 计）
   state.playHandOrder = [];
@@ -186,14 +187,30 @@ async function restart(opts) {
   state.players.a.zones = [[], [], []]; state.players.a.hand = [];
 
   // v137：玩家可用自建满编卡组（opts.playerDeckDefs）；否则沿用上一局自建卡组；都没有则随机曲线
-  const custom = (opts.playerDeckDefs && opts.playerDeckDefs.length === 12)
-    ? opts.playerDeckDefs
-    : (lastPlayerDeckDefs && lastPlayerDeckDefs.length === 12 ? lastPlayerDeckDefs : null);
-  if (custom) {
-    lastPlayerDeckDefs = custom.slice();
-    state.players.p.deck = buildDeckFromDefs(custom);
+  // v142：开发调试 opts.emptyPlayerDeck → 玩家牌库为空（「重新开始」会沿用）；AI 仍随机
+  if (opts.emptyPlayerDeck === true) {
+    lastEmptyPlayerDeck = true;
+    lastPlayerDeckDefs = null;
+    state.players.p.deck = [];
+  } else if (opts.playerDeckDefs) {
+    lastEmptyPlayerDeck = false;
+    const custom = (opts.playerDeckDefs.length === 12) ? opts.playerDeckDefs : null;
+    if (custom) {
+      lastPlayerDeckDefs = custom.slice();
+      state.players.p.deck = buildDeckFromDefs(custom);
+    } else {
+      lastPlayerDeckDefs = null;
+      state.players.p.deck = buildDeckCards(DECK_CURVE);
+    }
+  } else if (lastEmptyPlayerDeck) {
+    state.players.p.deck = [];
   } else {
-    state.players.p.deck = buildDeckCards(DECK_CURVE);
+    const custom = (lastPlayerDeckDefs && lastPlayerDeckDefs.length === 12) ? lastPlayerDeckDefs : null;
+    if (custom) {
+      state.players.p.deck = buildDeckFromDefs(custom);
+    } else {
+      state.players.p.deck = buildDeckCards(DECK_CURVE);
+    }
   }
   // v138：对手每局按 AI 费用结构从卡池随机组一套 12 张（同费用不重复）
   state.players.a.deck = buildDeckCards(AI_DECK_CURVE);
@@ -205,8 +222,12 @@ async function restart(opts) {
   // 选 3 块区域：按抽选权重（pick，默认 1）不放回抽 3 块，保证互不相同；
   // 辉针城 pick 0.28 → 每局出现率约 10%（约 10 局 1 次）。
   // 区域池不足 3 种时退回旧逻辑（允许重复、仅避免三块完全相同）作兜底。
+  // v143：开发调试固定三块「无名之丘」（仍走未揭示→揭晓流程）
   let picks;
-  if (LOCATION_POOL.length >= 3) {
+  if (isDevMode()) {
+    const plain = findLocDef('plain') || LOCATION_POOL[0];
+    picks = [plain, plain, plain];
+  } else if (LOCATION_POOL.length >= 3) {
     picks = [];
     const remain = LOCATION_POOL.slice();
     while (picks.length < 3 && remain.length > 0) {
@@ -245,7 +266,11 @@ async function restart(opts) {
   hideModal();
   $('undoMask').classList.add('hidden');
   clearLog();
-  log('sys', '新对局开始！三块地形皆为「未揭示」，将在第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。先手暗牌后统一翻面。');
+  if (isDevMode()) {
+    log('sys', '开发调试对局：玩家空牌库 · 每回合能量 10 · 三块地形固定为「无名之丘」· AI 不出牌。未揭示地形将在第 1/2/3 回合依次揭晓。');
+  } else {
+    log('sys', '新对局开始！三块地形皆为「未揭示」，将在第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。先手暗牌后统一翻面。');
+  }
   // 注：地形“出现时”效果（如虹龙洞给双方石块）不再开局结算——
   // 三块真实地形在揭晓那一刻才“出现”，由 locationRevealStage 结算（v74）。
   runGameStartEffects(); // ⓪ 游戏开始效果挂点（现无注册效果）：第 1 回合开始前执行
@@ -260,7 +285,8 @@ async function restart(opts) {
 async function playOpening(gen) {
   for (let i = 0; i < 3; i++) {
     const card = drawOne('p');
-    if (card) card.justDrawn = true; // 复用“抽牌从右滑入”演出（v91/v93）
+    if (!card) break; // v142：开发调试空牌库时跳过开场发牌等待
+    card.justDrawn = true; // 复用“抽牌从右滑入”演出（v91/v93）
     renderHand();
     await sleep(720); // 等滑入动画（0.65s）播完并留一点间隔
     if (gen !== state.gen) return;
@@ -286,6 +312,36 @@ function buildDeckCards(curve) {
 
 /* v137→v139：用玩家自建卡组（12 张 def）造牌库——纯随机洗牌；drawOne 从队尾取，故反转存储 */
 let lastPlayerDeckDefs = null;
+/* v142：开发调试空牌库模式（无参 restart / 再来一局沿用） */
+let lastEmptyPlayerDeck = false;
+function isDevMode() { return !!lastEmptyPlayerDeck; }
+/** v144：当前出牌落位归属（开发调试切换立场为敌方时返回 'a'） */
+function playSide() {
+  return (isDevMode() && state.playAsSide === 'a') ? 'a' : 'p';
+}
+/** v145：读某方能量对象（total / left） */
+function energyOf(side) {
+  return state.players[side];
+}
+/** v145：回合开始给双方写入本回合能量基数（变量独立，数值可相同） */
+function grantTurnEnergy(total) {
+  for (const side of ['p', 'a']) {
+    const pl = state.players[side];
+    pl.energyTotal = total;
+    pl.energyLeft = total;
+  }
+}
+/** 本回合归属为 side 的落牌记录（含玩家以敌方立场暗出的牌） */
+function movesForSide(side) {
+  const out = [];
+  for (const m of state.playerMoves) {
+    if ((m.side || 'p') === side) out.push(m);
+  }
+  if (side === 'a') {
+    for (const m of state.aiMoves) out.push(m);
+  }
+  return out;
+}
 function buildDeckFromDefs(defs) {
   const base = (defs || []).slice(0, 12);
   if (base.length !== 12) return buildDeckCards(DECK_CURVE);
@@ -495,8 +551,9 @@ function roundStartStage() {
   const drawnP = drawOne('p');
   if (drawnP) drawnP.justDrawn = true; // v91：玩家抽牌入场演出（屏幕右端滑入）
   drawOne('a');
-  st.energyTotal = Math.min(st.turn, 6);           // ①-2 能量结算
-  st.energyLeft = st.energyTotal;
+  // ①-2 能量结算：普通局 = min(回合, 6)；开发调试 = 固定 10（v143）
+  // v145：双方各自一份 energyTotal/energyLeft（基数相同，之后可单独修改）
+  grantTurnEnergy(isDevMode() ? 10 : Math.min(st.turn, 6));
   st.phase = 'play';
   st.selected = -1;
   st.moveCardId = null;
@@ -508,7 +565,8 @@ function roundStartStage() {
   st.playHandOrder = st.players.p.hand.map((c) => c.id);
   renderAll();
   log('sys', `—— 第 ${st.turn} 回合 · 双方各抓 1 张 ——`); // v94：含第 1 回合
-  setStatus(`第 ${st.turn} 回合 · 能量 ${st.energyTotal}：可一次暗出多张牌（总费用不超过能量），出完点「结束回合」；点能量框可重置本回合暗牌。`);
+  const stanceTip = (isDevMode() && st.playAsSide === 'a') ? '【敌方立场】' : '';
+  setStatus(`第 ${st.turn} 回合 · 能量 ${st.players.p.energyTotal}${stanceTip}：可一次暗出多张牌（总费用不超过能量），出完点「结束回合」；点能量框可重置本回合暗牌。`);
 }
 
 async function playRound(gen) {
@@ -521,15 +579,21 @@ async function playRound(gen) {
   if (gen !== state.gen) return;
   if (act.type === 'retreat') { doRetreat(); return; }
 
-  // 阶段 ③：对手放置
+  // 阶段 ③：对手放置（v143：开发调试跳过，AI 不出牌）
   state.phase = 'busy';
   renderControls();
-  setStatus('对手思考中…');
-  await sleep(600);
-  if (gen !== state.gen) return;
-  aiThink();
-  renderAll();
-  await sleep(600);
+  if (isDevMode()) {
+    setStatus('开发调试：对手本回合不出牌。');
+    state.aiMoves = [];
+    await sleep(200);
+  } else {
+    setStatus('对手思考中…');
+    await sleep(600);
+    if (gen !== state.gen) return;
+    aiThink();
+    renderAll();
+    await sleep(600);
+  }
   if (gen !== state.gen) return;
 
   // 阶段 ④：翻牌结算（翻开暗牌，逐张按放置顺序结算「揭示」效果）
@@ -569,7 +633,7 @@ function selectHand(index) {
   st.moveCardId = null; // 开始选牌即取消“移动牌”模式
   const card = st.players.p.hand[index];
   if (!card) return;
-  if (card.def.c > st.energyLeft) { setStatus('剩余能量不足，换一张更便宜的吧。'); return; }
+  if (card.def.c > st.players.p.energyLeft) { setStatus('剩余能量不足，换一张更便宜的吧。'); return; }
   st.selected = (st.selected === index) ? -1 : index;
   renderAll();
 }
@@ -637,8 +701,9 @@ function tryPlayAt(locIdx) {
     return false;
   }
   const card = st.players.p.hand[st.selected];
-  if (!card || card.def.c > st.energyLeft) return false;
-  const zone = st.players.p.zones[locIdx];
+  if (!card || card.def.c > st.players.p.energyLeft) return false;
+  const side = playSide(); // v144：开发调试可切到敌方立场落牌
+  const zone = st.players[side].zones[locIdx];
   if (!locOpen(locIdx)) {
     setStatus(`「${locDef(locIdx).n}」还没开放，要到第 ${locDef(locIdx).minTurn} 回合才能放牌。`);
     return false;
@@ -647,22 +712,29 @@ function tryPlayAt(locIdx) {
     setStatus(`「${card.def.n}」需要占满 ${occOf(card)} 格，只能放在最大可放数为 ${occOf(card)} 的区域（且己方该区为空）。`);
     return false;
   }
-  if (sideRoom('p', locIdx) < occOf(card)) {
-    setStatus('这个区域已经放满，选别的区域吧。');
+  if (sideRoom(side, locIdx) < occOf(card)) {
+    setStatus(side === 'a'
+      ? '对手这一侧已经放满，选别的区域吧。'
+      : '这个区域已经放满，选别的区域吧。');
     return false;
   }
+  card.side = side; // 归属：敌方立场时按对手卡结算揭示/持续等
   zone.push(card);
   enqueueField(card); // 暗出：进入场上放置顺序队列（v55）
   st.players.p.hand.splice(st.selected, 1);
   st.selected = -1;
-  st.energyLeft -= card.def.c;
-  st.playerMoves.push({ cardId: card.id, loc: locIdx });
-  log('p', `你暗出「${card.def.n}」(${card.def.c}费) → ${st.locs[locIdx].def.n}`);
+  st.players.p.energyLeft -= card.def.c;
+  st.playerMoves.push({ cardId: card.id, loc: locIdx, side });
+  if (side === 'a') {
+    log('a', `你（敌方立场）暗出「${card.def.n}」(${card.def.c}费) → ${st.locs[locIdx].def.n}`);
+  } else {
+    log('p', `你暗出「${card.def.n}」(${card.def.c}费) → ${st.locs[locIdx].def.n}`);
+  }
   renderAll();
-  if (st.energyLeft <= 0) {
+  if (st.players.p.energyLeft <= 0) {
     setStatus('能量已用完，点「结束回合」交给对手。');
   } else {
-    setStatus(`剩余能量 ${st.energyLeft}：还可以继续出牌，或点「结束回合」。`);
+    setStatus(`剩余能量 ${st.players.p.energyLeft}：还可以继续出牌，或点「结束回合」。`);
   }
   return true;
 }
@@ -728,13 +800,15 @@ function confirmEnergyReset() {
 function undoPlacedCards() {
   const st = state;
   const pl = st.players.p;
-  // 1) 从区域里取回暗牌
+  // 1) 从区域里取回暗牌（含开发调试敌方立场落到对手区的牌）
   const removed = [];
   for (const mv of st.playerMoves) {
-    const zone = pl.zones[mv.loc];
+    const side = mv.side || 'p';
+    const zone = st.players[side].zones[mv.loc];
     const ci = zone.findIndex((c) => c.id === mv.cardId);
     if (ci >= 0) {
       const [card] = zone.splice(ci, 1);
+      card.side = 'p'; // 回手后归属恢复为我方
       removed.push(card);
       dequeueField(card); // 撤回暗牌：移出放置队列（再次打出时重新入队）
     }
@@ -751,8 +825,9 @@ function undoPlacedCards() {
   }
   for (const c of pool.values()) restored.push(c); // 理论兜底
   pl.hand = restored;
-  // 3) 能量返还
-  st.energyLeft = Math.min(st.energyTotal, st.energyLeft + removed.reduce((s, c) => s + c.def.c, 0));
+  // 3) 能量返还（只返还玩家侧；敌方立场落牌仍耗玩家能量）
+  const en = pl;
+  en.energyLeft = Math.min(en.energyTotal, en.energyLeft + removed.reduce((s, c) => s + c.def.c, 0));
   st.selected = -1;
   st.playerMoves = [];
   log('p', `↺ 你重置了本回合暗出的 ${removed.length} 张牌，已放回手牌，能量返还。`);
@@ -837,8 +912,8 @@ async function revealRound() {
   const order = [];
   const sideOrder = first === 'p' ? ['p', 'a'] : ['a', 'p'];
   for (const side of sideOrder) {
-    const moves = side === 'p' ? st.playerMoves : st.aiMoves;
-    for (const mv of moves) order.push({ side, ...mv });
+    // v144：玩家以敌方立场暗出的牌记在 playerMoves.side='a'，按归属并入该方翻牌序
+    for (const mv of movesForSide(side)) order.push({ side, cardId: mv.cardId, loc: mv.loc });
   }
   for (const mv of order) {
     const pl = st.players[mv.side];
@@ -938,8 +1013,8 @@ function revealEffectWillChange(side, locIdx, card) {
       return !(['p', 'a'].some((s) => sideUsed(s, locIdx) > t.max));
     }
     case 'oc': {
-      const opp = side === 'p' ? st.aiMoves : st.playerMoves;
-      return opp.some((m) => m.loc === locIdx);
+      const present = movesForSide(other).some((m) => m.loc === locIdx);
+      return present;
     }
     case 'shift': {
       // 需要“最右侧（第 3 列）己方侧”有空位，且“最左侧（第 1 列）己方侧”有已翻开可搬卡
@@ -1513,8 +1588,7 @@ function applyEffect(side, locIdx, card, spec) {
     }
     case 'oc': {
       // 揭示：翻开当回合，对方是否在本区域放置过至少一张牌（本回合落牌记录）
-      const oppMoves = side === 'p' ? st.aiMoves : st.playerMoves;
-      const present = oppMoves.some((m) => m.loc === locIdx);
+      const present = movesForSide(other).some((m) => m.loc === locIdx);
       if (present) {
         applyPermBuff(card, fx.a, card);
         log(side, `✦ 对方本回合在本区放过牌：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`);
@@ -1697,12 +1771,35 @@ function renderControls() {
   $('btnPass').disabled = !inPlay;
   // 已经出过牌 → 按钮变成「结束回合」
   $('btnPass').textContent = state.playerMoves.length > 0 ? '结束回合' : '跳过回合';
+  // v144→v146：开发调试隐藏「修改能量 / 图鉴」，显示「切换立场」；
+  // 正常对局隐藏「修改能量 / 指定卡牌 / 查看对手」（调试入口仅开发模式保留）
+  const dev = isDevMode();
+  const energyBtn = $('btnEnergyDev');
+  const pickBtn = $('btnPick');
+  const codexBtn = $('btnCodex');
+  const switchBtn = $('btnSwitchSide');
+  const spyBtn = $('btnAiSpy');
+  if (energyBtn) energyBtn.classList.add('hidden'); // 正常与开发均不再显示顶栏改能量
+  if (pickBtn) pickBtn.classList.toggle('hidden', !dev);
+  if (codexBtn) codexBtn.classList.toggle('hidden', dev);
+  if (spyBtn) spyBtn.classList.toggle('hidden', !dev);
+  if (switchBtn) {
+    switchBtn.classList.toggle('hidden', !dev);
+    const asEnemy = state.playAsSide === 'a';
+    switchBtn.textContent = asEnemy ? '⇄ 立场：敌方' : '⇄ 切换立场';
+    switchBtn.classList.toggle('side-enemy', asEnemy);
+    switchBtn.title = asEnemy
+      ? '当前：落牌进敌方区域（再点恢复我方）'
+      : '点击后：当前与后续回合落牌进敌方区域，归属对手';
+    switchBtn.disabled = !inPlay;
+  }
 }
 
 function renderHud() {
+  const en = state.players.p;
   $('turnVal').textContent = state.turn;
-  $('energyVal').textContent = state.energyLeft;
-  $('energyUnit').textContent = `/ ${state.energyTotal}`;
+  $('energyVal').textContent = en.energyLeft;
+  $('energyUnit').textContent = `/ ${en.energyTotal}`;
   $('cubeVal').textContent = state.stakes;
   const pips = $('cubePips');
   pips.innerHTML = '';
@@ -1711,12 +1808,13 @@ function renderHud() {
     if (state.stakes >= 2 ** i) d.className = 'on';
     pips.appendChild(d);
   }
-  // 能量槽：亮起 = 本回合剩余可用能量
+  // 能量槽：亮起 = 本回合剩余可用能量（显示玩家侧）
   const ep = $('energyPips');
   ep.innerHTML = '';
-  for (let i = 0; i < 6; i++) {
+  const pipN = Math.max(6, en.energyTotal | 0);
+  for (let i = 0; i < pipN; i++) {
     const d = document.createElement('div');
-    d.className = 'pip' + (i < state.energyLeft ? ' on' : '');
+    d.className = 'pip' + (i < en.energyLeft ? ' on' : '');
     ep.appendChild(d);
   }
 }
@@ -1826,10 +1924,10 @@ function syncUnrevealDecor(col, def) {
 function canPlaceP(idx) {
   const st = state;
   const card = st.players.p.hand[st.selected];
-  if (!card || card.def.c > st.energyLeft) return false;
+  if (!card || card.def.c > st.players.p.energyLeft) return false;
   if (!locOpen(idx)) return false;
   if (occOf(card) > 1 && !occZoneOk(card, idx)) return false; // 大体积卡需上限恰为占格数
-  return sideRoom('p', idx) >= occOf(card);
+  return sideRoom(playSide(), idx) >= occOf(card);
 }
 
 function miniCardEl(card, locIdx, side) {
@@ -1992,7 +2090,7 @@ function renderHand() {
   cards.forEach((card, index) => {
     const el = document.createElement('div');
     el.className = 'hand-card' + (card.def.img ? '' : ' no-img');
-    const afford = card.def.c <= st.energyLeft;
+    const afford = card.def.c <= st.players.p.energyLeft;
     if (!afford) el.classList.add('unaffordable');
     if (st.selected === index) el.classList.add('selected');
     if (card.justHandAdded) { el.classList.add('hand-new'); card.justHandAdded = false; } // v90 加入手牌演出
@@ -2071,10 +2169,29 @@ function uiOnPickClose() { if (window.CardBrowser) window.CardBrowser.closePick(
 function uiOnEnergyDev() {
   const st = state;
   if (st.phase !== 'play') { setStatus('只有在你的出牌阶段才能修改能量。'); return; }
-  st.energyTotal = 7;
-  st.energyLeft = 7;
-  log('sys', '⚡ 开发者指令：本回合能量已设为 7（下回合恢复为按回合数计）。');
-  setStatus('本回合能量已改为 7，可继续出牌（仅本回合有效，下回合恢复）。');
+  const en = st.players.p;
+  en.energyTotal = 7;
+  en.energyLeft = 7;
+  log('sys', '⚡ 开发者指令：本回合你的能量已设为 7（对手能量不变；下回合双方按回合数重置）。');
+  setStatus('本回合你的能量已改为 7，可继续出牌（仅本回合有效，下回合恢复）。');
+  renderAll();
+}
+
+// v144：开发调试「切换立场」——落牌进敌方区 / 恢复我方（跨回合保持，直到再点或重开）
+function uiOnSwitchSide() {
+  if (!isDevMode()) return;
+  const st = state;
+  if (st.phase !== 'play') { setStatus('只有在出牌阶段才能切换立场。'); return; }
+  st.playAsSide = st.playAsSide === 'a' ? 'p' : 'a';
+  st.selected = -1;
+  st.moveCardId = null;
+  if (st.playAsSide === 'a') {
+    log('sys', '⇄ 已切换到敌方立场：本回合及之后暗出的牌将落在对手区域，归属对手。');
+    setStatus('立场：敌方 — 选牌点区域会放到对手一侧（再点「切换立场」恢复我方）。');
+  } else {
+    log('sys', '⇄ 已恢复我方立场：暗出的牌回到自己区域。');
+    setStatus('立场：我方 — 暗出的牌落在自己一侧。');
+  }
   renderAll();
 }
 
@@ -2298,6 +2415,73 @@ function renderSide() {
   $('aiCount').textContent = st.players.a.hand.length;
   $('aiDeck').textContent = st.players.a.deck.length;
   $('aiSnapTag').classList.toggle('hidden', !st.aSnapped);
+  // v147：开发调试显示对手当前能量（剩余 / 本回合上限）
+  const enRow = $('aiEnergyRow');
+  const enA = st.players.a;
+  if (enRow) {
+    enRow.classList.toggle('hidden', !isDevMode());
+    if (isDevMode()) {
+      const v = $('aiEnergyVal');
+      const u = $('aiEnergyUnit');
+      if (v) v.textContent = enA.energyLeft;
+      if (u) u.textContent = '/ ' + enA.energyTotal;
+    }
+  }
+  // 若情报弹窗开着，牌数变化时同步刷新内容
+  const spy = $('aiSpyMask');
+  if (spy && !spy.classList.contains('hidden')) renderAiSpy();
+}
+
+/* ---------- v141：查看对手手牌 / 牌库 ---------- */
+function aiSpyCardEl(card) {
+  const def = card.def;
+  const live = cardPower(card);
+  const sign = live > def.p ? 'up' : live < def.p ? 'down' : '';
+  const el = document.createElement('div');
+  el.className = 'hand-card ai-spy-card' + (def.img ? '' : ' no-img');
+  el.style.setProperty('--cgrad', gradOf(def));
+  el.innerHTML = cardFaceHTML(def, { power: live, sign });
+  el.title = def.n + '（' + def.c + ' 费 / 威力 ' + live + '）· 点击放大';
+  el.addEventListener('click', () => showHandCard(card));
+  return el;
+}
+function fillAiSpyGrid(holder, cards, emptyText) {
+  if (!holder) return;
+  holder.innerHTML = '';
+  if (!cards.length) {
+    const none = document.createElement('div');
+    none.className = 'ai-spy-empty';
+    none.textContent = emptyText;
+    holder.appendChild(none);
+    return;
+  }
+  for (const c of cards) holder.appendChild(aiSpyCardEl(c));
+}
+function renderAiSpy() {
+  const hand = state.players.a.hand.slice();
+  // deck 队尾先抽 → 反转后左侧为下一张将抽到
+  const deck = state.players.a.deck.slice().reverse();
+  const hc = $('aiSpyHandCount');
+  const dc = $('aiSpyDeckCount');
+  if (hc) hc.textContent = hand.length;
+  if (dc) dc.textContent = deck.length;
+  fillAiSpyGrid($('aiSpyHand'), hand, '手上没有牌。');
+  fillAiSpyGrid($('aiSpyDeck'), deck, '牌库已空。');
+}
+function openAiSpy() {
+  renderAiSpy();
+  $('aiSpyMask').classList.remove('hidden');
+}
+function closeAiSpy() {
+  $('zoomMask').classList.add('hidden');
+  hidePowerPanel();
+  $('aiSpyMask').classList.add('hidden');
+}
+function uiOnAiSpy() {
+  const mask = $('aiSpyMask');
+  if (!mask) return;
+  if (mask.classList.contains('hidden')) openAiSpy();
+  else closeAiSpy();
 }
 
 /* ---------------- 弹窗 ---------------- */
@@ -2335,13 +2519,17 @@ window.Game = {
     onPickClose: uiOnPickClose,
     onPickConfirm: uiOnPickConfirm,
     onEnergyDev: uiOnEnergyDev,
+    onSwitchSide: uiOnSwitchSide,
+    onAiSpy: uiOnAiSpy,
+    closeAiSpy,
     onEnergyReset: uiEnergyReset,
     confirmEnergyReset,
     cancelEnergyReset,
   },
   _dbg: () => ({
     gen: state.gen, phase: state.phase, turn: state.turn,
-    energyTotal: state.energyTotal, energyLeft: state.energyLeft,
+    energyTotal: state.players.p.energyTotal, energyLeft: state.players.p.energyLeft,
+    energyTotalA: state.players.a.energyTotal, energyLeftA: state.players.a.energyLeft,
     hasWaiter: !!pendingResolve,
     handP: state.players.p.hand.map((c) => c.def.c),
     handA: state.players.a.hand.map((c) => c.def.c),
@@ -2357,15 +2545,18 @@ window.Game = {
   const zoomMask = $('zoomMask');
   const undoMask = $('undoMask');
   const pickMask = $('pickMask');
+  const aiSpyMask = $('aiSpyMask');
   codexMask.addEventListener('click', (e) => { if (e.target === codexMask) closeCodex(); });
   zoomMask.addEventListener('click', (e) => { if (e.target === zoomMask) closeZoom(); });
   undoMask.addEventListener('click', (e) => { if (e.target === undoMask) cancelEnergyReset(); });
   pickMask.addEventListener('click', (e) => { if (e.target === pickMask) uiOnPickClose(); });
+  if (aiSpyMask) aiSpyMask.addEventListener('click', (e) => { if (e.target === aiSpyMask) closeAiSpy(); });
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!zoomMask.classList.contains('hidden')) closeZoom();
     else if (!codexMask.classList.contains('hidden')) closeCodex();
     else if (!pickMask.classList.contains('hidden')) uiOnPickClose();
+    else if (aiSpyMask && !aiSpyMask.classList.contains('hidden')) closeAiSpy();
     else if (!undoMask.classList.contains('hidden')) cancelEnergyReset();
   });
 })();

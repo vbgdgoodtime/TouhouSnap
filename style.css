@@ -49,7 +49,7 @@ body {
 .brand h1 { font-size: 20px; letter-spacing: 2px; color: #2e4527; }
 .brand .sub { font-size: 11px; color: #64805c; }
 
-.hud { display: flex; gap: 10px; margin-left: auto; }
+.hud { display: flex; gap: 10px; margin-left: auto; align-items: center; }
 .hud-item {
   background: rgba(255, 255, 255, .66);
   border: 1px solid rgba(108, 148, 100, .35);
@@ -59,6 +59,23 @@ body {
   align-items: baseline;
   gap: 6px;
 }
+/* v140：能量行左侧「返回主页」——外观跟 hud 一致，可点击 */
+.hud-home {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  align-items: center;
+  color: #2e4527;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.hud-home:hover {
+  border-color: rgba(124, 168, 110, .85);
+  background: #f2f9ea;
+  box-shadow: 0 0 0 2px rgba(124, 168, 110, .2);
+}
+.hud-home:active { transform: scale(.97); }
+.hud-home-ico { font-size: 14px; font-weight: 800; line-height: 1; color: #3d5a33; }
+.hud-home .hud-label { font-size: 12px; font-weight: 800; color: #2e4527; }
 .hud-label { font-size: 11px; color: #64805c; }
 .hud-value { font-size: 20px; font-weight: 700; }
 .hud-unit { font-size: 11px; color: #64805c; }
@@ -71,6 +88,12 @@ body {
 .cube-pips span.on { background: #c99400; box-shadow: 0 0 6px rgba(201, 148, 0, .55); }
 
 .top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* v144：开发调试「切换立场」激活态（落牌进敌方） */
+.top-actions #btnSwitchSide.side-enemy {
+  background: #5a2a2a;
+  color: #ffe8e8;
+  border-color: #a05050;
+}
 
 .btn {
   border: 1px solid rgba(108, 148, 100, .4);
@@ -904,7 +927,39 @@ body {
 .avatar-row { display: flex; gap: 10px; align-items: center; }
 .avatar { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; }
 .av-ai { background: linear-gradient(135deg, #28477a, #3e5d99); border: 2px solid #5d7cbd; }
-.mini-stats { font-size: 12px; color: #64805c; display: flex; flex-direction: column; gap: 3px; }
+.mini-stats { font-size: 12px; color: #64805c; display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.mini-stats .ai-energy { color: #3d6b8c; font-weight: 700; }
+.ai-spy-btn { flex: 0 0 auto; margin-left: auto; padding: 5px 10px; font-size: 12px; font-weight: 700; }
+.ai-spy-modal { max-width: min(720px, 94vw); width: 94vw; text-align: left; padding: 18px 18px 16px; }
+.ai-spy-modal .codex-head { margin-bottom: 10px; }
+.ai-spy-sec { margin-bottom: 14px; }
+.ai-spy-h {
+  font-size: 13px;
+  font-weight: 800;
+  color: #2e4527;
+  margin-bottom: 8px;
+  letter-spacing: .5px;
+}
+.ai-spy-h span { color: #64805c; font-weight: 700; }
+.ai-spy-note { font-size: 11px; font-weight: 600; color: #78906f; }
+.ai-spy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  max-height: 28vh;
+  overflow-y: auto;
+  padding: 4px 2px 8px;
+  scrollbar-width: thin;
+}
+.ai-spy-grid .ai-spy-card { width: 100%; cursor: pointer; }
+.ai-spy-grid .ai-spy-card:hover { border-color: rgba(242, 201, 76, .85); box-shadow: 0 0 0 2px rgba(242, 201, 76, .45); }
+.ai-spy-empty {
+  grid-column: 1 / -1;
+  color: #7a8a6f;
+  font-size: 13px;
+  padding: 16px 0;
+  text-align: center;
+}
 .snap-tag {
   margin-top: 8px; text-align: center; font-size: 12px; font-weight: 700;
   color: #a97e00; border: 1px solid rgba(201, 148, 0, .5); border-radius: 8px; padding: 3px;

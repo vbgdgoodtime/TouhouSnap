@@ -299,6 +299,21 @@ function checkRenderInvariants(tag) {
   if (!inPlay && !byId('btnPass').disabled) probs.push(`非出牌阶段（${d.phase}）「结束回合」按钮仍可点`);
   if (d.phase === 'over' && modalOpen() === false) probs.push('对局已结束但没有结算弹窗');
 
+  // 6) 场上卡牌 id 唯一（同一张卡不能被两个格位重复渲染）+ 卡名必须是已知卡牌
+  const ids = q('.zone .mini-card').map((el) => el.dataset.cardid);
+  const dupIds = Array.from(new Set(ids.filter((v, i) => ids.indexOf(v) !== i)));
+  if (dupIds.length) probs.push(`场上同一张卡被重复渲染（卡牌 id 重复）：${dupIds.join(',')}`);
+  const unknown = [];
+  for (const el of q('.zone .mini-card')) {
+    const nameEl = el.querySelector('.mc-name');
+    if (nameEl && !defByName(nameEl.textContent)) unknown.push(nameEl.textContent);
+  }
+  if (unknown.length) probs.push(`场上出现未知卡名（卡牌数据异常）：${Array.from(new Set(unknown)).join(',')}`);
+
+  // 7) 侧栏对手信息：手牌张数显示与数据层一致
+  const aiCount = (byId('aiCount') || {}).textContent;
+  if (aiCount !== String(d.handA.length)) probs.push(`对手手牌数显示 ${aiCount} ≠ 数据层 ${d.handA.length}`);
+
   if (probs.length) fail(tag + ' 盘面不变量：' + probs.join(' ／ '));
   return probs.length === 0;
 }
@@ -567,7 +582,6 @@ async function playTurnRandom(t, ctx) {
     fail(`第 ${t} 回合开始时能量不是满格：${d0.energyLeft}/${d0.energyTotal}`);
   }
   const startLogs = logEntries().length;
-  const turnStartZones = zoneCounts().slice();
 
   // 1) 机会性回归：能量重置（每局只做一次，尽量早）
   if (ctx.wantReset) {
@@ -625,7 +639,6 @@ async function playTurnRandom(t, ctx) {
     }
     if (logEntries().length <= startLogs) fail(`第 ${t} 回合没有任何日志增加`);
   }
-  void turnStartZones;
   return res;
 }
 

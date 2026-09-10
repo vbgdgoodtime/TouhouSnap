@@ -21,7 +21,7 @@
          - 开始对战 → home.js 隐藏本页并调用既有入口 window.Game.restart()（与顶部
            「重新开始」同一个函数，游戏主逻辑未改动）；
          - 卡组设置 → deck-page.js 的卡组设置页面（v121，见下方 #deckScreen）；
-         - 开发调试 → 后续页面，现为占位提示（扩展点见 home.js 的 PAGES）。
+         - 开发调试 → dev-page.js（不校验卡组，直接进战斗；玩家空牌库、AI 随机）。
        游戏引擎自身仍在后台完成首局初始化（未改动 game.js），点击开始对战时重开一局。 -->
   <section class="home-screen" id="homeScreen">
     <div class="home-decor" id="homeDecor" aria-hidden="true"></div>
@@ -178,6 +178,9 @@
       </div>
     </div>
     <div class="hud">
+      <button type="button" class="hud-item hud-home" id="btnHome" title="返回主页面" onclick="Home.show()">
+        <span class="hud-home-ico">←</span><span class="hud-label">主页</span>
+      </button>
       <div class="hud-item" id="turnBox"><span class="hud-label">回合</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit">/ 6</span></div>
       <div class="hud-item clickable" id="energyBox" title="点击可重置本回合已暗出的牌（能量全额返还）" onclick="Game.ui.onEnergyReset()">
         <span class="hud-label">能量</span><span class="hud-value" id="energyVal">1</span><span class="hud-unit" id="energyUnit">/ 6</span><span class="reset-mark">↺</span>
@@ -187,6 +190,7 @@
     <div class="top-actions">
       <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()">⚡ 修改能量</button>
       <button id="btnPick" class="btn btn-ghost" onclick="Game.ui.onPick()">🎯 指定卡牌</button>
+      <button id="btnSwitchSide" class="btn btn-ghost hidden" onclick="Game.ui.onSwitchSide()" title="开发调试：切换落牌立场">⇄ 切换立场</button>
       <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
       <button id="btnSnap" class="btn btn-snap" onclick="Game.ui.onSnap()">双倍下注</button>
       <button id="btnRestart" class="btn btn-ghost" onclick="Game.restart()">重新开始</button>
@@ -206,7 +210,9 @@
           <div class="mini-stats">
             <div>手上还有 <span id="aiCount">3</span> 张</div>
             <div>牌库 <span id="aiDeck">12</span> 张</div>
+            <div class="ai-energy hidden" id="aiEnergyRow">能量 <span id="aiEnergyVal">1</span><span id="aiEnergyUnit">/ 1</span></div>
           </div>
+          <button type="button" class="btn btn-ghost ai-spy-btn" id="btnAiSpy" title="查看对手手牌与牌库" onclick="Game.ui.onAiSpy()">👁️ 查看</button>
         </div>
         <div id="aiSnapTag" class="snap-tag hidden">⚡ 已加倍</div>
       </div>
@@ -272,6 +278,25 @@
       </div>
       <div class="card-filter-bar" id="codexFilter"></div>
       <div class="codex-grid" id="codexGrid"></div>
+    </div>
+  </div>
+
+  <!-- v141：查看对手手牌 / 牌库（调试用） -->
+  <div class="modal-mask hidden" id="aiSpyMask">
+    <div class="modal codex-modal ai-spy-modal">
+      <div class="codex-head">
+        <h2>👁️ 对手情报</h2>
+        <span class="codex-tip" id="aiSpyTip">手牌与牌库（点击卡牌可放大）</span>
+        <button class="btn btn-ghost codex-close" onclick="Game.ui.closeAiSpy()">关闭 ✕</button>
+      </div>
+      <div class="ai-spy-sec">
+        <div class="ai-spy-h">手牌 <span id="aiSpyHandCount">0</span> 张</div>
+        <div class="ai-spy-grid" id="aiSpyHand"></div>
+      </div>
+      <div class="ai-spy-sec">
+        <div class="ai-spy-h">牌库 <span id="aiSpyDeckCount">0</span> 张 <span class="ai-spy-note">（左＝下一张将抽到）</span></div>
+        <div class="ai-spy-grid" id="aiSpyDeck"></div>
+      </div>
     </div>
   </div>
 
@@ -348,5 +373,7 @@
   <script src="deck-storage.js"></script>
   <!-- v121：卡组设置页面（主页面「卡组设置」入口 → window.DeckBuilder） -->
   <script src="deck-page.js"></script>
+  <!-- v142：开发调试入口（主页面「开发调试」→ window.DevTools；空玩家牌库直接开战） -->
+  <script src="dev-page.js"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* =========================================================
-   东方逆转 · home.js（v120→v137）
+   东方逆转 · home.js（v120→v142）
    主页面（首页）交互脚本。
 
    页面本体是 index.html 里的静态标记 #homeScreen（<body class="in-home"> 时显示），
@@ -8,12 +8,14 @@
      2) 三个入口按钮的事件接线；
      3) 暴露 window.Home（show / hide / openPage / isHome）；
      4) v137：开始对战前弹出「选出战卡组」（仅满 12 张可选）。
+     5) v142：开发调试走 DevTools.open()（空牌库直接开战）。
 
    按钮：
      - 开始对战（#homeBtnBattle）：先弹出 #battleDeckMask 选卡组 → 确认后隐藏主页面
        并调用 Game.restart({ playerDeckDefs })；取消则留在主页面。
      - 卡组设置（#homeBtnDeck）：隐藏主页面 → window.DeckBuilder.open()
-     - 开发调试（#homeBtnDev）：后续页面占位。
+     - 开发调试（#homeBtnDev）：隐藏主页面 → window.DevTools.open()
+       （不校验卡组，直接开战；玩家空牌库、AI 随机）
 
    注：game.js 底部的启动 restart() 保持原样（后台首局随机牌库初始化）。
    ========================================================= */
@@ -23,7 +25,7 @@
   var $ = function (id) { return document.getElementById(id); };
 
   var PAGES = {
-    dev: { label: '开发调试', ready: false, page: 'DevTools', tip: '「开发调试」页面正在开发中，后续版本加入。' },
+    dev: { label: '开发调试', ready: true, page: 'DevTools', tip: '「开发调试」页面正在开发中，后续版本加入。' },
     deck: { label: '卡组设置', ready: true, page: 'DeckBuilder', tip: '「卡组设置」页面正在开发中，后续版本加入。' },
   };
 
@@ -73,6 +75,7 @@
   function isHome() { return document.body.classList.contains('in-home'); }
 
   function show() {
+    document.body.classList.remove('in-dev');
     document.body.classList.add('in-home');
     var el = $('homeScreen');
     if (el) el.classList.remove('hidden');
@@ -198,6 +201,7 @@
     }
     hideBattleDeckPicker();
     hide();
+    document.body.classList.remove('in-dev');
     try {
       var p = window.Game.restart({ playerDeckDefs: deck.cards.slice() });
       if (p && typeof p.catch === 'function') {

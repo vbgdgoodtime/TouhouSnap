@@ -5,7 +5,7 @@
    occOf / zoneTotals / zoneEff / cardPowerIn / enqueueField / log。
    入口：playRound 阶段 ③ 调用 aiThink()（game.js 内函数名引用本文件的全局函数）。
    策略要点：
-   - 贪心按估值把剩余能量花完；
+   - 贪心按本方 energyLeft 把剩余能量花完（v145：与玩家能量变量独立）；
    - 反转区（辉针城 inv，胜者=点数低）不主动放牌（v116）；
    - 「鬼人正邪」（xform → needle）仅在己方落后该区 ≥10 点时打出；
    - 聚变反应炉（purge）落子权重 ×0.25，尽量避开；
@@ -49,9 +49,10 @@ function aiThink() {
       log('snap', `⚡ 对手双倍下注！赌注升至 ${st.stakes}`);
     }
   }
-  // 贪心循环：把剩余能量花完为止
-  let rem = st.energyTotal;
+  // 贪心循环：把本方剩余能量花完为止（v145：读 players.a 独立能量）
+  const en = pl;
   while (true) {
+    const rem = en.energyLeft;
     const affordable = pl.hand.filter((c) => c.def.c <= rem);
     if (affordable.length === 0) break;
     const cands = [];
@@ -82,7 +83,8 @@ function aiThink() {
     pl.zones[pick.loc].push(pick.card);
     enqueueField(pick.card); // 对手暗出：进入场上放置顺序队列（v55）
     pl.hand.splice(pl.hand.indexOf(pick.card), 1);
-    rem -= pick.card.def.c;
+    pick.card.side = 'a';
+    en.energyLeft -= pick.card.def.c;
     st.aiMoves.push({ cardId: pick.card.id, loc: pick.loc });
     log('a', `对手在「${st.locs[pick.loc].def.n}」暗出一张牌(${pick.card.def.c}费)。`);
   }
