@@ -189,6 +189,11 @@ body {
 .location.barrier      { border-color: rgba(111, 154, 138, .6); }
 .location.dormouse     { border-color: rgba(143, 131, 184, .6); }
 .location.fairyshrine  { border-color: rgba(207, 95, 74, .6); }
+.location.sealingclub  { border-color: rgba(196, 150, 255, .6); }
+.location.yukarihouse  { border-color: rgba(214, 180, 255, .62); }
+.location.houraipharmacy { border-color: rgba(64, 176, 140, .55); }
+.location.calmsea      { border-color: rgba(79, 168, 200, .6); }
+.location.falsemoon    { border-color: rgba(201, 196, 232, .65); }
 /* 聚变反应炉：暗红色为主的主题底 */
 .location.reactor {
   background: linear-gradient(180deg, #47100b 0%, #5c1509 100%);
@@ -478,6 +483,186 @@ body {
 .location.fairyshrine .cell-guide { border-color: rgba(207, 95, 74, .4); }
 .location.fairyshrine .zone .slot-row.quad::before { background: rgba(207, 95, 74, .3); }
 .location.fairyshrine .slot-count { color: #8f3a26; background: rgba(255, 255, 255, .85); }
+
+/* 秘封俱乐部（v199 新增）：深紫罗兰夜幕 + 星象感（深底浅字）；
+   效果＝第 5 回合开始时本区域变成随机另一个地形（xformTurn，并结算其「出现时」效果）
+   —— 星点由 ::before 平铺铺在列底，故四个直接子块抬到 z-index 1 之上（口径同「未揭示」列）。 */
+.location.sealingclub {
+  background: linear-gradient(180deg, #1b1236 0%, #2a1d55 52%, #140d28 100%);
+  border-color: rgba(196, 150, 255, .6);
+}
+.location.sealingclub > .loc-head,
+.location.sealingclub > .loc-mid,
+.location.sealingclub > .zone { position: relative; z-index: 1; }
+.location.sealingclub::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .85;
+  background-image:
+    radial-gradient(1.6px 1.6px at 20% 30%, rgba(255, 255, 255, .9), transparent 55%),
+    radial-gradient(1.2px 1.2px at 70% 15%, rgba(215, 200, 255, .85), transparent 55%),
+    radial-gradient(1.8px 1.8px at 45% 75%, rgba(255, 255, 255, .8), transparent 55%),
+    radial-gradient(1.1px 1.1px at 85% 60%, rgba(200, 225, 255, .8), transparent 55%),
+    radial-gradient(1.3px 1.3px at 30% 88%, rgba(255, 255, 255, .75), transparent 55%),
+    radial-gradient(1px 1px at 60% 45%, rgba(230, 215, 255, .7), transparent 55%);
+  background-size: 120px 140px, 160px 110px, 140px 150px, 130px 120px, 150px 130px, 100px 100px;
+  background-repeat: repeat;
+}
+.location.sealingclub .loc-head {
+  background: linear-gradient(180deg, rgba(58, 38, 104, .94), rgba(38, 24, 74, .9));
+  border-bottom-color: rgba(196, 150, 255, .4);
+}
+.location.sealingclub .loc-name { color: #f2e9ff; }
+.location.sealingclub .loc-mid {
+  background: linear-gradient(180deg, rgba(64, 44, 116, .55), rgba(30, 20, 60, .42));
+  border-bottom-color: rgba(150, 120, 210, .35);
+}
+.location.sealingclub .loc-effect { color: #d8c6ff; }
+.location.sealingclub .zone.opp {
+  background: rgba(255, 255, 255, .06);
+  border-bottom-color: rgba(196, 150, 255, .22);
+}
+.location.sealingclub .zone.player-zone {
+  background: linear-gradient(180deg, rgba(140, 110, 220, .10), transparent 70%);
+}
+.location.sealingclub .cell-guide { border-color: rgba(190, 160, 240, .3); }
+.location.sealingclub .zone .slot-row.quad::before { background: rgba(200, 170, 255, .22); }
+.location.sealingclub .slot-count { color: #f2e9ff; background: rgba(30, 18, 58, .82); }
+
+/* 八云紫的家（v200 新增）：深靛紫 + 白色裂隙纹理（深底浅字）；
+   效果＝回合结束时双方各从后往前添加 1 张「隙间」（gap，该侧可用格数逐回合 −1）
+   —— 裂隙由 ::before 叠在列底，故四个直接子块抬到 z-index 1 之上（口径同「秘封俱乐部」）。 */
+.location.yukarihouse {
+  background: linear-gradient(180deg, #141a3c 0%, #1d2456 55%, #0e1230 100%);
+  border-color: rgba(214, 180, 255, .62);
+}
+.location.yukarihouse > .loc-head,
+.location.yukarihouse > .loc-mid,
+.location.yukarihouse > .zone { position: relative; z-index: 1; }
+.location.yukarihouse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .55;
+  background-image:
+    linear-gradient(74deg, transparent 47.5%, rgba(255, 255, 255, .55) 47.85%, rgba(255, 255, 255, .8) 48%, transparent 48.4%),
+    linear-gradient(-63deg, transparent 61.5%, rgba(214, 200, 255, .45) 61.85%, rgba(255, 255, 255, .65) 62%, transparent 62.45%),
+    linear-gradient(87deg, transparent 81.3%, rgba(255, 255, 255, .38) 81.7%, transparent 82.15%);
+}
+.location.yukarihouse .loc-head {
+  background: linear-gradient(180deg, rgba(44, 40, 96, .9), rgba(28, 26, 68, .86));
+  border-bottom-color: rgba(214, 180, 255, .42);
+}
+.location.yukarihouse .loc-name { color: #f1ecff; }
+.location.yukarihouse .loc-mid {
+  background: linear-gradient(180deg, rgba(52, 46, 112, .5), rgba(22, 20, 52, .4));
+  border-bottom-color: rgba(160, 140, 220, .34);
+}
+.location.yukarihouse .loc-effect { color: #d5cbff; }
+.location.yukarihouse .zone.opp {
+  background: rgba(255, 255, 255, .06);
+  border-bottom-color: rgba(214, 180, 255, .22);
+}
+.location.yukarihouse .zone.player-zone {
+  background: linear-gradient(180deg, rgba(130, 110, 220, .10), transparent 70%);
+}
+.location.yukarihouse .cell-guide { border-color: rgba(200, 180, 250, .3); }
+.location.yukarihouse .zone .slot-row.quad::before { background: rgba(205, 190, 255, .22); }
+.location.yukarihouse .slot-count { color: #f1ecff; background: rgba(20, 18, 46, .84); }
+
+/* 蓬莱药局（v201 新增）：米白 + 薄荷绿「药局/处方」主题（浅底深字）；
+   效果＝此区域双方所有卡牌都不会被减攻（noDown，负的战力增量一律被拦下） */
+.location.houraipharmacy {
+  background: linear-gradient(180deg, #f7fbf5 0%, #eaf7ef 55%, #dff2e6 100%);
+  border-color: #40b08c;
+}
+.location.houraipharmacy .loc-head {
+  background: linear-gradient(180deg, #4fbd97, #2f8e70);
+  border-bottom-color: rgba(255, 255, 255, .35);
+}
+.location.houraipharmacy .loc-name { color: #ffffff; }
+.location.houraipharmacy .loc-mid {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(224, 244, 233, .62));
+  border-bottom-color: rgba(64, 176, 140, .32);
+}
+.location.houraipharmacy .loc-effect { color: #1f6b52; }
+.location.houraipharmacy .zone.opp {
+  background: rgba(64, 176, 140, .10);
+  border-bottom-color: rgba(64, 176, 140, .26);
+}
+.location.houraipharmacy .zone.player-zone {
+  background: linear-gradient(180deg, rgba(64, 176, 140, .07), transparent 70%);
+}
+.location.houraipharmacy .cell-guide { border-color: rgba(64, 176, 140, .4); }
+.location.houraipharmacy .zone .slot-row.quad::before { background: rgba(64, 176, 140, .28); }
+.location.houraipharmacy .slot-count { color: #1f6b52; background: rgba(255, 255, 255, .88); }
+
+/* ==================== v202：静海（🌊）+ 区域「抹除文本」（地形字段 mute） ====================
+   地形主题：深蓝静水（暗底浅字，与「蓬莱药局」的浅底深字相反）；
+   效果＝此区域双方所有卡牌失去卡牌文字（卡面效果一律不发动，离场/换地形即恢复）。
+   另外两条是「被抹除」的显示口径：只作用于**放大视图**（场上的牌），图鉴里的静态卡面不变。 */
+.location.calmsea {
+  background: linear-gradient(180deg, #0b1f2f 0%, #10344a 55%, #0a1c29 100%);
+  border-color: #4fa8c8;
+}
+.location.calmsea .loc-head {
+  background: linear-gradient(180deg, #2c6f8f, #1b4c66);
+  border-bottom-color: rgba(160, 224, 255, .35);
+}
+.location.calmsea .loc-name { color: #eaf7ff; }
+.location.calmsea .loc-mid {
+  background: linear-gradient(180deg, rgba(18, 52, 74, .78), rgba(10, 30, 44, .72));
+  border-bottom-color: rgba(120, 200, 235, .32);
+}
+.location.calmsea .loc-effect { color: #a9dcf0; }
+.location.calmsea .zone.opp {
+  background: rgba(79, 168, 200, .10);
+  border-bottom-color: rgba(120, 200, 235, .26);
+}
+.location.calmsea .zone.player-zone {
+  background: linear-gradient(180deg, rgba(79, 168, 200, .08), transparent 70%);
+}
+.location.calmsea .cell-guide { border-color: rgba(120, 200, 235, .38); }
+.location.calmsea .zone .slot-row.quad::before { background: rgba(120, 200, 235, .26); }
+.location.calmsea .slot-count { color: #eaf7ff; background: rgba(8, 26, 40, .82); }
+/* 放大视图：文本被抹除的牌 —— 卡面效果文字与详情说明置灰划线，并留一行状态提示 */
+.zoom-card.text-muted .hc-text { opacity: .42; text-decoration: line-through; }
+.zm-desc.text-muted { opacity: .5; text-decoration: line-through; }
+.zoom-info .zm-kind.mute-note { color: #1d7fa8; }
+
+/* ==================== v203：虚假之月（🌕）+ 区域「延长回合」（地形字段 extraRound） ====================
+   地形主题：夜空中的赝品之月 —— 深靛蓝紫夜空 + 银白月晕（与「秘封俱乐部」的紫、「八云紫的家」的
+   淡紫刻意区分：本块更暗、更冷、以银白为主）；
+   效果＝此地形在场时本局共有第 7 回合（延长机制的口径见 data/locations.js 的 `extraRound=`）。 */
+.location.falsemoon {
+  background: linear-gradient(180deg, #141a2e 0%, #232a48 52%, #101527 100%);
+  border-color: #c9c4e8;
+}
+.location.falsemoon .loc-head {
+  background: linear-gradient(180deg, #4a4a78, #2c2c50);
+  border-bottom-color: rgba(226, 222, 255, .38);
+}
+.location.falsemoon .loc-name { color: #f4f1ff; }
+.location.falsemoon .loc-mid {
+  background: linear-gradient(180deg, rgba(38, 42, 72, .8), rgba(20, 23, 42, .74));
+  border-bottom-color: rgba(200, 195, 240, .32);
+}
+.location.falsemoon .loc-effect { color: #d8d2ff; }
+.location.falsemoon .zone.opp {
+  background: rgba(180, 176, 235, .10);
+  border-bottom-color: rgba(200, 195, 240, .26);
+}
+.location.falsemoon .zone.player-zone {
+  background: linear-gradient(180deg, rgba(180, 176, 235, .09), transparent 70%);
+}
+.location.falsemoon .cell-guide { border-color: rgba(208, 202, 250, .38); }
+.location.falsemoon .zone .slot-row.quad::before { background: rgba(208, 202, 250, .24); }
+.location.falsemoon .slot-count { color: #f4f1ff; background: rgba(14, 16, 32, .84); }
 
 /* 辉针城：反转区意象——上下各半（上黑下白） */
 .location.needle {
@@ -805,6 +990,74 @@ body {
   border-color: #b98800;
   box-shadow: 0 0 0 2px rgba(201, 148, 0, .35), 0 0 22px rgba(214, 166, 20, .25);
   background: linear-gradient(180deg, #f7fcec, #e8f2da);
+}
+
+/* ---------- v205：区域「已破碎」（天界 `shatter` 摧毁后的列） ----------
+   整列被一块损坏面板占据：**看不出原本是哪块地形、没有双方总点数的数字、也没有格位**，
+   只写「已破碎」。列 DOM 由 js/game.js 的 renderShatteredColumn 整个换成
+   `.location.shattered-loc > .shatter-block`，因此这里不需要（也不该有）.loc-head / .loc-mid / .zone。 */
+.location.shattered-loc {
+  border-color: rgba(126, 112, 112, .6);
+  background:
+    repeating-linear-gradient(135deg, rgba(30, 25, 31, .95) 0 11px, rgba(41, 34, 43, .95) 11px 22px);
+  box-shadow: inset 0 0 46px rgba(0, 0, 0, .62), 0 3px 12px rgba(28, 18, 24, .38);
+  overflow: hidden;
+}
+/* 两道贯穿整列的裂纹 + 一层暗角（纯装饰，不挡任何交互） */
+.location.shattered-loc::before,
+.location.shattered-loc::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.location.shattered-loc::before {
+  background:
+    linear-gradient(112deg, transparent 46.2%, rgba(255, 255, 255, .22) 47.3%, rgba(0, 0, 0, .6) 48.4%, transparent 49.6%),
+    linear-gradient(64deg, transparent 59.6%, rgba(255, 255, 255, .15) 60.9%, rgba(0, 0, 0, .55) 62.2%, transparent 63.4%),
+    linear-gradient(155deg, transparent 28%, rgba(255, 255, 255, .1) 29.4%, rgba(0, 0, 0, .45) 30.6%, transparent 32%);
+}
+.location.shattered-loc::after {
+  background: radial-gradient(circle at 50% 42%, rgba(255, 176, 132, .1), transparent 64%);
+}
+.shatter-block {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 18px 12px;
+  text-align: center;
+  cursor: not-allowed;
+  user-select: none;
+}
+.shatter-block .shatter-glyph {
+  font-size: 34px;
+  line-height: 1;
+  filter: grayscale(.45);
+  opacity: .92;
+}
+.shatter-block .shatter-name {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  color: #ded0cb;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .8), 0 0 14px rgba(255, 120, 76, .26);
+}
+.shatter-block .shatter-sub {
+  font-size: 11.5px;
+  letter-spacing: .5px;
+  color: rgba(222, 208, 203, .6);
+}
+@media (max-width: 640px) {
+  .shatter-block { gap: 4px; padding: 12px 8px; }
+  .shatter-block .shatter-glyph { font-size: 26px; }
+  .shatter-block .shatter-name { font-size: 16px; letter-spacing: 3px; }
+  .shatter-block .shatter-sub { font-size: 10px; }
 }
 
 .loc-head {
@@ -1814,9 +2067,9 @@ body {
 .pick-loc-modal .pick-loc-zone-row,
 .pick-loc-modal .pick-actions { flex: 0 0 auto; }
 .pick-loc-modal .codex-tip.warn { color: #c0392b; font-weight: 700; }
-/* 「指定地形」与「指定卡牌」两个调试弹窗：内容超高时遮罩可滚动，控件永不被 88vh 裁掉 */
-#pickLocMask, #pickMask { overflow-y: auto; align-items: flex-start; padding: 10px; }
-#pickLocMask > .pick-loc-modal, #pickMask > .codex-modal { margin: auto; }
+/* 「指定地形」「指定卡牌」「添加石块」（v206）三个调试弹窗：内容超高时遮罩可滚动，控件永不被 88vh 裁掉 */
+#pickLocMask, #pickMask, #addStoneMask { overflow-y: auto; align-items: flex-start; padding: 10px; }
+#pickLocMask > .pick-loc-modal, #pickMask > .codex-modal, #addStoneMask > .add-stone-modal { margin: auto; }
 /* 弹窗内只有卡牌/地形网格滚动，底部按钮条固定可见（v149） */
 .codex-modal .codex-grid { flex: 1 1 auto; min-height: 0; }
 .pick-actions { flex: 0 0 auto; flex-wrap: wrap; align-items: center; }
@@ -1914,6 +2167,80 @@ body {
 @media (max-width: 520px) {
   .pick-loc-zone-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pick-loc-zone-row .plz-label { grid-column: 1 / -1; margin: 0 0 2px; }
+}
+
+/* ============ v206：开发者「🪨 添加石块」弹窗 ============
+   结构＝标题 + 区域选择条（复用 .pick-loc-zone-row / .plz-btn）+ 数量行（◀ 输入框 ▶）+ 确认按钮。
+   数量输入框**隐藏原生上下箭头**，只用我们自己的 ◀ ▶ 两个箭头按钮调数值。 */
+.add-stone-modal { max-width: 470px; }
+/* 复用「指定地形」的区域选择条时补一条：该弹窗里没有会滚动的网格，
+   但选择条与按钮条仍固定不压缩（`.pick-loc-modal` 的那条作用域不覆盖这里） */
+.add-stone-modal .pick-loc-zone-row,
+.add-stone-modal .pick-actions { flex: 0 0 auto; }
+.add-stone-body { padding: 16px 2px 6px; }
+.as-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.as-count-label,
+.as-count-unit {
+  font-size: 13px;
+  font-weight: 700;
+  color: #3d5535;
+  white-space: nowrap;
+}
+.as-step {
+  width: 40px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(108, 148, 100, .55);
+  background: rgba(255, 255, 255, .72);
+  color: #2e4527;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.as-step:hover:not(:disabled) { border-color: rgba(242, 201, 76, .95); background: rgba(255, 250, 226, .95); }
+.as-step:active:not(:disabled) { transform: scale(.92); }
+.as-step:disabled { opacity: .38; cursor: not-allowed; }
+.as-input {
+  width: 76px;
+  height: 38px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: #2e4527;
+  border-radius: 10px;
+  border: 1px solid rgba(108, 148, 100, .55);
+  background: rgba(255, 255, 255, .88);
+  font-family: inherit;
+  padding: 0 4px;
+}
+.as-input:focus { outline: none; border-color: #3d6b3a; box-shadow: 0 0 0 3px rgba(61, 107, 58, .18); }
+/* 隐藏原生 number 上下箭头（只保留我们自己的 ◀ ▶ 两个箭头按钮） */
+.as-input::-webkit-outer-spin-button,
+.as-input::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+.as-input { -moz-appearance: textfield; appearance: textfield; }
+.as-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #64805c;
+  text-align: center;
+}
+@media (max-width: 520px) {
+  .as-input { width: 62px; font-size: 16px; }
+  .as-step { width: 34px; height: 34px; }
+  .as-count { gap: 6px; }
+  .as-count-label, .as-count-unit { font-size: 12px; }
 }
 
 /* ============ 图鉴 / 放大卡牌 ============ */

@@ -57,6 +57,9 @@ function findLocDef(id) {
 }
 // 「未揭示」地形兜底定义（正式数据在 locations.js EXTRA.unreveal）：开局三列的未揭晓占位态
 const HIDDEN_LOC_DEF = { id: 'unreveal', n: '未揭示', icon: '❓', wt: 1, dbl: 1, max: 4, eff: '未揭示地形' };
+// v205：「已破碎」地形兜底定义（正式数据在 locations.js EXTRA.shattered）——天界 `shatter` 摧毁后的占位态。
+//   max 0 ⇒ 该侧一格不剩（放牌/移动/落场生成/复活全被挡）；wt 0 ⇒ 不计入区域数；无任何效果字段。
+const SHATTERED_LOC_DEF = { id: 'shattered', n: '已破碎', icon: '💥', wt: 0, dbl: 1, max: 0, eff: '此区域已被摧毁：不能放牌、不计分' };
 
 // 卡面渐变：有自定义 cg（如特殊卡牌「石块」的土黄色）则优先，否则按费用档位取色；
 // v185：再加一层兜底（未知费用档 → 深蓝灰 BACK_GRAD），保证任何卡都不会因取不到色值而透明
@@ -929,19 +932,22 @@ function devDiscard(sideKey, spec) {
 function locRoleBonus(locIdx, card) {
   const aff = locDef(locIdx).aff;
   if (!aff || !card || card.def.un || card.def.spell) return 0; // v170：法术无战力，不吃阵营加成
-  return card.def.g === aff.group ? aff.add : 0;
+  const v = card.def.g === aff.group ? aff.add : 0;
+  return (v < 0 && locNoDown(locIdx)) ? 0 : v; // v201：免减攻区抹平负加成
 }
 // 区域-费用加成：区域 cb={c,add} 给位于本区域、费用恰为该值的卡牌加威力
 // （如雾之湖对 1 费卡牌 +2；双方卡与特殊卡都算）。
 function locCostBonus(locIdx, card) {
   const cb = locDef(locIdx).cb;
   if (!cb || !card || card.def.un || card.def.spell) return 0; // v170：法术不吃费用加成（仍按印刷费用）
-  return card.def.c === cb.c ? cb.add : 0;
+  const v = card.def.c === cb.c ? cb.add : 0;
+  return (v < 0 && locNoDown(locIdx)) ? 0 : v; // v201：免减攻区抹平负加成
 }
 // 区域-全体修正：区域 all=N（可为负，如冥界 -2）给本区域所有卡牌（双方、特殊卡）加 N 威力
 function locAllBonus(locIdx, card) {
   if (!card || card.def.un || card.def.spell) return 0; // v170：法术不吃全区修正
-  return locDef(locIdx).all || 0;
+  const v = locDef(locIdx).all || 0;
+  return (v < 0 && locNoDown(locIdx)) ? 0 : v; // v201：免减攻区抹平负修正（如冥界 -2）
 }
 // 持续效果（og，原「在场光环」）：源卡**已翻开且仍在己方某区**期间，己方场上符合匹配条件的
 // 卡牌常驻 +N。动态读取（**实时派生**，不进 powerLog 永久台账）：源卡被摧毁/回手/换边离场即消失。
@@ -949,7 +955,7 @@ function locAllBonus(locIdx, card) {
 //   ① og.tk（v55 起，如比那名居天子 → 己方带 tk:'rock' 标记的石块）；
 //   ② og.cost（v179 起，如克劳恩皮丝 → 己方场上**印刷费用**为该值的卡牌，**含 1 费 token**；
 //      口径同「雾之湖」的 cb 费用加成：加费只改 cardCost，不改变印刷费用档位的判定）。
-function cardAuraBonus(card) {
+function cardAuraBonus(card, locIdx) {
   if (!card || !card.side || card.def.spell || card.def.un) return 0; // v170：法术无战力，不吃持续加成
   const tk = card.def.tk;
   const cost = card.def.c;
@@ -958,17 +964,21 @@ function cardAuraBonus(card) {
     for (const c of state.players[card.side].zones[j]) {
       const og = c.def.og;
       if (!og || !c.revealed || c.def.un) continue; // 源卡须已翻开且仍在场上
+      if (locMuted(j)) continue; // v202：静海「抹除文本」——源卡在静海 ⇒ 它的持续光环整条失效
       if (tk && og.tk === tk) b += og.add;
       else if (og.cost != null && og.cost === cost) b += og.add;
     }
   }
+  // v201：免减攻区域 —— 负的持续加成同样按 0 计（与 locRoleBonus/locCostBonus/locAllBonus 同口径）
+  if (b < 0 && typeof locIdx === 'number' && locNoDown(locIdx)) return 0;
   return b;
 }
 // 卡牌在指定区域的实时战力 = 基础威力 + 永久增益 + 区域加成（阵营/费用/全区）+ 持续效果
 // v170：法术恒为 0——它没有战力，不吃任何加成（阵营/费用/全区/持续都不适用）
+// v201：所在区域带 noDown（蓬莱药局）时，上述实时加成里的**负值一律按 0 计**（免减攻）
 function cardPowerIn(locIdx, card) {
   if (isSpell(card)) return 0;
-  return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card) + cardAuraBonus(card);
+  return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card) + cardAuraBonus(card, locIdx);
 }
 // ---- 占格（occ）口径：普通卡占 1 格；大体积卡（如伊吹萃香 occ:4）占满多格 ----
 // 出牌/生成/移动/放满等所有“还能放几张”的判定统一走这里，避免只用 zone.length 误判。
@@ -978,15 +988,80 @@ function occOf(card) {
   return (card && card.def && card.def.occ) || 1;
 }
 function sideUsed(side, locIdx) { return state.players[side].zones[locIdx].reduce((s, c) => s + occOf(c), 0); }
-function sideRoom(side, locIdx) { return locDef(locIdx).max - sideUsed(side, locIdx); }
-// 大体积卡只允许放入“上限恰为其占格数”的区域（如 occ4 只能进 max=4）
-function occZoneOk(card, locIdx) { return occOf(card) <= 1 || locDef(locIdx).max === occOf(card); }
-// 放满加成：区域 fill=N 时，某一方在本区实际占满 max 格（含大体积卡，如 4/4）则该方
-// 总战力额外 +N；因摧毁/撤回等原因不足 max 格时立即不生效（4→3 不加）。
+
+/* ---- v200：区域「隙间封格」（地形字段 `gap: N`，现仅「八云紫的家」）----
+   每回合结束时，若某侧在本区**还有空位**，就把该侧**最靠后**的格位封成「隙间」（灰卡）。
+   实现上**不往 zones 里塞卡**，而是把「已封格数」记在本列（`state.locs[j].gaps`，**双方各一份**），
+   该侧**可用格数** = 地形 `max` − 已封数（下限 0）；渲染层照旧只把隙间铺在“空置的不可用格”，
+   于是表现就是**最后一格先变灰、逐回合往前推**。
+   口径（用户确认，v200）：
+     ① **双方分别判定**：某侧在本区已占格 < 该侧可用格数（＝还有空位）时回合末 +N；
+        该侧“剩下的空间已经被牌放满”则本次**不加**；之后只要有牌被摧毁/移走腾出空位，
+        下一个回合末就继续加（所以某侧的封格数不会超过它“曾经空着”的程度）；
+     ② **下限 0**：可以封到该侧一格不剩（此后该侧不能在本区放牌/生成 token；已有卡保留、
+        照常计分），到 0 之后自然不会再加（已占格 ≥ 可用格数恒成立）；
+     ③ **地形被换掉即清空**（`resetLocGaps`：xform / collapse / 开发者「指定地形」/
+        秘封俱乐部的定时变形）——隙间属于「八云紫的家」这块地形，换地形不带过去；
+     ④ 只改「能放几张」：隙间**不占 zones 数组**、不进 `zoneTotals` / `powerLog` / `fieldQueue`，
+        不触发 `surv`/`phx`/`prot`/`ind`，也不参与任何摧毁/移动/换边的目标选择；
+     ⑤ 所有“还能放几张”的判定统一读 `locSideMax`（`sideRoom` / `occZoneOk` / `zoneFillBonus` /
+        渲染层格位），因此放牌、落场生成（含 token）、移动（mv/fly/shift/roam/gust）、
+        大体积卡上限、`fill` 放满加成全部自动按封格后的格数算。 */
+/* ---- v205：区域「已破碎」（天界 `shatter` 摧毁后的状态）----
+   天界在同一列「出现」时，会把另外两列的地形**连同其上的所有卡牌**一并摧毁（无视一切防护），
+   被摧毁的列就进入「已破碎」：地形换成 `EXTRA.shattered`（max 0 / wt 0 / 无效果），并在
+   `state.locs[j].shattered` 上打一个显式标记（渲染层据此把**整列**换成一块损坏面板）。
+   判据采用“标记 ∨ 占位地形 id”双保险，故即使某一侧漏设标记也照样算已破碎。
+   影响面（全部只读本判定，无一处写状态）：
+     · `locSideMax` → 0：`sideRoom` / `occZoneOk` / `zoneFillBonus` / 渲染格位全部自动作废；
+     · `locOpen`    → false：放牌 / 移动 / 落场生成 / 复活等“落点合法性”一并挡住；
+     · 渲染层 `renderZones` 整列跳过、`renderShatteredColumn` 负责画那块「已破碎」面板；
+     · 终局 `finishMatch` 跳过（不计分、不参与胜负）、`playEndHighlights` 跳过放大高亮；
+     · 四条件“换地形”的路径一律跳过（`xform` / `xformTurn` / `collapse` / 开发者「🗻 指定地形」）。 */
+function locShattered(locIdx) {
+  const L = state.locs && state.locs[locIdx];
+  if (!L) return false;
+  if (L.shattered) return true;
+  return !!(L.def && L.def.id === 'shattered');
+}
+function locGaps(side, locIdx) {
+  const L = state.locs[locIdx];
+  if (!L) return 0;
+  if (!L.gaps) L.gaps = { p: 0, a: 0 };
+  return L.gaps[side] || 0;
+}
+// 该列该侧的**可用格数**（地形 max − 已封隙间数，下限 0；max 缺省按 4）
+// v205：已破碎的区域恒为 0（一格不剩 ⇒ 不能放牌、`fill` 不生效、大体积卡也进不来）
+function locSideMax(side, locIdx) {
+  if (locShattered(locIdx)) return 0;
+  const d = locDef(locIdx);
+  const base = (typeof d.max === 'number') ? d.max : 4;
+  return Math.max(0, base - locGaps(side, locIdx));
+}
+// 该列两侧中**较大**的可用格数：仅供不带 side 的 occ 判定兜底
+// （实际能否落下仍由 sideRoom ≥ occ 把关，故不会因此放错）
+function locAnyMax(locIdx) { return Math.max(locSideMax('p', locIdx), locSideMax('a', locIdx)); }
+// 地形被换掉时清空两侧隙间（v200：隙间属于「八云紫的家」这块地形）
+function resetLocGaps(locIdx) {
+  const L = state.locs[locIdx];
+  if (L) L.gaps = { p: 0, a: 0 };
+}
+function sideRoom(side, locIdx) { return locSideMax(side, locIdx) - sideUsed(side, locIdx); }
+// 大体积卡只允许放入“该侧可用格数恰为其占格数”的区域（如 occ4 只能进可用 4 格的区域）；
+// 不带 side 时按两侧中较大的可用格数兜底（调用方随后仍会用 sideRoom 复核）
+function occZoneOk(card, locIdx, side) {
+  if (occOf(card) <= 1) return true;
+  const m = side ? locSideMax(side, locIdx) : locAnyMax(locIdx);
+  return m === occOf(card);
+}
+// 放满加成：区域 fill=N 时，某一方在本区实际占满**该侧可用格数**（含大体积卡，如 4/4）则该方
+// 总战力额外 +N；因摧毁/撤回等原因不足时立即不生效（4→3 不加）。
+// v200：可用格数＝地形 max − 已封隙间数；可用格数为 0（被隙间封死）时恒不生效。
 function zoneFillBonus(side, locIdx) {
   const def = locDef(locIdx);
   if (!def.fill) return 0;
-  return sideUsed(side, locIdx) >= def.max ? def.fill : 0;
+  const m = locSideMax(side, locIdx);
+  return (m > 0 && sideUsed(side, locIdx) >= m) ? def.fill : 0;
 }
 // 区域总点数：默认只统计“已翻开的牌”（暗牌不计入，翻面后才计入）；includeHidden=true 供 AI 估值。
 function zoneTotals(side, locIdx, includeHidden) {
@@ -1002,17 +1077,63 @@ function zoneEff(side, locIdx, includeHidden) {
   return locDef(locIdx).inv ? -t : t;
 }
 // 区域对放牌是否“开放”：带 minTurn 的区域（如七夕坂第 5 回合起）在到达前双方都不能放牌
+// v205：已破碎的区域恒不开放（整块区域都不存在了 —— 双方都不能再在此放牌/移动/生成）
 function locOpen(locIdx) {
+  if (locShattered(locIdx)) return false;
   const mt = locDef(locIdx).minTurn;
   return !mt || state.turn >= mt;
 }
 function locDef(locIdx) { return state.locs[locIdx].def; }
+
+/* ---- v203：本局总回合数（由地形字段 `extraRound` 驱动，现仅「虚假之月」）----
+   口径（用户确认，v203；见 data/locations.js 的 `extraRound=` 字段说明与 docs/现有地形.md）：
+     ① **实时读取当前三列**：任一列地形带 `extraRound`（未揭示列是 `unreveal` 占位地形、不带该字段
+        ⇒ 天然不算）则本局总回合数为 **7**，否则 6；地形被揭晓 / 变形 / 崩塌 / 开发者指定替换而
+        带上或失去该字段时立刻跟着变；
+     ② **进入第 7 回合后锁定**：只要 `state.turn` 已到 7 就恒为 7 —— 第 7 回合中途把虚假之月变掉
+        也不会提前终局（第 7 回合照常打完、第 7 回合末才结算）；这条也顺带保证**永远不会到第 8 回合**；
+     ③ **不叠加**：上限恒为 7（同时有两块带该字段的地形也只延长 1 回合）；
+     ④ 全引擎的消费点共四处，一律读本函数以保证一致：终局判定（`playRound`）、能量基数
+        （`roundStartStage` 的 `Math.min(回合数, …)`）、斯塔萨菲雅的终局边界（`energyNext`）、
+        顶栏「回合 N / 总数」（`renderHud`）。注意 `js/ai.js` 的地形投影与法术调度估值也读它。 */
+function fakeMoonOnField() {
+  return state.locs.some((l) => l && l.def && l.def.extraRound);
+}
+function roundsTotal() {
+  if (state.turn >= 7) return 7; // ②：已在第 7 回合 → 锁定（同时封住第 8 回合）
+  return fakeMoonOnField() ? 7 : 6;
+}
+/** v203：本局总回合数**发生变化的那一刻**的提示收口 —— 与 `state.roundTotal` 记录值不同才写一条日志。
+    值本身是实时读的（顶栏与终局判定不需要本函数），本函数只负责“变化的那一刻”留痕。
+    调用点＝①-0 地形揭晓 / ①-0b 定时变形 / 卡牌 `xform` / 地形 `collapse` 崩塌 / 开发者「🗻 指定地形」
+    / 每回合开始（防御性再补一次：任何路径漏调都能在回合边界补上）。 */
+function syncRoundTotal(tag) {
+  if (!state.locs) return;
+  const now = roundsTotal();
+  if (now === state.roundTotal) return;
+  const prev = state.roundTotal || 6;
+  state.roundTotal = now;
+  const why = tag || '地形变化';
+  const names = state.locs
+    .filter((l) => l && l.def && l.def.extraRound)
+    .map((l) => `「${l.def.n}」`)
+    .join('、');
+  if (now > prev) {
+    log('sys', `🌕 本局总回合数：${prev} → ${now} —— ${names || '虚假之月'}在场，本局将进行第 ${now} 回合（第 ${now} 回合能量 ${now} 点；${why}）。`);
+  } else {
+    log('sys', `🌕 本局总回合数：${prev} → ${now} —— 场上已没有「虚假之月」，本局回到 ${now} 回合（${why}）。`);
+  }
+  // v203：顶栏「回合 N / 总数」当场刷新（不等到回合末的 renderAll）——
+  // 因此翻牌阶段里被 `xform` 变出/变走的虚假之月也能即时反映到 /7 与 /6。
+  renderHud();
+}
 
 /* ---------------- 状态 ---------------- */
 const state = {
   gen: 0,
   cardSeq: 0,
   turn: 1,
+  roundTotal: 6,       // v203：本局总回合数（实时读 roundsTotal()；此字段只用于“变化的那一刻”留痕）
   phase: 'idle',       // idle | play | busy | over
   stakes: 1,
   pSnapped: false,
@@ -1068,6 +1189,7 @@ async function restart(opts) {
 
   state.cardSeq = 0;
   state.turn = 1;
+  state.roundTotal = 6; // v203：新一局的总回合数记录回到 6（本局真实值由 roundsTotal() 实时判定）
   state.phase = 'idle';
   state.stakes = 1;
   state.pSnapped = false;
@@ -1167,7 +1289,10 @@ async function restart(opts) {
   // 由 locationRevealStage 在第 1/2/3 回合开始时依次揭晓到第 0/1/2 列（左→中→右）。
   state.locPlan = picks;
   const hiddenDef = findLocDef('unreveal') || HIDDEN_LOC_DEF;
-  state.locs = picks.map(() => ({ def: hiddenDef }));
+  // v200：gaps = 本列两侧各自的「已封隙间格数」（见 locGaps / locSideMax；换地形时重置）
+  // v205：shattered = 本列是否已被「天界」摧毁（见 locShattered；新一局全部回到 false）
+  state.locs = picks.map(() => ({ def: hiddenDef, gaps: { p: 0, a: 0 }, shattered: false }));
+  shatterChain = null; // v205：丢掉上一局遗留的「天界降临」链条（gen 守卫之外的额外保险）
   state.moveCardId = null;
   state.flyMoved = new Set();
   state.flyMovedFrom = {};
@@ -1348,6 +1473,8 @@ function placeToken(side, locIdx, tkDef, cnt, out) {
      ① roundStart：locationRevealStage（①-0 地形揭晓：第 t 回合揭晓第 t 列，
                    含该地形“出现时”生成效果）
                   → runTurnStartEffects（全场“回合开始”效果，按放置队列序结算）
+                  → locXformTurnEffects（①-0b 地形定时变形，v199：第 turn 回合开始时把本区
+                  换成随机另一个地形（现秘封俱乐部）+ 立刻结算目标地形的「出现时」效果）
                   → 能量结算 + 抽牌（回合 2+，第 1 回合的 3 张已在开局发放）
                   → 清空回合临时状态
      ② 玩家放置与移动（waitPlayer：出牌 / 移动 / 重置 / 双倍 / 认输均在此阶段）
@@ -1357,7 +1484,8 @@ function placeToken(side, locIdx, tkDef, cnt, out) {
                     → 最后区域「揭示后吹飞」（gust，如魔力风暴吹到另一区，v162）
      ⑤-0 runLocTurnEndEffects：**区域（地形）回合结束效果**——每回合翻牌结算后最先执行：
                     先结算地形（grow 成长 / decay 衰减 → dice 定时掷骰（指定回合）→
-                    rally 定时加成（指定回合）→ purge 回合末摧毁 → collapse 崩塌（幽明结界）），
+                    rally 定时加成（指定回合）→ purge 回合末摧毁 → collapse 崩塌（幽明结界）→
+                    gap 回合结束封格（八云紫的家，v200：双方各从后往前添加 1 张隙间）），
                     再进入卡牌时机效果
                     （v153 口径：每回合结束时**先结算地形，再结算场上「回合结束」卡牌**）
      ⑤ runTurnEndEffects：全场“回合结束”卡牌效果（按放置队列序结算）
@@ -1410,6 +1538,8 @@ function resolveTimedEffects(timing) {
     }
     const locIdx = fieldLocOf(card);
     if (locIdx < 0) continue; // 防御：已不在场上
+    // v202：静海「抹除文本」——在该区的牌其时机效果不结算（错过的时机不补结算）
+    if (cardMuted(card)) { muteSkipLog(card, FX_TIMING_TXT[timing] || '时机效果'); continue; }
     applyEffect(card.side, locIdx, card, fx);
   }
 }
@@ -1633,16 +1763,22 @@ function runTurnStartEffects() {
 //   ③ rally 定时加成（演唱会，v161）：在指定回合的回合末，本区**双方所有已翻开卡牌**
 //      永久 +N 战力（见 locRallyEffects）；
 //   ④ purge（聚变反应炉）：摧毁本区全场战力最低的牌（见 reactorPurge）；
-//   ⑤ collapse 回合结束崩塌（幽明结界，v163）：本区双方总卡牌数达标即换地形（见 locCollapseEffects）。
+//   ⑤ collapse 回合结束崩塌（幽明结界，v163）：本区双方总卡牌数达标即换地形（见 locCollapseEffects）；
+//   ⑥ gap 回合结束封格（八云紫的家，v200）：双方各从后往前添加 1 张「隙间」（见 locGapEffects）。
 // 同一块地形一般只带其中一类字段；后续新地形机制在此追加。
-// ⚠️ collapse 放在**本阶段最后**：本回合先按原地形结算其 grow/decay/dice/rally/purge，
+// ⚠️ collapse 放在地形类效果的**最后**：本回合先按原地形结算其 grow/decay/dice/rally/purge，
 //    崩塌后的新地形从**下一回合**起按其规则参与（同一回合不再触发新地形的回合结束类效果）。
-function runLocTurnEndEffects() {
+//    ⚠️ v200：collapse 变完地形后其后的 gap **一定不生效**（换地形本身已把隙间清空，
+//    且目标地形自带 gap 才会触发）——故 gap 排在其后不会与崩塌互相干扰。
+// v205：本函数改为 async —— 其内的 collapse 崩塌若崩出「天界」，要等整条摧毁演出播完
+//       才进入后面的 gap 封格与阶段 ⑤ 卡牌回合结束效果。
+async function runLocTurnEndEffects() {
   locTurnEndPowerEffects();
   locDiceEffects();
   locRallyEffects();
   reactorPurge();
-  locCollapseEffects();
+  await locCollapseEffects();
+  locGapEffects();
 }
 
 // 阶段 ⑤：全场“回合结束”卡牌效果 —— 在区域（地形）回合结束效果（⑤-0）**之后**执行，
@@ -1766,6 +1902,18 @@ function revealLocFade(locIdx) {
 // ③ 开发者「🗻 指定地形」替换该列时（v150，可勾选关闭）。
 // 返回实际落场张数；未落满（该侧已放满）时在日志里说明。
 function runLocAppearEffect(idx, def) {
+  const placed = runLocAppearSpawn(idx, def);
+  // v205：天界「出现时摧毁另外两块地形」——与本函数同一套「出现时」时机，但它是一条**异步多阶段
+  // 演出链**（逐张摧毁 → 等 0.3s → 摧毁地形 → 等 0.3s → 第二块……），这里只负责**启动**；
+  // 正常对局的四条路径（揭晓 / 定时变形 / 崩塌 / 卡牌 `xform`）会 `await awaitShatterChain()`
+  // 把节奏等完再继续；**开发者工具例外** —— 它启动后立刻关窗，演出在后台播（见 uiOnPickLocConfirm）。
+  if (def && def.shatter) startShatterChain(idx, def);
+  return placed;
+}
+
+/** v150/v165/v166 原有的「出现时**生成**」逻辑（`spawn`）：从 runLocAppearEffect 拆出的纯生成部分
+    （v205 拆分只为给 `shatter` 让出收口；生成口径与行为逐字未变）。 */
+function runLocAppearSpawn(idx, def) {
   const sp = def && def.spawn;
   if (!sp) return 0;
   const cnt = sp.n || 1;
@@ -1800,6 +1948,199 @@ function runLocAppearEffect(idx, def) {
     return placed;
   }
   return 0;
+}
+
+/* ==================== v205：天界「出现时摧毁另外两块地形」（地形字段 `shatter: true`，现仅「天界」）====================
+   一句话口径：天界在本区「出现」的那一刻，把**另外两块地形**连同其上的**所有卡牌**一并摧毁，
+   本局此后**只剩本区域可用**；被摧毁的两列变成「已破碎」（看不出原地形、没有双方总点数、不能放牌）。
+
+   节奏（用户确认，v205；**2026 用户复测后把三处等待统一压到 0.3s**）——逐块处理、**左→右**
+   （跳过本列与已经破碎的列），每块两阶段：
+       ① 依次摧毁该区的所有卡（顺序 = 场上放置顺序队列 fieldQueue；每张间隔 0.3s）
+       ② 等 0.3s → 摧毁该地形本身（该列变「已破碎」）
+     两块之间再等 0.3s。整条节奏 = 卡A →0.3s→ 地形A →0.3s→ 卡B →0.3s→ 地形B。
+     ⚠️ 每张之间的 0.3s **短于** `playShatter` 的分崩离析动画（那个动画本身约 1s，且是**全局共用**
+     的摧毁演出，`dw`/`dwh`/`purge` 等都用它，**不能为一处机制单独改短**）——因此现在相邻几张的
+     碎裂动画会**重叠播放**（观感是“连续爆裂、一口气全碎”，而不是“一张播完再下一张”）。
+     这是“加快节奏”的预期取舍；若日后想恢复“每张完整播完”，把 `SHATTER_CARD_MS` 调回 1000 即可。
+
+   保护（用户确认）：**一切防护一律无视** —— 区域级 `prot`（睡鼠神祠 / 蕾蒂）与卡级 `surv`（灵乌路空）
+   / `phx`（藤原妹红）/ `ind`（佛体金刚石）全部不生效、不播任何替代演出（整块区域都不存在了）。
+   被摧毁的卡**照常走 `recordDestroy`**：进归属方的摧毁池、计入「纯狐」`costDown` 的摧毁计数。
+   含**暗牌**与**落场 token**、以及场上的法术，一视同仁。
+
+   实现要点：
+     · 「已破碎」= `state.locs[j].shattered = true` + `def` 换成 `EXTRA.shattered`（`max 0` / `wt 0`），
+       于是 `locSideMax`/`sideRoom` 恒 0、`locOpen` 恒 false —— 放牌 / 移动 / 落场生成 / 复活
+       全部自动被挡住（含 AI 的落点枚举，它同样读 `sideRoom`/`locOpen`）。
+     · 整列外观由 `renderShatteredColumn` 换成一块损坏面板（`.shattered-loc` + `.shatter-block`），
+       **不保留地形名、也不保留双方总点数的数字与格位**；`renderZones` 对该列整列跳过。
+     · 链条是**单例 Promise**（`shatterChain`）：同一时刻只可能有一条在播（防御重复触发），
+       正常对局的四条路径用 `awaitShatterChain()` 等它播完再继续，因此不会与
+       「回合开始 / 翻牌 / 回合结束」抢时序；**开发者工具不等**（启动后立刻关窗，演出后台播）。
+     · 「不重复摧毁」：已破碎的列直接跳过；另外两列都已破碎则该次「降临」无事发生（只记一条日志）。
+     · 「永久锁定」：已破碎的列不会被 `xform` / `xformTurn` / `collapse` / 开发者「🗻 指定地形」再换地形。 */
+
+// 三处等待统一为 0.3s（用户复测后要求“所有的间隔都改成 0.3 秒”，原为 1000 / 500 / 800）。
+// ⚠️ `SHATTER_CARD_MS` 现在短于 `playShatter` 的分崩离析动画（约 1s）——相邻几张的碎裂演出会重叠，
+//    这是刻意的“加快节奏”取舍（分崩离析是全局共用的摧毁演出，不为一处机制单独改短）。
+const SHATTER_CARD_MS = 300;       // 每张卡之间（原 1000）
+const SHATTER_TERRAIN_MS = 300;    // 该区最后一张卡 → 摧毁该地形本身（原 500）
+const SHATTER_NEXT_LOC_MS = 300;   // 摧毁地形 A → 开始摧毁地形 B 的卡（原 800）
+
+// 正在播放的「天界降临」链条（Promise | null）。单例：同一时刻只播一条。
+let shatterChain = null;
+
+/** 整列换成「已破碎」的损坏面板（v205）：看不出原本是哪块地形、没有双方总点数、也没有格位。
+    做法是**换掉整个列元素**（连带丢弃原来的点击/悬停监听，破碎列不再触发任何出牌逻辑），
+    并把 `Game._els` 里该列的四个引用换成游离占位节点 —— 这样其它按索引取值的渲染代码不会报错。 */
+function renderShatteredColumn(locIdx) {
+  const els = Game._els;
+  if (!els || !els.cols) return;
+  const old = els.cols[locIdx];
+  const col = document.createElement('div');
+  col.className = 'location shattered-loc';
+  col.dataset.shattered = String(locIdx);
+  const block = document.createElement('div');
+  block.className = 'shatter-block';
+  block.innerHTML =
+    '<span class="shatter-glyph">💥</span>' +
+    '<span class="shatter-name">已破碎</span>' +
+    '<span class="shatter-sub">此区域已被摧毁</span>';
+  block.addEventListener('click', (e) => {
+    e.stopPropagation(); // 破碎列不参与任何出牌/移动逻辑，只给个说明
+    setStatus('此区域已被「天界」摧毁：不能放牌、没有点数、也不参与胜负。');
+  });
+  col.appendChild(block);
+  if (old && old.parentNode) old.parentNode.replaceChild(col, old);
+  else if ($('board')) $('board').appendChild(col);
+  els.cols[locIdx] = col;
+  els.oppZone[locIdx] = document.createElement('div');   // 占位：破碎列没有格位
+  els.mineZone[locIdx] = document.createElement('div');
+  els.totA[locIdx] = document.createElement('span');      // 占位：破碎列没有点数
+  els.totP[locIdx] = document.createElement('span');
+}
+
+/** 依次摧毁某区域内**双方的所有卡**（v205，天界专用；**无视 surv/phx/ind/prot**）。
+    顺序 = 场上放置顺序队列 `fieldQueue`（与其它摧结束算同口径：谁先放谁先碎），
+    不在队列里的（理论不会）按「先己方后敌方、格位顺序」补在后面。
+    每张：`recordDestroy`（先记账，须在移出区域之前）→ `playShatter`（分崩离析，悬浮层不受重建影响）
+    → 移出区域 → 移出放置队列 → 渲染 → 等 `SHATTER_CARD_MS`。返回实际摧毁张数。 */
+async function shatterZoneCards(locIdx, gen, srcName) {
+  const def = locDef(locIdx);
+  const where = def ? def.n : `区域 ${locIdx + 1}`;
+  const targets = state.fieldQueue.filter((c) => c && fieldLocOf(c) === locIdx);
+  for (const side of ['p', 'a']) {
+    for (const c of state.players[side].zones[locIdx]) {
+      if (targets.indexOf(c) < 0) targets.push(c); // 兜底：不在放置队列里的也一并摧毁
+    }
+  }
+  if (!targets.length) {
+    log('danger', `☁️ ${srcName}：「${where}」区域上空无一卡，直接进入地形摧毁。`);
+    return 0;
+  }
+  log('danger', `☁️ ${srcName}：「${where}」区域开始崩塌 —— 依次摧毁其上的 ${targets.length} 张卡牌（本机制无视一切防摧毁 / 免摧毁保护）。`);
+  let n = 0;
+  for (const c of targets) {
+    if (gen !== state.gen) return n;           // 防御：链条播放期间重开了一局
+    if (fieldLocOf(c) !== locIdx) continue;    // 防御：已被前一张的效果挪走或摧毁
+    recordDestroy(c, locIdx, srcName);         // ① 记入摧毁池（须在移出区域之前，此刻才读得到实时战力）
+    playShatter(c);                            // ② 分崩离析演出（悬浮层，约 1s）
+    const zone = state.players[c.side].zones[locIdx];
+    const i = zone.indexOf(c);
+    if (i >= 0) zone.splice(i, 1);             // ③ 移出区域
+    dequeueField(c);                           // ④ 移出放置队列（后续时机不再结算它）
+    n++;
+    renderZones();                             // 让“这张已经没了”立刻可见
+    await sleep(SHATTER_CARD_MS);
+  }
+  log('danger', `☁️ ${srcName}：「${where}」区域上的 ${n} 张卡牌已全部摧毁（含暗牌与落场 token）。`);
+  return n;
+}
+
+/** 摧毁某区域的**地形本身**（v205）：换成「已破碎」占位地形 + 整列换成损坏面板。
+    返回被摧毁的地形 def（供日志/调用方使用）。 */
+function shatterZoneTerrain(locIdx, srcName) {
+  const L = state.locs[locIdx];
+  if (!L) return null;
+  const prev = L.def;
+  L.shattered = true;
+  L.def = findLocDef('shattered') || SHATTERED_LOC_DEF;
+  resetLocGaps(locIdx);            // 隙间属于被摧毁的那块地形，一并清空
+  renderShatteredColumn(locIdx);   // 整列换成损坏面板（列名 / 效果文字 / 配色 / 格位 全部消失）
+  // v203：若被摧毁的正是「虚假之月」→ 本局总回合数当场退回 6（并留一条日志 + 刷新顶栏）
+  syncRoundTotal('天界摧毁地形');
+  log('danger', `☁️ ${srcName}：「${prev ? prev.icon + prev.n : '该区域'}」的地形被彻底摧毁 → 该列变成「已破碎」（双方区域一并消失，不能放牌、不计分、不参与胜负）。`);
+  return prev;
+}
+
+/** 「天界降临」链条（v205）：左→右依次摧毁另外两列（卡 →0.3s→ 地形 →0.3s→ 卡 →0.3s→ 地形）。 */
+async function runShatterChain(heavenIdx, gen, srcName) {
+  const targets = [];
+  for (let j = 0; j < 3; j++) {
+    if (j === heavenIdx) continue;
+    if (locShattered(j)) continue; // ⑥ 不重复摧毁：已经破碎的列直接跳过
+    targets.push(j);
+  }
+  const heavenName = locDef(heavenIdx) ? locDef(heavenIdx).n : '本区域';
+  if (!targets.length) {
+    log('sys', `☁️ ${srcName}：另外两块区域早已破碎（不会重复摧毁），本次「降临」无事发生。`);
+    return;
+  }
+  log('danger', `☁️ ${srcName}降临！即将摧毁另外 ${targets.length} 块区域（${targets.map((j) => `「${locDef(j) ? locDef(j).n : '区域 ' + (j + 1)}」`).join('、')}）—— 本局此后只剩「${heavenName}」一个可用区域。`);
+  for (let k = 0; k < targets.length; k++) {
+    const j = targets[k];
+    if (gen !== state.gen) return;
+    if (locShattered(j)) continue;              // 防御：链条期间该列已被别的路径摧毁
+    await shatterZoneCards(j, gen, srcName);    // ① / ③ 依次摧毁该区的所有卡
+    if (gen !== state.gen) return;
+    await sleep(SHATTER_TERRAIN_MS);            // 0.3s
+    if (gen !== state.gen) return;
+    shatterZoneTerrain(j, srcName);             // ② / ④ 摧毁地形本身
+    if (k < targets.length - 1) {
+      await sleep(SHATTER_NEXT_LOC_MS);         // 0.3s（只在下游还有一块要拆时才等）
+      if (gen !== state.gen) return;
+    }
+  }
+  renderZones();
+  log('danger', `☁️ ${srcName}：另外两块区域已全部破碎 —— 本局仅剩「${heavenName}」可放牌，终局也只按这一个区域判定。`);
+}
+
+/** 启动「天界降临」链条（同步返回，演出在后台播）。单例：已有链条在播时直接复用、不重复启动。
+    ⚠️ 收尾清空时按「还是同一条 Promise」判定（`shatterChain === p`）——这样即使上一局的链条在
+    `restart` 之后才收尾，也不会把新一局的链条误清掉（`gen` 守卫之外的额外保险）。 */
+function startShatterChain(heavenIdx, def) {
+  if (shatterChain) return shatterChain;
+  const gen = state.gen;
+  const srcName = (def && def.n) || '天界';
+  let p = null;
+  const done = () => { if (shatterChain === p) shatterChain = null; };
+  p = (async () => {
+    try {
+      await runShatterChain(heavenIdx, gen, srcName);
+    } catch (e) {
+      console.error('[天界] 区域摧毁演出出错：', e);
+    } finally {
+      done();
+      // ⚠️ 收尾渲染自带 try/catch：本链条可能是**未被 await 的“后台播”**（如开发者工具里
+      //    立刻关窗后就撒手），若 finally 里抛异常会让整条 Promise 变成未处理的 rejection。
+      try { if (gen === state.gen) renderZones(); } catch (e) { console.error('[天界] 收尾渲染出错：', e); }
+    }
+  })();
+  shatterChain = p;
+  return p;
+}
+
+/** 等待正在播放的「天界降临」链条结束（没有链条时立即 resolve）。
+    正常对局的四条路径（揭晓 / 定时变形 / 崩塌 / 卡牌 `xform`）都会在启动后 await 它，
+    卡牌 `xform` 那条同步路径由 `revealRound` 在每张牌结算后补等 —— 保证节奏不被后续阶段打断。
+    ⚠️ 开发者「🗻 指定地形」（`uiOnPickLocConfirm`）**故意不 await**：启动后立刻关窗，演出后台播。 */
+async function awaitShatterChain() {
+  while (shatterChain) {
+    const p = shatterChain;
+    await p.catch(() => {});
+    if (shatterChain === p) break; // 防御：链条没被清空时避免死循环
+  }
 }
 
 // v166（spawn.reveal = true）：让「出现时」生成的卡**也结算一次自身的「揭示」效果**。
@@ -1860,35 +2201,105 @@ function applyGatherBuff(side, card, group, add) {
   return n;
 }
 
-function locationRevealStage() {
+async function locationRevealStage() {
   const st = state;
   const idx = st.turn - 1;
   if (idx < 0 || idx >= st.locs.length) return;
   const loc = st.locs[idx];
-  if (!loc || !loc.def || loc.def.id !== 'unreveal') return; // 该列已揭晓（防御）
+  // 该列已揭晓（防御）；v205：已被「天界」摧毁的列也走这里 —— 已破碎列永不揭晓
+  if (!loc || !loc.def || loc.def.id !== 'unreveal') return;
   const target = st.locPlan && st.locPlan[idx];
   if (!target) return;
   revealLocFade(idx); // v98：旧“未揭示”外观淡出 700ms（快照需在换 def 前抓取）
   loc.def = target; // 换上真实地形
+  resetLocGaps(idx); // v200：换地形 → 清空本列已封的隙间
   refreshLocHeader(idx); // 列名/图标/效果文案/配色即时更新
   log('sys', `🃏 第 ${st.turn} 回合开始：地形「${target.n}」揭晓！`);
   // 揭晓时刻结算该地形的“出现时”生成效果（如虹龙洞给双方各 1 张石块）
+  // v205：若揭晓的是「天界」，这里同时启动「摧毁另外两块地形」的演出链
   runLocAppearEffect(idx, target);
+  // v203：揭晓出来的地形若带 `extraRound`（虚假之月）→ 本局总回合数当场变 7（顶栏「/ 7」+ 一条日志）
+  syncRoundTotal('地形揭晓');
+  // v205：把「天界降临」整条摧毁演出等完再回上层 —— 否则回合开始效果 / 抽牌会插进节奏里
+  await awaitShatterChain();
 }
 
-// 阶段 ①：回合开始 —— 地形揭晓 → 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置
-function roundStartStage() {
+/* ---- v199：区域「定时变形」效果（字段 `xformTurn: { turn }`，现仅「秘封俱乐部」）----
+   在**第 turn 回合的回合开始时**（roundStartStage 的 ①-0b，紧接 ①-0「地形揭晓」之后、
+   场上「回合开始」卡牌效果 ①-1 之前）结算：把本区域地形**整体换成地形池里随机另一个地形**，
+   并立刻结算目标地形的「出现时」效果（runLocAppearEffect，同 xform / collapse 的 v151 口径）。
+   口径（用户确认，v199）：
+     ① 候选 = LOCATION_POOL 里**除自身以外**的全部地形（**允许与另外两列当前地形重复**）；
+        EXTRA 的非随机地形不入候选，故绝不会变成「未揭示」；
+     ② 抽中「上限放不下本区已放卡」的地形（如迷途竹林 max 2 而某侧已放 3 张）**照常变形**——
+        口径同「地形揭晓」的超限处理：已放卡不移动、不增删、不摧毁，隙间只铺在“空置”的
+        不可用格（见 buildZoneChildren），该侧此后按已满处理；
+     ③ 换掉后本区不再带 `xformTurn` 字段，故**只会变形一次**；
+     ④ 新地形**从变形那一刻起完全生效**（列头配色随 refreshLocHeader 立即更新），含
+        **同一回合末**的 grow/decay/dice/rally/purge 等回合结束类效果；
+     ⑤ 若该地形是在第 turn 回合开始**之后**才落到本区的（`xform` 区域变形 / 开发者
+        「🗻 指定地形」），该时机已过、**不补结算**（口径同 dice / rally）；
+     ⑥ 非“摧毁”/非增减类：不改任何卡牌的战力与格位、不触发 surv/phx/prot/ind、不进
+        powerLog（生成物走 placeToken 的既有口径）。
+   与另外两个“变形”机制的分工：`xform`（鬼人正邪）＝卡牌揭示时**指定**目标地形且上限
+   不足则失败；`collapse`（幽明结界）＝回合末**按本区卡牌数**触发、目标**指定**；本字段
+   ＝回合开始时**随机**目标、且**不做上限防御**（按超限口径照常变形）。 */
+async function locXformTurnEffects() {
   const st = state;
-  locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
+  let changed = false;
+  for (let j = 0; j < 3; j++) {
+    if (locShattered(j)) continue; // v205：已破碎的列永久锁定 —— 不再变形（该列也不带任何字段）
+    const def = locDef(j);
+    const xt = def.xformTurn;
+    if (!xt || st.turn !== xt.turn) continue; // 只在指定回合的回合开始结算
+    const cands = LOCATION_POOL.filter((d) => d && d.id !== def.id); // v199：只排除自身
+    if (!cands.length) {
+      log('danger', `${def.icon} ${def.n}：地形池里没有可变成的其它地形，本次不变形。`);
+      continue;
+    }
+    const target = cands[Math.floor(Math.random() * cands.length)];
+    st.locs[j].def = target; // 换上目标地形（上限/加成/反转/… 等字段即刻生效）
+    resetLocGaps(j);         // v200：换地形 → 清空本列已封的隙间
+    refreshLocHeader(j);     // 列名/图标/效果文案/配色即时更新
+    log('sys', `${def.icon} ${def.n}：第 ${st.turn} 回合开始 —— 本区域变成了「${target.icon} ${target.n}」！`);
+    // v151 口径：变形 = 该地形在本区“出现”——立刻结算其「出现时」效果
+    // （如变成虹龙洞 → 双方各生成 1 张石块；目标无 spawn 时为空操作）
+    // v205：随机候选里包含「天界」——变成天界同样会摧毁另外两块地形（整条演出在此等完）
+    runLocAppearEffect(j, target);
+    // v203：随机变形可能变成「虚假之月」→ 本局总回合数当场变 7（反之变走则退回 6）
+    syncRoundTotal('地形定时变形');
+    await awaitShatterChain(); // v205：等「天界降临」的摧毁演出播完再继续（场上「回合开始」效果在它之后）
+    changed = true;
+  }
+  if (changed) renderZones(); // 隙间 / 锁定遮罩 / 点数横幅随新地形即时刷新
+  return changed;
+}
+
+// 阶段 ①：回合开始 —— 地形揭晓 → 地形定时变形（v199）→ 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置
+// v205：本阶段改为 async —— ①-0 / ①-0b 里若出现「天界」，要等它的摧毁演出链播完再继续。
+async function roundStartStage(gen) {
+  const st = state;
+  await locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
+  if (gen !== state.gen) return;
+  await locXformTurnEffects(); // ①-0b 地形定时变形（v199：秘封俱乐部第 5 回合开始时变随机地形 + 结算其「出现时」）
+  if (gen !== state.gen) return;
+  // v203：防御性再同步一次本局总回合数 —— 地形变化的各条路径都已各自调用 syncRoundTotal，
+  //       这里只是保证“任何漏调的路径”也能在回合边界补上那一条日志（值本身一直是实时读的）。
+  syncRoundTotal('回合开始');
   runTurnStartEffects(); // ①-1 全场“回合开始”效果（按放置队列序）
+  // v205：①-1 里的卡牌若用 `xform`/`fx` 把本区变成「天界」，等摧毁演出播完再抽牌/结算能量
+  await awaitShatterChain();
+  if (gen !== state.gen) return;
   // ①-2 抽牌（v94：第 1 回合起每回合双方都各抓 1 张——开局 3 张已逐张发放，第 1 回合再抽第 4 张）
   const drawnP = drawOne('p');
   if (drawnP) drawnP.justDrawn = true; // v91：玩家抽牌入场演出（屏幕右端滑入）
   drawOne('a');
-  // ①-2 能量结算：普通局 = min(回合, 6)；开发调试 = 固定 10（v143）
+  // ①-2 能量结算：普通局 = min(回合, 本局总回合数)；开发调试 = 固定 10（v143）
   // v145：双方各自一份 energyTotal/energyLeft（基数相同，之后可单独修改）
   // v169：额外能量（energyNext）在 grantTurnEnergy 内一次性并入（并写下 energyGain 供 HUD 提示）
-  grantTurnEnergy(isDevMode() ? 10 : Math.min(st.turn, 6));
+  // v203：上限由写死的 6 改为 roundsTotal()（虚假之月在场 → 第 7 回合双方各 7 点；
+  //       该函数在 turn>=7 时锁定为 7，故第 7 回合中途地形被换掉也仍是 7 点）
+  grantTurnEnergy(isDevMode() ? 10 : Math.min(st.turn, roundsTotal()));
   st.phase = 'play';
   st.selected = -1;
   st.moveCardId = null;
@@ -1908,7 +2319,9 @@ function roundStartStage() {
 async function playRound(gen) {
   if (gen !== state.gen) return;
   const st = state;
-  roundStartStage(); // 阶段 ①：回合开始（回合开始效果 / 能量结算 / 抽牌）
+  // v205：阶段 ① 改为 await —— ①-0「地形揭晓」若揭到「天界」，会在这里等整条摧毁演出播完
+  await roundStartStage(gen); // 阶段 ①：回合开始（回合开始效果 / 能量结算 / 抽牌）
+  if (gen !== state.gen) return;
 
   // 阶段 ②：玩家放置与移动（出牌 / 跳过 / 认输 / 双倍 / 移动 / 重置均在此阶段触发）
   const act = await waitPlayer();
@@ -1933,20 +2346,29 @@ async function playRound(gen) {
   if (gen !== state.gen) return;
 
   // 阶段 ④：翻牌结算（翻开暗牌，逐张按放置顺序结算「揭示」效果）
-  await revealRound();
+  await revealRound(gen);
   if (gen !== state.gen) return;
 
   // 阶段 ⑤-0 区域（地形）回合结束效果（先结算地形）→ 阶段 ⑤ 全场“回合结束”卡牌效果
   // → 阶段 ⑥ 手牌回合结束效果（v153：地形恒在场上回合结束卡牌之前结算）
-  runLocTurnEndEffects();
+  // v205：⑤-0 改为 await —— 其内的 collapse 崩塌若崩出「天界」，要等整条摧毁演出播完
+  await runLocTurnEndEffects();
+  if (gen !== state.gen) return;
   runTurnEndEffects();
   runHandEndEffects();
+  // v205：⑤/⑥ 里的卡牌若把本区变成「天界」（xform），在这里把摧毁演出等完再进终局判定
+  await awaitShatterChain();
+  if (gen !== state.gen) return;
   renderAll();
 
-  if (st.turn >= 6) {
+  // v203：终局判定改读本局总回合数 —— 场上有「虚假之月」时第 6 回合末续打第 7 回合；
+  //       已到第 7 回合则 roundsTotal() 锁定为 7，故第 7 回合末必定终局（不会出现第 8 回合）。
+  if (st.turn >= roundsTotal()) {
     // 阶段 ⑦：游戏结束效果（按放置队列序）→ 终局演出 → 结算胜负
-    //（第 6 回合的 ⑤-0 / ⑤ / ⑥ 同样先于终局执行）
+    //（最后一回合 = 第 6 或第 7 回合；其 ⑤-0 / ⑤ / ⑥ 同样先于终局执行）
     runGameEndEffects();
+    await awaitShatterChain(); // v205：⑦ 里的卡牌若把本区变成「天界」，等摧毁演出播完再结算胜负
+    if (gen !== state.gen) return;
     await playEndHighlights(gen); // v85：等加减动画清空后，依左→右放大胜方总点数
     if (gen !== state.gen) return;
     finishMatch();
@@ -1991,6 +2413,12 @@ function uiMoveFly(cardId) {
   if (st.phase !== 'play') return;
   const found = findPlayerCard(cardId);
   if (!found || !found.card.def.fly || !found.card.revealed) return;
+  // v202：静海「抹除文本」——静海里的牌失去「每回合移动一次」的能力，不能进入移动模式
+  if (cardMuted(found.card)) {
+    muteSkipLog(found.card, '「每回合移动一次」（fly）的能力');
+    setStatus(`「${found.card.def.n}」在「${locDef(found.j).n}」里失去了卡牌文字，不能用“每回合移动一次”。`);
+    return;
+  }
   if (st.moveCardId === cardId) {
     st.moveCardId = null;
     setStatus('已取消移动。');
@@ -2010,6 +2438,14 @@ function tryMoveFlyTo(locIdx) {
   const found = findPlayerCard(st.moveCardId);
   if (!found) { st.moveCardId = null; renderZones(); return true; }
   const card = found.card;
+  // v202：静海「抹除文本」——防守：已进入移动模式后该区才变成静海（开发者「指定地形」）也不放行
+  if (cardMuted(card)) {
+    muteSkipLog(card, '「每回合移动一次」（fly）的能力');
+    setStatus(`「${card.def.n}」在「${locDef(found.j).n}」里失去了卡牌文字，不能用“每回合移动一次”。`);
+    st.moveCardId = null;
+    renderZones();
+    return true;
+  }
   if (st.flyMoved.has(card.id)) { setStatus('这张卡本回合已经移动过一次。'); st.moveCardId = null; renderZones(); return true; }
   if (locIdx === found.j) { setStatus('这张卡本来就在这个区域，选别的区域吧。'); return true; }
   if (!locOpen(locIdx)) { setStatus(`「${locDef(locIdx).n}」还没开放，不能移过去。`); return true; }
@@ -2091,7 +2527,7 @@ function tryPlayAt(locIdx) {
     setStatus(`「${locDef(locIdx).n}」还没开放，要到第 ${locDef(locIdx).minTurn} 回合才能放牌。`);
     return false;
   }
-  if (occOf(card) > 1 && !occZoneOk(card, locIdx)) {
+  if (occOf(card) > 1 && !occZoneOk(card, locIdx, side)) {
     setStatus(`「${card.def.n}」需要占满 ${occOf(card)} 格，只能放在最大可放数为 ${occOf(card)} 的区域（且己方该区为空）。`);
     return false;
   }
@@ -2224,7 +2660,7 @@ function undoFlyMoves() {
     const found = findPlayerCard(id);
     if (!found || found.j === from) { st.flyMoved.delete(id); continue; }
     const back = st.players.p.zones[from];
-    if (back.length >= locDef(from).max) continue; // 理论不会发生：先重置暗牌已腾位
+    if (back.length >= locSideMax('p', from)) continue; // 理论不会发生：先重置暗牌已腾位（v200：按该侧可用格数判）
     found.zone.splice(found.zone.indexOf(found.card), 1);
     back.push(found.card);
     st.flyMoved.delete(id);
@@ -2273,8 +2709,9 @@ function currentLeaderSide() {
   return null;
 }
 
-async function revealRound() {
+async function revealRound(gen) {
   const st = state;
+  if (gen === undefined) gen = st.gen; // 兼容旧调用（本函数此前无参）
   // 决定先后翻牌：首回合随机；其后按当前领先方（结算口径）先翻，持平则随机。
   // 同一方的多张牌严格按“放置顺序”翻。
   let first;
@@ -2311,24 +2748,31 @@ async function revealRound() {
       : `「${card.def.n}」翻牌 — 威力 ${cardPowerIn(mv.loc, card)}`);
     let willChange = false;
     if (card.def.k) {
-      // 只有效果“真的会造成变化”时才停顿展示（缩放动画同时播放，避免同帧重建吞掉入场）
-      willChange = revealEffectWillChange(mv.side, mv.loc, card);
-      if (willChange) await sleep(400);
-      if (card.def.k === 'shift') {
-        // 八云紫整体右移：分步演出，每移动一张间隔 0.3s（v78）
-        await applyShiftReveal(mv.side, card.def.t);
-      } else if (card.def.k === 'gather') {
-        // v171：三妖精集结——按区域顺序逐区生成并揭示（第 1→2→3 区），每区之间 0.5s；
-        // 三区都揭示完并做完“己方三妖精 +N 战力”之后才返回，随后才轮到本法术消散。
-        await applyGatherReveal(mv.side, card);
-      } else if (card.def.k === 'reviveDiscard') {
-        // v193：四季映姬的复活弃牌池——**逐张**推进（复活 → 渲染「凝聚显形」→ 结算该张的揭示
-        // → 停 500ms → 下一张），避免一次性复活一大把牌（连锁揭示叠加 / 演出互相盖住）。
-        await applyReviveDiscardReveal(mv.side, card);
+      // v202：静海「抹除文本」——在带 mute 的区域里翻开的牌，其文本视为不存在 ⇒ 揭示不发动。
+      // 三个走分步演出的键（shift / gather / reviveDiscard）也一并在这里拦下，
+      // 不必进各自的演出函数（否则它们会绕过 applyEffect 入口的守卫）。
+      if (cardMuted(card)) {
+        muteSkipLog(card, '揭示效果');
       } else {
-        applyEffect(mv.side, mv.loc, card);
+        // 只有效果“真的会造成变化”时才停顿展示（缩放动画同时播放，避免同帧重建吞掉入场）
+        willChange = revealEffectWillChange(mv.side, mv.loc, card);
+        if (willChange) await sleep(400);
+        if (card.def.k === 'shift') {
+          // 八云紫整体右移：分步演出，每移动一张间隔 0.3s（v78）
+          await applyShiftReveal(mv.side, card.def.t);
+        } else if (card.def.k === 'gather') {
+          // v171：三妖精集结——按区域顺序逐区生成并揭示（第 1→2→3 区），每区之间 0.5s；
+          // 三区都揭示完并做完“己方三妖精 +N 战力”之后才返回，随后才轮到本法术消散。
+          await applyGatherReveal(mv.side, card);
+        } else if (card.def.k === 'reviveDiscard') {
+          // v193：四季映姬的复活弃牌池——**逐张**推进（复活 → 渲染「凝聚显形」→ 结算该张的揭示
+          // → 停 500ms → 下一张），避免一次性复活一大把牌（连锁揭示叠加 / 演出互相盖住）。
+          await applyReviveDiscardReveal(mv.side, card);
+        } else {
+          applyEffect(mv.side, mv.loc, card);
+        }
+        if (willChange) renderZones(); // 效果确有变化才重建（白板/未触发时保留入场元素直到动画播完）
       }
-      if (willChange) renderZones(); // 效果确有变化才重建（白板/未触发时保留入场元素直到动画播完）
     }
     // v170：法术——**在且仅在**自身揭示效果结算完之后消散（此刻它仍占着 1 个格位，
     // 因此它自己的生成/换边类效果判定都把它算作占位）；消散后再结算区域「揭示后吹飞」
@@ -2341,6 +2785,11 @@ async function revealRound() {
     // roam 类揭示键（k='roam'）的漂移也在这里统一 flush 飞行演出。
     runLocAfterRevealEffects(mv.side, mv.loc, card);
     flushPendingDriftFly();  // v158/v162：roam / gust 的“滑行+缩放”飞行演出
+    // v205：若这张牌的揭示用 `xform` 把本区变成了「天界」，它的摧毁链是**同步启动、异步播放**的
+    // （`case 'xform'` 在 applyEffect 里，改不成 async）——在这里把整条演出等完，
+    // 再进入下一张翻牌与随后的 ⑤-0 / ⑤ / ⑥，避免后续阶段插进摧毁节奏里。
+    await awaitShatterChain();
+    if (gen !== state.gen) return;
     await sleep(500); // 效果结算后停顿，再进入下一张翻牌
   }
   st.playerMoves = [];
@@ -2359,9 +2808,11 @@ function revealEffectWillChange(side, locIdx, card) {
   const vis = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
   // v170：法术没有战力——「落后自增」（bl）与「对方同区落牌自增」（oc）对它没有意义，不产生变化
   if (def.spell && (def.k === 'bl' || def.k === 'oc')) return false;
+  // v202：静海「抹除文本」——被抹除的牌不会产生任何变化（也不空等结算前的 400ms 停顿）
+  if (cardMuted(card)) return false;
   switch (def.k) {
     case 'bf': return mine.some((c) => c !== card && !c.def.un && c.revealed);
-    case 'de': return vis.length > 0;
+    case 'de': return vis.length > 0 && !locNoDown(locIdx); // v201：本区「免减攻」→ 不产生变化，跳过结算前停顿
     case 'ba': return true; // 至少自己已翻开会吃到 +N
     case 'bl': return zoneEff(side, locIdx) < zoneEff(other, locIdx);
     case 'dw':
@@ -2407,8 +2858,9 @@ function revealEffectWillChange(side, locIdx, card) {
     case 'deAll': {
       // v180（蓬莱的玉枝·法术）：敌方**三个区域**所有已翻开卡牌各 −N——只要对方场上
       // 任一区域存在可被削弱的已翻开卡（排除 un 与法术）就真的会产生变化
+      // v201：该区域带 noDown（蓬莱药局）时那里的卡吃不到 −N，故逐区排除后再判断
       return st.players[other].zones.some(
-        (z) => z.some((c) => c.revealed && !c.def.un && !c.def.spell)
+        (z, j) => !locNoDown(j) && z.some((c) => c.revealed && !c.def.un && !c.def.spell)
       );
     }
     case 'mv': {
@@ -2610,6 +3062,13 @@ function applyPermBuff(card, d, srcCard, tag) {
   // v170：法术没有战力——任何位置（手牌/场上揭示瞬间/回手）都不吃战力增减，
   // 因而不进战力影响历史、不排队 ±N 演出（地形 gamble/dice/grow/decay/rally 也走这里收口）
   if (isSpell(card)) return;
+  // v201：区域「免减攻」（地形字段 noDown，现仅「蓬莱药局」）——**负增量在生效前被拦下**：
+  // 卡牌战力原封不动、不写 powerLog、不排 −N 演出；返回 false 供调用方调整汇总日志。
+  if (d < 0 && cardNoDown(card)) {
+    const j = fieldLocOf(card);
+    log('sys', `💊 ${locDef(j).n}：「${card.def.n}」免于减攻 —— 本次 ${d} 战力被拦下（现 ${cardPowerIn(j, card)}）。`);
+    return false;
+  }
   card.buff += d;
   addBuffLog(card, d, srcCard, tag);
   if (d !== 0) {
@@ -2617,6 +3076,7 @@ function applyPermBuff(card, d, srcCard, tag) {
     if (hit) hit.d += d;
     else buffFlashQueue.push({ card, d });
   }
+  return true;
 }
 function flushBuffFlash() {
   if (!buffFlashQueue.length) return;
@@ -2835,13 +3295,107 @@ function flushPendingDriftFly() {
 //   原区域立即失效、新区域立即生效；同区换边（switch/gift 类把她在本区内换到对方一侧）
 //   仍属同一区域，因保护的是敌我双方，故效果不变；蕾蒂真正离场才全场失效。
 function locNoDestroy(locIdx) {
-  if (locDef(locIdx).prot) return true; // v164：地形级免摧毁（如睡鼠神祠）
+  if (locDef(locIdx).prot) return true; // v164：地形级免摧毁（如睡鼠神祠）——地形效果，不受静海影响
   for (const s of ['p', 'a']) {
     for (const c of state.players[s].zones[locIdx]) {
-      if (c.revealed && c.def.prot) return true;
+      if (!c.revealed || !c.def.prot) continue;
+      // v202：静海「抹除文本」——卡级 prot（蕾蒂）的文字也被抹除 ⇒ 不再提供区域免摧毁
+      if (locMuted(locIdx)) { muteSkipLog(c, '「区域免摧毁」（prot）'); continue; }
+      return true;
     }
   }
   return false;
+}
+
+/* ==================== v201：区域「免减攻」（地形字段 `noDown: true`，现仅「蓬莱药局」）====================
+   一句话口径：本区域的**所有卡牌**（双方、含暗牌与落场 token）**无法被减少战力**——
+   一切“负的战力增量”在生效前被拦下：卡牌战力原封不动、不写进战力影响历史（`powerLog`）、
+   不播 −N 演出，只记一条 `sys` 日志说明“免于减攻”。
+   结算入口：**唯一收口 `applyPermBuff(card, d, …)`** —— `d < 0` 且该卡此刻在带 `noDown` 的区域
+   （`cardNoDown`，按 `fieldLocOf` 实时查）时直接返回 `false` 表示“被拦下”（调用方据此调整日志）。
+   覆盖的负增量来源（用户口径：**所有会让本区卡牌战力下降的效果**）：
+     ① 卡牌揭示类：`de`（本区敌方 −N）、`deAll`（敌方全场 −N）；
+     ② 地形类：`decay` 衰减、`dice` 掷出负、`gamble` 掷出负、`rally` 的负 `add`；
+     ③ 其它走同一收口的负差：`surv` 防摧毁的“替代降攻”、分身/衍生物与本体战力对齐时的负差；
+     ④ **实时负加成一并抹平**：本区地形若带负的 `all` / `cb` / `aff`（或己方持续 `og` 为负），
+        对本区卡牌按 **0** 计（`locRoleBonus` / `locCostBonus` / `locAllBonus` / `cardAuraBonus`
+        内 clamp；战力影响历史面板同口径，避免“面板合计 ≠ 场上战力”）。
+   口径边界（用户确认，v201）：
+     · **不追溯、不恢复**：地形出现前已经吃到的减攻留在卡上（`buff` 里的负值照常计入战力），
+       本机制只拦“结算那一刻人在本区域”的卡；卡被移出本区/离场后立即不再受保护；
+     · **不是“摧毁”类**：与 `surv`/`phx`/`prot`/`ind` 无耦合；但 `surv` 的“替代降攻”被拦下时，
+       该卡**不离场、也不降攻**（两个防护叠加，完全免费，见 `surviveDestroy`）；
+     · **卡牌自身的印刷负战力不算“被减攻”**：厄运 −3 / 水银 −1 进本区照常是负战力；对方往本区
+       塞这类负战力 token 也照常（那是“放入新卡”，不是“减少已有卡的战力”）；
+     · **法术**恒为 0 且不吃任何增减（v170），与本机制无交互；
+     · 不影响区域总点数口径（`dbl`/`inv`/`fill` 照常），也不阻止“卡牌被摧毁导致区域总点数下降”。 */
+function locNoDown(locIdx) {
+  const L = state.locs[locIdx];
+  return !!(L && L.def && L.def.noDown);
+}
+// 某张卡此刻是否受「免减攻」保护：必须在场上，且其当前所在区域带 noDown
+function cardNoDown(card) {
+  if (!card) return false;
+  const j = fieldLocOf(card);
+  return j >= 0 && locNoDown(j);
+}
+
+/* ==================== v202：区域「抹除文本」（地形字段 `mute: true`，现仅「静海」）====================
+   一句话口径：本区域的**所有卡牌**（双方，含暗牌、落场 token 与法术）**失去卡牌文字**——
+   卡面上写的效果一律视为不存在、**任何时机都不发动**（用户口径）。
+   判定方式＝**实时读法、零状态**（与 v200 `gap` / v201 `noDown` 同一思路，不改卡的任何数据）：
+     ① `locMuted(locIdx)`：该列当前地形是否带 `mute`；
+     ② `cardMuted(card)`：该卡**此刻是否在场上、且所在区域带 `mute`**（按 `fieldLocOf` 实时查）
+        ——手牌 / 牌库 / 三个牌池里的同名卡**完全不受影响**（它们不在场上）。
+   因此**静海被换掉（xform / collapse / xformTurn / 开发者「🗻 指定地形」）或卡被移出本区
+   （mv / fly / shift / roam / gust）即自动恢复**文本，不需要任何收尾代码。
+   被抹除的范围（用户确认，v202）：
+     · **揭示 `k`**（含 shift / gather / reviveDiscard 三个走分步演出的键）：翻开时不发动；
+     · **持续 `og`**：**源卡**在静海 → 它的光环整条失效；被加成的卡在静海**不影响**
+       （光环是被动接收的，只要源卡在静海外就照常给）；
+     · **时机效果 `fx`**（turnStart / turnEnd / gameEnd）：在静海期间不结算，**错过的时机不补结算**；
+     · **防护/替代**：`surv`（防摧毁）/ `phx`（凤凰重生）/ `prot`（蕾蒂的区域免摧毁）/
+       `ind`（自身不可摧毁）——它们也是“卡面文字”，在静海内**一并失效**；
+     · **`fly`**（每回合移动一次）：在静海内不能用该能力；
+     · **法术**：揭示不发动，但**照常消散**（消散是 v170 的法术规则、不是卡面文字）→ 仍进放逐池。
+   **不受影响**（用户口径：“只有在静海里的牌才会被影响”）：
+     · `costDown`（纯狐：在手牌/牌库里就生效的减费）、`gs`（哆来咪：开局在卡组即触发）、
+       `playReq`（大鲶鱼：只在“手牌→场上”那一刻校验，打出后不再追踪）；
+     · 卡的数值与物理属性：印刷费用 `def.c`、基础威力 `def.p`、阵营 `g`、
+       **`occ` 大体积占格**（视为物理属性：静海里的萃香仍占 4 格）；
+     · **区域类效果**（地形写的，不是卡面文字）：`aff` / `cb` / `all` / `fill` / `inv` / `purge` /
+       `grow` / `decay` / `dice` / `rally` / `gamble` / `gust` / `gap` / `noDown` / `prot` 照常；
+     · 卡照常能被增益 / 削弱 / 摧毁 / 移动 / 换边（它只是“哑巴”，不是 `un` 占位卡）；
+       `dw`/`dwh`/`dwb`/`dwc`/`purge` 的**候选与筛选口径完全不变**（按威力/按印刷费用照选它）。
+   **不追溯**：静海出现前已经结算过的永久效果留在卡上（`buff` / `powerLog` 不回滚）；
+   在静海期间因被抹除而错过的揭示 / 时机效果**不补结算**（口径同 `dice`/`rally` 的“时机已过不补”）。
+   **日志**：每张牌**首次**被拦截时记一条（`card.muteNoted` 标记，避免每回合刷屏）。
+   守卫点一览（全部读上面两个判定，无一处写状态）：`applyEffect` 入口（覆盖揭示 / 时机 / morph /
+   集结 / 复活等所有连锁路径）、`revealRound`（含三个分步演出键）、`resolveTimedEffects`、
+   `revealEffectWillChange`、`cardAuraBonus` + `powerHistoryRows`（og 源卡）、`locNoDestroy`（蕾蒂）、
+   `isDestroyable` / `indestructibleBlock` / `surviveDestroy` / `phoenixRevive`、
+   `uiMoveFly` / `tryMoveFlyTo` / `renderZones` 的 canFly、`showFieldCard`（显示）。 */
+function locMuted(locIdx) {
+  const L = state.locs[locIdx];
+  return !!(L && L.def && L.def.mute);
+}
+// 某张卡此刻是否“文本已被抹除”：必须在场上，且其当前所在区域带 mute
+function cardMuted(card) {
+  if (!card || !card.def) return false;
+  const j = fieldLocOf(card);
+  return j >= 0 && locMuted(j);
+}
+// 时机名 → 日志里的可读说法（供 resolveTimedEffects / applyEffect 的拦截日志复用）
+const FX_TIMING_TXT = { turnStart: '「回合开始」效果', turnEnd: '「回合结束」效果', gameEnd: '「游戏结束」效果' };
+/* 被「静海」抹除导致的拦截日志：每张牌**首次**记一条（kindTxt 如「揭示效果」「回合结束效果」
+   「防摧毁」等），返回 true = 本次确实记了日志（false = 这张牌此前已提示过）。 */
+function muteSkipLog(card, kindTxt) {
+  if (!card || !card.def || card.muteNoted) return false;
+  card.muteNoted = true;
+  const j = fieldLocOf(card);
+  const where = j >= 0 ? `「${locDef(j).n}」` : '场上';
+  log('sys', `🌊 「${card.def.n}」在${where}失去了卡牌文字 → ${kindTxt}不发动（本局首次提示；该牌离开静海后文本会恢复）。`);
+  return true;
 }
 
 /* ---- v180：自身不可摧毁（def.ind，现仅「佛体金刚石」ind:true）----
@@ -2860,7 +3414,9 @@ function locNoDestroy(locIdx) {
    唯一收口 `indestructibleBlock`（结算点：dw/dwh/dwb/purge 各自选完目标之后）；
    `isDestroyable` 只用于 revealEffectWillChange 预判“这次摧毁会不会真的产生变化”。 */
 function isDestroyable(card) {
-  return !!card && !!card.revealed && !card.def.un && !card.def.spell && !card.def.ind;
+  if (!card || !card.revealed || card.def.un || card.def.spell) return false;
+  // v202：静海「抹除文本」——在静海里的 `ind` 同样被抹除（不再免疫摧毁）；本函数只作预判、不记日志
+  return !(card.def.ind && !cardMuted(card));
 }
 
 /* v180：摧毁判定落在 ind 卡上时的统一处理 —— 记一条日志并返回 true，
@@ -2868,6 +3424,8 @@ function isDestroyable(card) {
    返回 false = 该卡没有 ind，按原逻辑继续（phx → surv → 移除）。 */
 function indestructibleBlock(card, srcName) {
   if (!card || !card.def || !card.def.ind) return false;
+  // v202：静海「抹除文本」——静海里的 `ind` 已被抹除 ⇒ 不拦、照常摧毁（“判定结束、不改打别的”不再适用）
+  if (cardMuted(card)) { muteSkipLog(card, '「自身不可摧毁」（ind）'); return false; }
   log('sys', `✦ ${srcName} 的摧毁判定落在「${card.def.n}」上，但它自身不可摧毁（无法被摧毁）→ 本次摧毁失败、判定结束（不改打其他牌）。`);
   return true;
 }
@@ -2878,6 +3436,14 @@ function indestructibleBlock(card, srcName) {
 function surviveDestroy(card) {
   const surv = card && card.def && card.def.surv;
   if (!surv) return false;
+  // v202：静海「抹除文本」——静海里的「防摧毁」一并失效 ⇒ 该卡照常被摧毁（不降战力、不离场替代）
+  if (cardMuted(card)) { muteSkipLog(card, '「防摧毁」（surv）'); return false; }
+  // v201：区域「免减攻」（蓬莱药局）——替代降攻被拦下 ⇒ **不离场、也不降攻**（两个防护叠加）
+  const j0 = fieldLocOf(card);
+  if (j0 >= 0 && locNoDown(j0)) {
+    log('danger', `💥 「${card.def.n}」被摧毁时触发了防摧毁：没有被摧毁；且本区域「${locDef(j0).n}」免减攻，替代的 −${surv} 战力也被一并拦下（战力不变，现 ${cardPowerIn(j0, card)}）。`);
+    return true;
+  }
   applyPermBuff(card, -surv, null, '防摧毁'); // 永久 -N（红色 -N 演出）
   const locIdx = fieldLocOf(card);
   log('danger', `💥 「${card.def.n}」被摧毁时触发了防摧毁：没有被摧毁，取而代之永久降低 ${surv} 点战力（现 ${locIdx >= 0 ? cardPowerIn(locIdx, card) : cardPower(card)}）。`);
@@ -2891,6 +3457,8 @@ function surviveDestroy(card) {
 function phoenixRevive(card, locIdx) {
   const phx = card && card.def && card.def.phx;
   if (!phx) return false;
+  // v202：静海「抹除文本」——静海里的「凤凰重生」一并失效 ⇒ 该卡照常被摧毁（不回手、不 +N）
+  if (cardMuted(card)) { muteSkipLog(card, '「凤凰重生」（phx）'); return false; }
   const st = state;
   const side = card.side;
   const zone = st.players[side].zones[locIdx];
@@ -3194,6 +3762,14 @@ function applyEffect(side, locIdx, card, spec) {
   const fx = spec || def;
   // 日志文案：条目自带 t > 卡面效果文案(def.t) > 卡名
   const txt = fx.t || (fx === def ? def.t : def.n);
+  // v202：静海「抹除文本」——文本已被抹除的卡，其效果一律不发动。
+  // 本守卫放在**结算入口**，因此覆盖所有路径：翻牌揭示（含 morph 重新触发）、
+  // fx 时机效果（resolveTimedEffects 亦有一道带时机名的守卫）、落场法术 settleFieldSpell、
+  // 集结/复活等连锁结算；法术的“消散”不受影响（那是法术规则，不在这里做）。
+  if (cardMuted(card)) {
+    muteSkipLog(card, spec ? '时机效果' : '揭示效果');
+    return;
+  }
 
   switch (fx.k) {
     case 'bf': {
@@ -3206,9 +3782,17 @@ function applyEffect(side, locIdx, card, spec) {
     }
     case 'de': {
       // 只削弱“结算时已翻开”的对方卡牌：对方暗牌不会提前被降
-      let n = 0;
-      for (const c of theirs) { if (c.def.un || c.def.spell || !c.revealed) continue; applyPermBuff(c, -fx.a, card); n++; }
-      log(side, `✦ ${txt}${n ? `（影响 ${n} 张）` : '（但没有已翻开的对方卡牌可影响）'}`);
+      // v201：目标若在「免减攻」区域（蓬莱药局）则该次 −N 被拦下，不计入“影响 N 张”
+      let n = 0, blocked = 0;
+      for (const c of theirs) {
+        if (c.def.un || c.def.spell || !c.revealed) continue;
+        if (applyPermBuff(c, -fx.a, card) === false) { blocked++; continue; }
+        n++;
+      }
+      const partsDe = [];
+      if (n) partsDe.push(`影响 ${n} 张`);
+      if (blocked) partsDe.push(`${blocked} 张因本区「免减攻」被拦下（战力不变）`);
+      log(side, `✦ ${txt}${partsDe.length ? `（${partsDe.join('；')}）` : '（但没有已翻开的对方卡牌可影响）'}`);
       break;
     }
     case 'deAll': {
@@ -3222,18 +3806,20 @@ function applyEffect(side, locIdx, card, spec) {
       //   ⑤走 applyPermBuff 收口：−N 演出 + 战力影响历史按来源记本卡；非“摧毁”，
       //     带 `surv`/`phx`/`prot`/`ind` 的卡照常被削（`ind` 只挡摧毁、不挡增减）。
       let nAll = 0;
+      let blockedAll = 0; // v201：因「免减攻」被拦下的张数（逐区判，见 applyPermBuff 的收口）
       const hitAll = [];
       for (let j = 0; j < 3; j++) {
         for (const c of st.players[other].zones[j].slice()) {
           if (c.def.un || c.def.spell || !c.revealed) continue;
-          applyPermBuff(c, -fx.a, card);
+          if (applyPermBuff(c, -fx.a, card) === false) { blockedAll++; continue; }
           nAll++;
           hitAll.push(`第 ${j + 1} 区「${c.def.n}」`);
         }
       }
-      log(side, `✦ ${txt}${nAll
-        ? `（影响 ${nAll} 张：${hitAll.join('、')}）`
-        : '（但对方场上没有已翻开的卡牌可影响）'}`);
+      const partsAll = [];
+      if (nAll) partsAll.push(`影响 ${nAll} 张：${hitAll.join('、')}`);
+      if (blockedAll) partsAll.push(`${blockedAll} 张因所在区域「免减攻」被拦下（战力不变）`);
+      log(side, `✦ ${txt}${partsAll.length ? `（${partsAll.join('；')}）` : '（但对方场上没有已翻开的卡牌可影响）'}`);
       break;
     }
     case 'ba': {
@@ -3594,10 +4180,11 @@ function applyEffect(side, locIdx, card, spec) {
       // 否则变身失败、保持原样（避免变身成萃香后与其他卡共存导致占格超限）。
       if (occOf(pick) > 1) {
         const ownZone = st.players[side].zones[locIdx];
-        const legal = locDef(locIdx).max === occOf(pick)
+        // v200：可用格数＝地形 max − 该侧已封隙间数（封格后大体积卡同样放不进）
+        const legal = locSideMax(side, locIdx) === occOf(pick)
           && ownZone.length === 1 && ownZone[0] === card;
         if (!legal) {
-          log('danger', `✦ ${def.n} 想变身成「${pick.def.n}」（占 ${occOf(pick)} 格），但本区域不满足条件（需 max=${occOf(pick)} 且己方该区只有 ${def.n} 这一张卡），变身失败、保持原样。`);
+          log('danger', `✦ ${def.n} 想变身成「${pick.def.n}」（占 ${occOf(pick)} 格），但本区域不满足条件（需该侧可用格数 = ${occOf(pick)} 且己方该区只有 ${def.n} 这一张卡），变身失败、保持原样。`);
           break;
         }
       }
@@ -3647,16 +4234,25 @@ function applyEffect(side, locIdx, card, spec) {
       // 揭示：把本区域变成目标地形（fx.xf = 地形 id，出自 POOL 或 EXTRA，如辉针城 needle）
       const target = findLocDef(fx.xf);
       if (!target) break;
+      // v205：已破碎的区域永久锁定 —— 不能被任何路径再换地形
+      if (locShattered(locIdx)) {
+        log('danger', `✦ ${def.n} 想把本区变成「${target.n}」，但本区域已被摧毁（已破碎）、不能再改变地形，变形失败。`);
+        break;
+      }
       const over = ['p', 'a'].some((s2) => sideUsed(s2, locIdx) > target.max);
       if (over) { log('danger', `✦ ${def.n} 想把本区变成「${target.n}」，但双方牌数超出其上限，变形失败。`); break; }
       const prevLoc = state.locs[locIdx].def;
       state.locs[locIdx].def = target;
+      resetLocGaps(locIdx); // v200：换地形 → 清空本列已封的隙间
       refreshLocHeader(locIdx); // 更新列名/图标/效果文字/配色（隙间随 max=4 自动消失）
       log('danger', `✦ ${def.n} 将本区域变成了「${target.n}」！`);
       // v151：区域变形等同于“该地形在本区出现”——立刻结算目标地形的「出现时」效果
       // （如变形成虹龙洞 → 双方各生成 1 张「石块」，与地形揭晓同一函数）。
       // 本区原本就已经是目标地形时不重复结算（同一地形不会二次“出现”）。
       if (prevLoc !== target) runLocAppearEffect(locIdx, target);
+      // v203：把本区变成「虚假之月」→ 本局总回合数变 7；把虚假之月变成别的地形 → 退回 6
+      //（进入第 7 回合后由 roundsTotal() 锁定，故第 7 回合中途变掉不影响本局继续）
+      syncRoundTotal('卡牌区域变形');
       break;
     }
     case 'roam': {
@@ -4005,7 +4601,9 @@ function applyEffect(side, locIdx, card, spec) {
       //   ② **一次性**：结算完即清空（不像持续效果每回合都给）；同一回合打出多张 / 多个来源
       //      会叠加（登记式 `addPendingTurnEnergy`，+2 就是两点）；
       //   ③ 归属按**牌的所属方**：玩家打出给自己、AI 抽到打出则 AI 自己加（对双方一视同仁）；
-      //   ④ 终局边界：第 6 回合（最后一回合）翻开时已没有“下一回合”，该额外能量**不会被用到**
+      //   ④ 终局边界：**本局最后一回合**翻开时已没有“下一回合”，该额外能量**不会被用到**
+      //      （v203：本条件改读 `roundsTotal()` —— 无虚假之月时最后一回合＝第 6 回合；有则为第 7 回合，
+      //       因此在有虚假之月的局里，第 6 回合翻开的这份**会在第 7 回合正常到账**）
       //      （登记后随本局结束，日志里会说明）；开发调试切换立场把牌落到敌方一侧时，
       //      该牌归属对手，故加的是**对手**的能量；
       //   ⑤ 非“摧毁”/非放置类效果：与区域字段、格位、`surv`/`phx`/`prot` 等互不影响。
@@ -4017,8 +4615,8 @@ function applyEffect(side, locIdx, card, spec) {
       const total = booked.n;
       const who = side === 'p' ? '你' : '对手';
       log('sys', `🔋 ${txt}：${who}将在下一回合额外获得 ${gain} 点能量${total > gain ? `（已累计 ${total} 点）` : ''}。`);
-      if (st.turn >= 6) {
-        log('sys', `⚠️ 这是最后一回合（第 6 回合），下一回合不存在，这份额外能量本局不会生效。`);
+      if (st.turn >= roundsTotal()) {
+        log('sys', `⚠️ 这是最后一回合（第 ${roundsTotal()} 回合），下一回合不存在，这份额外能量本局不会生效。`);
         break;
       }
       // 揭示演出（登记：卡位星光迸发 + 「能量 +N 下回合生效」气泡）
@@ -4094,6 +4692,7 @@ async function playEndHighlights(gen) {
   await waitBuffFxDone(); // “所有的动画结束”后再开始
   if (gen !== state.gen) return;
   for (let j = 0; j < 3; j++) {
+    if (state.locs[j].shattered) continue; // v205：已破碎的区域不显示点数比大小 → 跳过放大高亮
     const win = zoneWinnerSide(j);
     if (!win) continue; // 平局区域：无胜方点数可放大
     const pill = (win === 'p' ? Game._els.totP[j] : Game._els.totA[j]).closest('.loc-total');
@@ -4142,9 +4741,12 @@ function moveCardToRandomZone(card) {
 // 每回合翻牌结算后（阶段 ⑤-0 的**最后一步**）检查：若本区域**双方总卡牌数** ≥ collapse.cards
 // （按“张数”计——大体积卡（occ）也算 1 张，暗牌与落场 token 都算），
 // 则把本区域地形**整体换成 collapse.to** 指定的地形（现在为「冥界」underworld）。
-function locCollapseEffects() {
+// v205：本函数改为 async —— 崩塌目标若带 `shatter`（「天界」），要等整条摧毁演出播完；
+//       已破碎的列永久锁定，直接跳过（不会重复崩塌、也不能再换地形）。
+async function locCollapseEffects() {
   const st = state;
   for (let j = 0; j < 3; j++) {
+    if (locShattered(j)) continue; // v205：已破碎的列跳过
     const def = locDef(j);
     const col = def.collapse;
     if (!col) continue;
@@ -4158,11 +4760,48 @@ function locCollapseEffects() {
       continue;
     }
     st.locs[j].def = target; // 换上目标地形（上限/加成/反转等字段即刻生效）
+    resetLocGaps(j);         // v200：换地形 → 清空本列已封的隙间
     refreshLocHeader(j);     // 列名/图标/效果文案/配色即时更新
     log('danger', `${def.icon} ${def.n}：本区双方共 ${cnt} 张卡牌（≥ ${col.cards}），结界崩塌 —— 本区域变成了「${target.n}」！`);
     // v151 口径：变形 = 该地形在本区“出现”——立刻结算其「出现时」效果
     // （冥界无 spawn，此处为空操作；若日后换成带 spawn 的目标地形则照常生成）
     runLocAppearEffect(j, target);
+    // v203：崩塌出「虚假之月」→ 本局总回合数变 7（第 6 回合末崩塌同样会续出第 7 回合，用户口径）
+    syncRoundTotal('地形崩塌');
+    await awaitShatterChain(); // v205：目标若带 `shatter`（天界）→ 等摧毁链播完
+  }
+}
+
+/* ---- v200：区域「回合结束封格」效果（地形字段 `gap: N`，现仅「八云紫的家」）----
+   每回合翻牌结算后（阶段 ⑤-0 地形类回合结束效果的**最后一步**，排在 collapse 之后）结算：
+   逐列检查本列地形是否带 `gap`，对**双方分别**判定 —— 某侧在本区**还有空位**
+   （已占格 `sideUsed` < 该侧当前可用格数 `locSideMax`）就在回合末继续封 `gap`（缺省 1）格；
+   该侧“剩下的空间已经被牌放满”（含已被封到底、可用格数 0）则本次**不加**。
+   封格 = 把该侧「已封隙间数」+N（见 locGaps / locSideMax）：可用格数随之 −N，
+   渲染层（buildZoneChildren）随即在**最靠后的空置不可用格**铺出「隙间」灰卡，
+   于是表现就是“从后往前、逐回合各封一格”。口径详见 locGaps 注释与
+   `docs/现有机制.md` §2「区域「回合结束封格」效果」段。 */
+function locGapEffects() {
+  const st = state;
+  for (let j = 0; j < 3; j++) {
+    const def = locDef(j);
+    const per = def.gap;
+    if (!per) continue;
+    const n = Math.max(1, Math.floor(per));
+    const hit = [];
+    for (const side of ['p', 'a']) {
+      const used = sideUsed(side, j);
+      const before = locSideMax(side, j);
+      if (used >= before) continue; // 该侧剩下的空间已被牌放满 / 已封到底 → 本次不加
+      const L = st.locs[j];
+      if (!L.gaps) L.gaps = { p: 0, a: 0 };
+      L.gaps[side] = (L.gaps[side] || 0) + Math.min(n, before - used); // 至多封到“刚好放满”，不会超过可用格数
+      const after = locSideMax(side, j);
+      hit.push(`${side === 'p' ? '你方' : '敌方'}隙间 ${locGaps(side, j)} 张（可用 ${after} 格，已放 ${used} 张）`);
+    }
+    if (hit.length) {
+      log('sys', `${def.icon} ${def.n}：回合结束 —— 双方各从后往前添加隙间 → ${hit.join('、')}`);
+    }
   }
 }
 
@@ -4210,7 +4849,11 @@ function runLocRevealEffects(side, locIdx, card) {
   // v170：法术没有战力、且揭示后即消散，不参与博彩（不掷点、不记日志）
   if (isSpell(card)) return 0;
   const d = Math.random() < 0.5 ? def.gamble : -def.gamble; // 各 50%：+N / −N
-  applyPermBuff(card, d, null, def.n); // tag = 地形名 → 战力影响历史按来源显示「驹草赌场」
+  // tag = 地形名 → 战力影响历史按来源显示「驹草赌场」；v201：掷出负值且本区带 noDown 时被拦下
+  if (applyPermBuff(card, d, null, def.n) === false) {
+    log('sys', `${def.icon} ${def.n}：${side === 'p' ? '你方' : '敌方'}「${card.def.n}」赌了一把 → 掷出 ${d}，但被本区「免减攻」拦下（战力不变，现 ${cardPowerIn(locIdx, card)}）`);
+    return d;
+  }
   log(d > 0 ? 'sys' : 'danger', // 赌涨走绿色、赌跌走红色（与成长/衰减同口径）
     `${def.icon} ${def.n}：${side === 'p' ? '你方' : '敌方'}「${card.def.n}」赌了一把 → ${d > 0 ? '+' : '−'}${Math.abs(d)} 战力（现 ${cardPowerIn(locIdx, card)}）`);
   return d;
@@ -4242,7 +4885,11 @@ function locDiceEffects() {
       for (const c of st.players[side].zones[j].slice()) {
         if (c.def.un || c.def.spell) continue; // v170：法术无战力，不掷骰
         const d = Math.random() < 0.5 ? n : -n; // 每张卡各自掷一次：+n / −n 各半
-        applyPermBuff(c, d, null, def.n); // tag = 地形名 → 战力影响历史按来源显示「骰子赌桌」
+        // v201：若本区带 noDown（不会与本字段共存，防御性保留）→ 掷出负值时被拦下
+        if (applyPermBuff(c, d, null, def.n) === false) {
+          hit.push(`${side === 'p' ? '你方' : '敌方'}「${c.def.n}」掷出 ${d} 但被「免减攻」拦下(${cardPowerIn(j, c)})`);
+          continue;
+        }
         hit.push(`${side === 'p' ? '你方' : '敌方'}「${c.def.n}」${d > 0 ? '+' : '−'}${Math.abs(d)}(${cardPowerIn(j, c)})`);
       }
     }
@@ -4278,7 +4925,8 @@ function locRallyEffects() {
       // 快照遍历：applyPermBuff 只改 buff 不增删卡，slice 仅作防御
       for (const c of st.players[side].zones[j].slice()) {
         if (!c.revealed || c.def.un || c.def.spell) continue; // v170：法术无战力，不吃定时加成
-        applyPermBuff(c, add, null, def.n); // tag = 地形名 → 战力影响历史按来源显示「演唱会」
+        // v201：add 为负且本区带 noDown（防御性）→ 该次被拦下，不计入“已加成”列表
+        if (applyPermBuff(c, add, null, def.n) === false) continue; // tag = 地形名 → 战力影响历史按来源显示「演唱会」
         hit.push(`${side === 'p' ? '你方' : '敌方'}「${c.def.n}」(${cardPowerIn(j, c)})`);
       }
     }
@@ -4310,11 +4958,13 @@ function locTurnEndPowerEffects() {
     const delta = (def.grow || 0) - (def.decay || 0);
     if (!delta) continue;
     const hit = [];
+    let blocked = 0; // v201：被本区「免减攻」拦下的张数（只在 delta<0 时可能出现）
     for (const side of ['p', 'a']) {
       // 快照遍历：applyPermBuff 只改 buff 不增删卡，slice 仅作防御
       for (const c of st.players[side].zones[j].slice()) {
         if (!c.revealed || c.def.un || c.def.spell) continue; // v170：法术无战力，不吃成长/衰减
-        applyPermBuff(c, delta, null, def.n); // tag = 地形名 → 战力影响历史按来源显示「寺子屋」/「间歇泉」
+        // tag = 地形名 → 战力影响历史按来源显示「寺子屋」/「间歇泉」
+        if (applyPermBuff(c, delta, null, def.n) === false) { blocked++; continue; } // v201：免减攻 → 本次跳过
         hit.push(`${side === 'p' ? '你方' : '敌方'}「${c.def.n}」(${cardPowerIn(j, c)})`);
       }
     }
@@ -4322,7 +4972,9 @@ function locTurnEndPowerEffects() {
     if (hit.length) {
       const sign = delta > 0 ? '+' : '−';
       log(delta > 0 ? 'sys' : 'danger', // 成长走绿色 sys、衰减走红色 danger
-        `${def.icon} ${def.n}：本区双方已翻开卡牌各 ${sign}${Math.abs(delta)} 战力 → ${hit.join('、')}`);
+        `${def.icon} ${def.n}：本区双方已翻开卡牌各 ${sign}${Math.abs(delta)} 战力 → ${hit.join('、')}${blocked ? `（另有 ${blocked} 张因本区「免减攻」被拦下）` : ''}`);
+    } else if (blocked) {
+      log('sys', `${def.icon} ${def.n}：本区双方已翻开卡牌本应各 −${Math.abs(delta)} 战力，但 ${blocked} 张全部因本区「免减攻」被拦下（战力不变）。`);
     }
   }
 }
@@ -4369,8 +5021,17 @@ function finishMatch() {
   st.phase = 'over';
   const lines = [];
   let pw = 0, aw = 0, tie = 0, pTotal = 0, aTotal = 0;
+  let shatteredN = 0; // v205：已破碎（被「天界」摧毁）的区域数
   for (let j = 0; j < 3; j++) {
     const def = st.locs[j].def;
+    // v205：已破碎的区域**不计分、不参与胜负、也不显示点数比大小** —— 只留一行说明。
+    //       ⚠️ 刻意不写原本的地形名（与棋盘上“看不出原来是什么地形”保持一致；
+    //          原地形名在它被摧毁那一刻的日志里已经记过）。
+    if (st.locs[j].shattered) {
+      shatteredN++;
+      lines.push(`⚡ 区域 ${j + 1}：<b>已破碎</b>（已被「天界」摧毁 —— 不计分、不参与胜负）`);
+      continue;
+    }
     const rawP = zoneTotals('p', j) * def.dbl;
     const rawA = zoneTotals('a', j) * def.dbl;
     // 反转区域（辉针城）：展示仍用真实点数，但胜负比较取负（低者胜）
@@ -4385,17 +5046,22 @@ function finishMatch() {
     const tag = (def.dbl > 1 ? '（威力×2）' : '') + (def.inv ? '（低者胜）' : '');
     lines.push(`${def.n}${tag}：你 ${rawP} : ${rawA} 对手 → ${who}`);
   }
-  const hasInv = st.locs.some((l) => l.def.inv);
+  const hasInv = st.locs.some((l) => !l.shattered && l.def.inv); // 只统计仍在场的区域
+  const aliveN = 3 - shatteredN; // v205：仍参与判定的可用区域数（「天界」局通常为 1）
   let delta = 0, title, sub, emblem;
   if (tie > 0) {
-    // 存在平局区域：按三个区域的总点数决胜
-    sub = `存在平局区域 → 三区总点数决胜：你 ${pTotal} : ${aTotal} 对手${hasInv ? '（反转区域按负值计入总点数）' : ''}`;
+    // 存在平局区域：按仍在场区域的总点数决胜（v205：已破碎区域不加进 pTotal/aTotal）
+    sub = shatteredN
+      ? `已被摧毁 ${shatteredN} 个区域 → 仅剩 ${aliveN} 个可用区域，且为平局 → 按剩余区域总点数决胜：你 ${pTotal} : ${aTotal} 对手`
+      : `存在平局区域 → 三区总点数决胜：你 ${pTotal} : ${aTotal} 对手${hasInv ? '（反转区域按负值计入总点数）' : ''}`;
     if (pTotal > aTotal) { delta = st.stakes; title = '你赢了！'; emblem = '🏆'; }
     else if (aTotal > pTotal) { delta = -st.stakes; title = '你输了…'; emblem = '💀'; }
     else { title = '平局'; emblem = '🤝'; sub += ' · 总点数相同'; }
   } else {
     // 无平局区域：看谁赢下的区域更多
-    sub = `无平局区域 → 按赢下区域数决胜：你 ${pw} : ${aw} 对手`;
+    sub = shatteredN
+      ? `已被摧毁 ${shatteredN} 个区域 → 仅剩 ${aliveN} 个可用区域，按赢下区域数决胜：你 ${pw} : ${aw} 对手`
+      : `无平局区域 → 按赢下区域数决胜：你 ${pw} : ${aw} 对手`;
     if (pw > aw) { delta = st.stakes; title = '你赢了！'; emblem = '🏆'; }
     else { delta = -st.stakes; title = '你输了…'; emblem = '💀'; }
   }
@@ -4458,6 +5124,8 @@ function renderControls() {
   const spyBtn = $('btnAiSpy');
   if (energyBtn) energyBtn.classList.add('hidden'); // 正常与开发均不再显示顶栏改能量
   if (pickLocBtn) pickLocBtn.classList.toggle('hidden', !dev);
+  const addStoneBtn = $('btnAddStone'); // v206：开发者「🪨 添加石块」
+  if (addStoneBtn) addStoneBtn.classList.toggle('hidden', !dev);
   if (pickBtn) pickBtn.classList.toggle('hidden', !dev);
   if (codexBtn) codexBtn.classList.toggle('hidden', dev);
   if (spyBtn) spyBtn.classList.toggle('hidden', !dev);
@@ -4476,6 +5144,10 @@ function renderControls() {
 function renderHud() {
   const en = state.players.p;
   $('turnVal').textContent = state.turn;
+  // v203：顶栏「回合 N / 总数」的总数改读本局总回合数 —— 地形「虚假之月」在场 → / 7
+  //（揭晓那一刻起就变 /7；被换掉则回 /6；已到第 7 回合则锁定为 7）。元素缺失时静默跳过（防御）。
+  const turnMaxEl = $('turnMax');
+  if (turnMaxEl) turnMaxEl.textContent = '/ ' + roundsTotal();
   $('energyVal').textContent = en.energyLeft;
   $('energyUnit').textContent = `/ ${en.energyTotal}`;
   // v169：额外能量提示——本回合能量里由「额外能量」多出来的部分（如斯塔萨菲雅 → 下回合 +1）
@@ -4564,10 +5236,15 @@ function buildBoard() {
     els.totP.push(mid.querySelector('[data-side="p"]'));
   });
   Game._els = els;
+  // v205：某列已是「已破碎」时（防御；正常 restart 会先把 locs 全重置为未揭示）
+  //       把整列换成损坏面板 —— 与 shatterZoneTerrain 走同一个渲染出口。
+  state.locs.forEach((loc, idx) => { if (locShattered(idx)) renderShatteredColumn(idx); });
 }
 
 // 区域被“变形”（如鬼人正邪 → 辉针城）后刷新该列的标题/图标/效果文字/配色 class
+// v205：若该列已「破碎」，整列换成损坏面板（没有列名 / 效果文字 / 点数 / 格位）
 function refreshLocHeader(locIdx) {
+  if (locShattered(locIdx)) { renderShatteredColumn(locIdx); return; }
   const col = Game._els.cols[locIdx];
   if (!col) return;
   const def = locDef(locIdx);
@@ -4618,7 +5295,7 @@ function canPlaceP(idx) {
   if (!card || cardCost(card) > st.players.p.energyLeft) return false;
   if (!locOpen(idx)) return false;
   if (!playReqCheck(playSide(), card).ok) return false; // v196：卡级放置条件（playReq）
-  if (occOf(card) > 1 && !occZoneOk(card, idx)) return false; // 大体积卡需上限恰为占格数
+  if (occOf(card) > 1 && !occZoneOk(card, idx, playSide())) return false; // 大体积卡需该侧可用格数恰为占格数
   return sideRoom(playSide(), idx) >= occOf(card);
 }
 
@@ -4663,7 +5340,8 @@ function miniCardEl(card, locIdx, side) {
         ${modHtml}`;
     }
     // 己方“每回合可移动一次”的已翻开卡（如射命丸文）：出牌阶段点击进入移动
-    const canFly = side === 'p' && state.phase === 'play' && card.def.fly && card.revealed && !state.flyMoved.has(card.id);
+    // v202：静海「抹除文本」——文本被抹除的牌失去该能力，不再提示/不进入移动模式
+    const canFly = side === 'p' && state.phase === 'play' && card.def.fly && card.revealed && !state.flyMoved.has(card.id) && !cardMuted(card);
     if (canFly) {
       el.classList.add('can-fly');
       if (state.moveCardId === card.id) el.classList.add('fly-moving');
@@ -4687,6 +5365,9 @@ function renderZones() {
   if (!Game._els) return;
   const st = state;
   for (let j = 0; j < 3; j++) {
+    // v205：已破碎的列整列由 renderShatteredColumn 负责（一块损坏面板：无地形名、无双方总点数、
+    //       无格位、不可交互）——这里整列跳过，既不改它的 DOM，也不参与领先着色与格位渲染。
+    if (locShattered(j)) continue;
     Game._els.oppZone[j].innerHTML = '';
     Game._els.mineZone[j].innerHTML = '';
     for (const child of buildZoneChildren('a', j)) Game._els.oppZone[j].appendChild(child);
@@ -4706,10 +5387,12 @@ function renderZones() {
     pillP.classList.toggle('lead', eP > eA);
     const mineZoneEl = Game._els.mineZone[j].parentElement;
     const ldef = locDef(j);
-    const count = sideUsed('p', j) + '/' + ldef.max;
+    // v200：分母改用**该侧可用格数**（＝地形 max − 该侧已封隙间数），被隙间封掉的格不再算可用
+    const count = sideUsed('p', j) + '/' + locSideMax('p', j);
     let locTag = '';
     if (ldef.id === 'unreveal') locTag = ` · 🃏 第 ${j + 1} 回合揭晓`;
     else if (ldef.minTurn && !locOpen(j)) locTag = ` · 🔒 第 ${ldef.minTurn} 回合开放`;
+    if (locGaps('p', j)) locTag += ` · ≋ 隙间 ${locGaps('p', j)}`; // v200：本侧被隙间封掉几格
     mineZoneEl.querySelector('.slot-count').textContent = `已放 ${count}${locTag}`;
     mineZoneEl.parentElement.classList.toggle('hoverable', canPlaceP(j));
     // 未开放区域加灰色遮罩（如七夕坂第 5 回合前）
@@ -4722,13 +5405,16 @@ function renderZones() {
 
 /* 把区域的一侧 2×2 格位按规则填充：
    - 已放卡永远占其格位（含揭晓后超过上限的卡：不删除、不移动，见 locationRevealStage）；
-   - 空位且属于允许格（i < def.max）：max=4 用浅灰虚线格，max<4 用透明占位；
-   - 空位且是不允许格（i >= def.max）：固定用「隙间」灰色卡占位——只铺在“空置”的不可用格，
-     所以隙间数 = 4 − max(已放卡数, 上限)：未超限时 = 4−上限（如迷途竹林 2 个）；
-     揭晓超限时随卡占格递减（已放 3 张 → 1 个；放满 4 张或大体积卡占满整侧 → 0 个），
-     与“不删卡”口径一致。 */
+   - 空位且属于允许格（i < 该侧可用格数）：地形 max=4 用浅灰虚线格，max<4 用透明占位；
+   - 空位且是不允许格（i >= 该侧可用格数）：固定用「隙间」灰色卡占位——只铺在“空置”的不可用格，
+     所以隙间数 = 4 − max(已放卡数, 可用格数)：未超限时 = 4−可用格数（如迷途竹林 2 个）；
+     揭晓超限/被隙间封格时随卡占格递减（已放 3 张 → 1 个；放满 4 张或大体积卡占满整侧 → 0 个），
+     与“不删卡”口径一致。
+   ⚠️ v200：「可用格数」= 该地形 max − **该侧**已封隙间数（locSideMax，双方各记一份）——
+     「八云紫的家」每回合末从后往前各封一格，封出来的正是这里渲染的隙间；换地形时清空。 */
 function buildZoneChildren(side, locIdx) {
   const def = locDef(locIdx);
+  const sideMax = locSideMax(side, locIdx); // v200：该侧可用格数（含隙间封格）
   const cards = state.players[side].zones[locIdx];
   const out = [];
   // 大体积卡（如伊吹萃香 occ:4）独占整侧 2×2：只渲染一张放大卡，区域视为放满
@@ -4743,7 +5429,7 @@ function buildZoneChildren(side, locIdx) {
   for (let i = 0; i < 4; i++) {
     const card = cards[i];
     if (card) { out.push(miniCardEl(card, locIdx, side)); continue; } // 已有卡优先占格
-    if (i >= def.max) {
+    if (i >= sideMax) {
       out.push(gapCellEl());
       continue;
     }
@@ -4957,7 +5643,9 @@ function uiOnPickLoc() {
   else closePickLoc();
 }
 // 某列当前地形文案（用于按钮 title / 提示行）
+// v205：已破碎的列标成「已破碎（不可更换）」，一眼看出它被天界摧毁且永久锁定
 function locTextAt(idx) {
+  if (locShattered(idx)) return '💥 已破碎（不可更换）';
   const def = state.locs[idx] && state.locs[idx].def;
   return def ? (def.icon + ' ' + def.n) : '未揭示';
 }
@@ -5040,7 +5728,7 @@ function renderPickLocGrid() {
       '<span class="lpc-icon">' + def.icon + '</span>' +
       '<span class="lpc-name"></span>' +
       '<span class="lpc-eff"></span>' +
-      '<span class="lpc-meta">上限 ' + def.max + (def.inv ? ' · 反转' : '') + (def.purge ? ' · 回合末摧毁' : '') + (def.grow ? ' · 回合末成长' : '') + (def.decay ? ' · 回合末衰减' : '') + (def.gamble ? ' · 翻开随机±' : '') + (def.dice ? ' · 第' + def.dice.turn + '回合掷骰' : '') + (def.rally ? ' · 第' + def.rally.turn + '回合+' + def.rally.add : '') + (def.gust ? ' · 揭示后吹飞' : '') + (def.collapse ? ' · ' + def.collapse.cards + '张牌后崩塌' : '') + (def.prot ? ' · 区域免摧毁' : '') + (def.spawn ? (def.spawn.cost != null ? ' · 出现生成随机' + def.spawn.cost + '费卡' : ' · 出现生成特殊卡') : '') + '</span>';
+      '<span class="lpc-meta">上限 ' + def.max + (def.inv ? ' · 反转' : '') + (def.purge ? ' · 回合末摧毁' : '') + (def.grow ? ' · 回合末成长' : '') + (def.decay ? ' · 回合末衰减' : '') + (def.gamble ? ' · 翻开随机±' : '') + (def.dice ? ' · 第' + def.dice.turn + '回合掷骰' : '') + (def.rally ? ' · 第' + def.rally.turn + '回合+' + def.rally.add : '') + (def.gust ? ' · 揭示后吹飞' : '') + (def.collapse ? ' · ' + def.collapse.cards + '张牌后崩塌' : '') + (def.prot ? ' · 区域免摧毁' : '') + (def.xformTurn ? ' · 第' + def.xformTurn.turn + '回合变形' : '') + (def.gap ? ' · 回合末各封 ' + def.gap + ' 格隙间' : '') + (def.noDown ? ' · 区域免减攻' : '') + (def.mute ? ' · 抹除卡牌文字' : '') + (def.extraRound ? ' · 本局+' + def.extraRound + ' 回合' : '') + (def.shatter ? ' · 出现时摧毁另外两块地形' : '') + (def.spawn ? (def.spawn.cost != null ? ' · 出现生成随机' + def.spawn.cost + '费卡' : ' · 出现生成特殊卡') : '') + '</span>';
     btn.querySelector('.lpc-name').textContent = def.n;
     btn.querySelector('.lpc-eff').textContent = def.eff || '无特殊效果';
     btn.addEventListener('click', () => {
@@ -5052,6 +5740,7 @@ function renderPickLocGrid() {
   }
 }
 function uiOnPickLocClose() { closePickLoc(); }
+// v205：本函数**保持同步** —— 换上「天界」时只启动摧毁链、不在这里等它（弹窗必须立刻关）。
 function uiOnPickLocConfirm() {
   if (!isDevMode()) return;
   const def = pickLocDefId ? findLocDef(pickLocDefId) : null;
@@ -5061,11 +5750,17 @@ function uiOnPickLocConfirm() {
     updatePickLocTip('请先在上方选中要替换的区域（1 / 2 / 3）。');
     return;
   }
+  // v205：已破碎的区域**永久锁定** —— 任何路径（含开发者工具）都不能再给它换地形
+  if (locShattered(locIdx)) {
+    updatePickLocTip('区域 ' + (locIdx + 1) + ' 已被「天界」摧毁（已破碎）：永久锁定，不能再指定地形。需要重试请先「重新开始」。');
+    return;
+  }
   const prev = state.locs[locIdx].def;
   const spawnChk = $('pickLocSpawn');
   const wantSpawn = !spawnChk || spawnChk.checked; // v150：默认结算「出现时」效果（可勾掉）
   // 直接替换当前列显示地形；同步 locPlan，避免后续揭晓又盖回旧计划
   state.locs[locIdx].def = def;
+  resetLocGaps(locIdx); // v200：换地形 → 清空本列已封的隙间
   if (state.locPlan && state.locPlan.length > locIdx) state.locPlan[locIdx] = def;
   refreshLocHeader(locIdx); // 列名/图标/效果文案/配色即时更新
   const spawnNote = !wantSpawn
@@ -5073,11 +5768,172 @@ function uiOnPickLocConfirm() {
     : (def.spawn ? '（结算「出现时」效果）' : '（该地形没有「出现时」效果）');
   log('sys', '🗻 开发者指令：将区域 ' + (locIdx + 1) + '「' + (prev ? prev.n : '?') + '」替换为「' + def.n + '」' + spawnNote + '。');
   // v150：与地形揭晓走同一结算路径 —— 如虹龙洞 → 双方各生成 1 张「石块」
+  // v205：换上「天界」时，这里同时启动「摧毁另外两块地形」的演出链
   const spawnCount = wantSpawn ? runLocAppearEffect(locIdx, def) : 0;
+  // v203：换上/换掉「虚假之月」→ 本局总回合数当场变（顶栏即时刷新 + 留一条日志，便于调试验证）
+  syncRoundTotal('开发者指定地形');
+  // v205：⚠️ 这里**刻意不等** `awaitShatterChain()` —— 开发者工具必须**立刻关窗**，
+  //       「天界降临」的逐张摧毁演出在后台继续播（它自己每摧毁一张就 renderZones 一次，
+  //       结束时也会收尾重绘）。若在此 await，弹窗会一直挂到两块地形都拆完才消失（用户反馈）。
+  //       注：正常对局里的四条路径（揭晓 / xformTurn / collapse / 卡牌 xform）**仍然会等** ——
+  //       那里必须等，否则回合开始、翻牌、回合结束会插进摧毁节奏里。
   renderZones(); // 隙间 / 锁定遮罩 / 点数横幅 / 新生成的 token 一并刷新
   setStatus('区域 ' + (locIdx + 1) + ' 已替换为「' + def.n + '」'
-    + (spawnCount > 0 ? '，并结算了「出现时」生成（共 ' + spawnCount + ' 张）。' : '。'));
-  closePickLoc();
+    + (spawnCount > 0 ? '，并结算了「出现时」生成（共 ' + spawnCount + ' 张）。' : '。')
+    + ((def.shatter && shatterChain) ? '「天界降临」演出进行中：另外两块区域正在被逐个摧毁…' : ''));
+  closePickLoc(); // 立刻收起弹窗（演出在后台继续）
+}
+
+/* ---------- v206：开发者「🪨 添加石块」（批量生成石块，纯粹为调试方便）----------
+   入口：顶栏 `.top-actions` 里紧接「🗻 指定地形」的 `#btnAddStone`（**仅开发调试显示**）。
+   弹窗 `#addStoneMask`：上面三个按钮选区域 1/2/3（复用「指定地形」的 `.pick-loc-zone-row` /
+   `.plz-btn` 样式与交互），下面一个可用 **◀ ▶ 箭头**增减的数字输入框 + 「添加石块」。
+   口径（用户确认，v206）：**双方各 N 张** —— 与「虹龙洞 / 黄瓜田 / 幽灵洋馆」的
+   「区域出现时：双方各生成 N 张」**完全同款**，统一走 `placeToken`（落地即翻开、占格位、
+   进 `fieldQueue`、播「凝聚显形」演出），因此也**照常尊重**：
+     · 限张地形（迷途竹林 max 2）、「八云紫的家」的隙间封格、大体积卡占满整侧；
+     · **v205 的「已破碎」区域**（`locSideMax` 恒 0 ⇒ 一张也放不下，会明确提示而不是静默失败）。
+   生成的石块是**普通 `SPECIAL.stone` token**（1 费 / 0 战力 / `tk:'rock'` / 无 `k`），
+   因此照常吃「比那名居天子」的持续光环、计入「大鲶鱼」的 `playReq` 放置条件、
+   也可被摧毁 / 移动 / 换边 —— 正是这几个机制需要的调试素材。
+   ⚠️ 它不是“出现时”效果、不走 `runLocAppearEffect`、不触发任何 `spawn`（也就不会连锁别的机制）。
+   N 的取值范围夹在 **1..4**（每侧 4 格、石块 occ=1）；空位不够时按实际可放张数少放并在日志写明。 */
+const ADD_STONE_MAX = 4; // 每侧最多 4 格（石块占 1 格）——输入框夹在 1..4
+let addStoneZoneIdx = 0; // 当前选中的目标区域 0/1/2
+
+function uiOnAddStone() {
+  if (!isDevMode()) return;
+  const mask = $('addStoneMask');
+  if (!mask) return;
+  if (mask.classList.contains('hidden')) openAddStone();
+  else closeAddStone();
+}
+function openAddStone() {
+  addStoneZoneIdx = 0;
+  const input = $('addStoneCount');
+  if (input) input.value = '1';
+  bindAddStoneZoneButtons();
+  bindAddStoneSteppers();
+  syncAddStoneZones();
+  updateAddStoneTip();
+  const mask = $('addStoneMask');
+  if (mask) mask.classList.remove('hidden');
+}
+function closeAddStone() {
+  const mask = $('addStoneMask');
+  if (mask) mask.classList.add('hidden');
+}
+function uiOnAddStoneClose() { closeAddStone(); }
+
+// 读输入框的数量：夹在 1..ADD_STONE_MAX（非法/空输入回落到 1）。
+// ⚠️ 刻意**不在这里回写** `input.value` —— 否则用户清空输入框准备重打时会被立刻填回 "1"，
+//    光标位置也会跳；回写只发生在「◀ ▶ 步进 / 失焦 / 确认」这三处。
+function readAddStoneCount() {
+  const input = $('addStoneCount');
+  let n = input ? parseInt(input.value, 10) : 1;
+  if (!Number.isFinite(n)) n = 1;
+  return Math.max(1, Math.min(ADD_STONE_MAX, n));
+}
+function stepAddStone(d) {
+  const input = $('addStoneCount');
+  if (!input) return;
+  input.value = String(Math.max(1, Math.min(ADD_STONE_MAX, readAddStoneCount() + d)));
+  updateAddStoneTip();
+}
+function bindAddStoneSteppers() {
+  const minus = $('addStoneMinus');
+  const plus = $('addStonePlus');
+  if (minus && minus.dataset.bound !== '1') { minus.dataset.bound = '1'; minus.addEventListener('click', () => stepAddStone(-1)); }
+  if (plus && plus.dataset.bound !== '1') { plus.dataset.bound = '1'; plus.addEventListener('click', () => stepAddStone(1)); }
+}
+// 选中要添加石块的目标区域（按钮点击 / 事件委托 都走这里）
+function selectAddStoneZone(idx) {
+  const i = Number(idx);
+  if (!Number.isFinite(i) || i < 0 || i > 2) return;
+  addStoneZoneIdx = i;
+  syncAddStoneZones();
+  updateAddStoneTip();
+}
+// 区域按钮直接绑定（幂等：data-bound 标记，重复打开不会重复挂监听）
+function bindAddStoneZoneButtons() {
+  const row = $('addStoneZones');
+  if (!row) return;
+  row.querySelectorAll('.plz-btn').forEach((btn) => {
+    if (btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => selectAddStoneZone(btn.getAttribute('data-loc')));
+  });
+}
+function syncAddStoneZones() {
+  const row = $('addStoneZones');
+  if (!row) return;
+  row.querySelectorAll('.plz-btn').forEach((btn) => {
+    const idx = Number(btn.getAttribute('data-loc'));
+    const on = idx === addStoneZoneIdx;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.textContent = pickLocZoneText(idx); // 与「指定地形」共用同一套区域文案
+    btn.title = '把石块加到 ' + pickLocZoneText(idx) + '（当前 ' + locTextAt(idx) + '；双方各一份）';
+  });
+  syncAddStoneSteppers();
+}
+/** 步进按钮在边界置灰（1 / 4）——由 syncAddStoneZones 与 updateAddStoneTip 共同调用，
+    所以无论是点按钮、直接键盘输入还是方向键改值，两个箭头都会立刻跟着置灰/解禁。 */
+function syncAddStoneSteppers() {
+  const n = readAddStoneCount();
+  const minus = $('addStoneMinus');
+  const plus = $('addStonePlus');
+  if (minus) minus.disabled = n <= 1;
+  if (plus) plus.disabled = n >= ADD_STONE_MAX;
+}
+// warn 非空时在弹窗内显示红字提示（校验失败 / 放不下用），否则显示当前选择与空位摘要
+function updateAddStoneTip(warn) {
+  const tip = $('addStoneTip');
+  const note = $('addStoneNote');
+  const idx = addStoneZoneIdx;
+  const n = readAddStoneCount();
+  const zoneTxt = pickLocZoneText(idx);
+  const okBtn = $('btnAddStoneConfirm');
+  const shattered = locShattered(idx);
+  syncAddStoneSteppers(); // 最前面同步：输入框被直接改值时两个箭头也立刻跟着置灰/解禁（后面有几条 return）
+  if (okBtn) okBtn.textContent = shattered ? '该区域已破碎（不可添加）' : ('给 ' + zoneTxt + ' 双方各加 ' + n + ' 张');
+  if (tip) {
+    if (warn) { tip.textContent = warn; tip.classList.add('warn'); }
+    else {
+      tip.textContent = '目标：' + zoneTxt + '（现在 ' + locTextAt(idx) + '） · 双方各 ' + n + ' 张';
+      tip.classList.remove('warn');
+    }
+  }
+  if (!note) return;
+  if (shattered) {
+    note.textContent = '⚠️ 该区域已被「天界」摧毁（已破碎）：一格不剩，石块放不下。';
+    return;
+  }
+  const rp = sideRoom('p', idx);
+  const ra = sideRoom('a', idx);
+  let text = '该区域空位：你方还能放 ' + rp + ' 张 · 敌方还能放 ' + ra + ' 张';
+  if (rp < n || ra < n) text += '。⚠️ 空位不足的部分会按实际可放张数少放（日志里会写明）。';
+  note.textContent = text;
+}
+function uiOnAddStoneConfirm() {
+  if (!isDevMode()) return;
+  const idx = addStoneZoneIdx;
+  if (idx < 0 || idx > 2 || !state.locs[idx]) { updateAddStoneTip('请先在上方选中目标区域（1 / 2 / 3）。'); return; }
+  if (locShattered(idx)) { updateAddStoneTip('区域 ' + (idx + 1) + ' 已被「天界」摧毁（已破碎）：一格不剩，石块放不下。'); return; }
+  const tk = TOKENS.stone;
+  if (!tk) { updateAddStoneTip('找不到 `SPECIAL.stone` 的卡牌定义，无法生成石块。'); return; }
+  const input = $('addStoneCount');
+  if (input) input.value = String(readAddStoneCount()); // 确认时把输入框回写成夹取后的值
+  const n = readAddStoneCount();
+  const made = []; // 收集本次生成的卡实例（供日志/后续扩展；placeToken 会塞进来）
+  const placedP = placeToken('p', idx, tk, n, made);
+  const placedA = placeToken('a', idx, tk, n, made);
+  const short = (placedP < n || placedA < n);
+  renderAll(); // 新石块立刻显形（带「凝聚显形」演出）+ 点数/领先着色/可放置状态一并刷新
+  log('sys', `🪨 开发者指令：给「${locDef(idx).n}」区域**双方各生成 ${n} 张「${tk.n}」** → 你方实际 ${placedP} 张、敌方实际 ${placedA} 张（落地即翻开、占格位、进放置队列；该侧放满则少放）。`);
+  setStatus(`区域 ${idx + 1}：双方各生成 ${n} 张石块 —— 你方 ${placedP} 张、敌方 ${placedA} 张`
+    + (short ? '（空位不足，已按实际可放张数生成）' : '') + '。');
+  closeAddStone(); // 与「指定地形」一致：关掉弹窗，方便立刻看盘面
 }
 
 function zoomStageBtn(label) {
@@ -5284,14 +6140,23 @@ function powerHistoryRows(card, locIdx) {
     for (const c of state.players[card.side].zones[j]) {
       const og = c.def.og;
       if (!og || !c.revealed || c.def.un) continue;
+      if (locMuted(j)) continue; // v202：静海「抹除文本」——与 cardAuraBonus 同口径（源卡被抹除则不计）
       const hit = (def.tk && og.tk === def.tk) || (og.cost != null && og.cost === def.c);
-      if (hit) rows.push({ d: og.add, kind: 'aura', label: c.def.n, sub: '持续效果' });
+      if (hit) {
+        // v201：免减攻区把负的持续加成也按 0 计（与 cardAuraBonus 同步）
+        const dv = (locNoDown(locIdx) && og.add < 0) ? 0 : og.add;
+        if (dv) rows.push({ d: dv, kind: 'aura', label: c.def.n, sub: '持续效果' });
+      }
     }
   }
   // 4) 区域加成（实时）：阵营 aff / 费用 cb / 全区 all
-  if (loc.aff && def.g === loc.aff.group && loc.aff.add) rows.push({ d: loc.aff.add, kind: 'loc', label: loc.n, sub: `区域加成（${GROUPS[loc.aff.group] || loc.aff.group}）` });
-  if (loc.cb && def.c === loc.cb.c && loc.cb.add) rows.push({ d: loc.cb.add, kind: 'loc', label: loc.n, sub: `区域加成（费用 ${loc.cb.c}）` });
-  if (loc.all) rows.push({ d: loc.all, kind: 'loc', label: loc.n, sub: '区域效果' });
+  //    v201：本区带 noDown（蓬莱药局）时，**负的实时加成按 0 计**——与 cardPowerIn /
+  //    cardAuraBonus 同口径，否则“面板合计 ≠ 场上当前威力”（第 3 段的持续效果同样处理）
+  const noDown = locNoDown(locIdx);
+  const fix = (v) => ((noDown && v < 0) ? 0 : v);
+  if (loc.aff && def.g === loc.aff.group && fix(loc.aff.add)) rows.push({ d: fix(loc.aff.add), kind: 'loc', label: loc.n, sub: `区域加成（${GROUPS[loc.aff.group] || loc.aff.group}）` });
+  if (loc.cb && def.c === loc.cb.c && fix(loc.cb.add)) rows.push({ d: fix(loc.cb.add), kind: 'loc', label: loc.n, sub: `区域加成（费用 ${loc.cb.c}）` });
+  if (loc.all && fix(loc.all)) rows.push({ d: fix(loc.all), kind: 'loc', label: loc.n, sub: '区域效果' });
   return rows;
 }
 
@@ -5335,6 +6200,8 @@ function showFieldCard(card, locIdx) {
   const live = cardPowerIn(locIdx, card);
   const diff = live - def.p;
   const sign = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+  // v202：静海「抹除文本」——这张牌此刻的文本是否已被抹除（决定效果文字置灰 + 顶部提示行）
+  const muted = cardMuted(card);
   // v169：费用修正跟着这一份卡走（被加费后打出的卡，场上/放大视图同样显示修正后的费用）
   const liveCost = cardCost(card);
   const costDiff = liveCost - def.c;
@@ -5342,18 +6209,19 @@ function showFieldCard(card, locIdx) {
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
   const el = document.createElement('div');
-  el.className = 'zoom-card hand-card';
+  el.className = 'zoom-card hand-card' + (muted ? ' text-muted' : '');
   el.style.setProperty('--cgrad', gradOf(def));
   el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign });
   slot.appendChild(el);
 
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${liveCost}</span>${isSpellDef(def) ? '<span class="zm-pow">法术 · 无战力</span>' : `<span class="zm-pow">场上威力 ${live}</span>`}</div>
+    ${muted ? `<div class="zm-kind mute-note">🌊 文本已被「${locDef(locIdx).n}」抹除：此牌的揭示 / 持续 / 时机 / 防护效果一律不发动（战力照常计入；离开静海后文本恢复）</div>` : ''}
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
     ${costDownNote(def)}
     <div class="zm-kind">${isSpellDef(def) ? '法术 · 无战力（揭示结算完后即自行消散）' : `基础威力 ${def.p}`}</div>
     <div class="zm-kind">${kindTags(def)}</div>
-    <div class="zm-desc">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
+    <div class="zm-desc${muted ? ' text-muted' : ''}">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
   renderDeriv(def);
   renderPowerHistory(card, locIdx); // 独立“战力影响历史”面板（同遮罩并排、弹窗外部）
   zoomStageBtn('关闭 ✕');
@@ -5635,6 +6503,10 @@ window.Game = {
     onPickLoc: uiOnPickLoc,
     onPickLocClose: uiOnPickLocClose,
     onPickLocConfirm: uiOnPickLocConfirm,
+    // v206：开发者「🪨 添加石块」（批量为某区域生成石块，口径＝双方各 N 张）
+    onAddStone: uiOnAddStone,
+    onAddStoneClose: uiOnAddStoneClose,
+    onAddStoneConfirm: uiOnAddStoneConfirm,
     onEnergyDev: uiOnEnergyDev,
     onSwitchSide: uiOnSwitchSide,
     onAiSpy: uiOnAiSpy,
@@ -5648,6 +6520,7 @@ window.Game = {
   },
   _dbg: () => ({
     gen: state.gen, phase: state.phase, turn: state.turn,
+    roundTotal: roundsTotal(), // v203：本局总回合数（虚假之月在场 → 7；已到第 7 回合则锁定为 7）
     energyTotal: state.players.p.energyTotal, energyLeft: state.players.p.energyLeft,
     energyTotalA: state.players.a.energyTotal, energyLeftA: state.players.a.energyLeft,
     energyGainP: state.players.p.energyGain || 0, energyGainA: state.players.a.energyGain || 0,
@@ -5704,11 +6577,33 @@ window.Game = {
   }
   if (aiSpyMask) aiSpyMask.addEventListener('click', (e) => { if (e.target === aiSpyMask) closeAiSpy(); });
   if (pileMask) pileMask.addEventListener('click', (e) => { if (e.target === pileMask) closePiles(); }); // v187
+  // v206：开发者「🪨 添加石块」弹窗（遮罩点击关闭 + 区域按钮/步进按钮直接绑定 + 输入框实时刷新提示）
+  const addStoneMask = $('addStoneMask');
+  if (addStoneMask) {
+    addStoneMask.addEventListener('click', (e) => { if (e.target === addStoneMask) closeAddStone(); });
+    bindAddStoneZoneButtons(); // 直接绑定（事件委托仅作兜底）
+    bindAddStoneSteppers();
+    const row = $('addStoneZones');
+    if (row) {
+      row.addEventListener('click', (e) => {
+        const btn = e.target.closest && e.target.closest('.plz-btn');
+        if (!btn) return;
+        selectAddStoneZone(btn.getAttribute('data-loc'));
+      });
+    }
+    const input = $('addStoneCount');
+    if (input) {
+      // 输入/上下方向键（number 输入框原生步进也会触发 input）→ 实时刷新提示与步进按钮置灰
+      input.addEventListener('input', () => updateAddStoneTip());
+      input.addEventListener('blur', () => { input.value = String(readAddStoneCount()); updateAddStoneTip(); });
+    }
+  }
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!zoomMask.classList.contains('hidden')) closeZoom();
     else if (!codexMask.classList.contains('hidden')) closeCodex();
     else if (pickLocMask && !pickLocMask.classList.contains('hidden')) closePickLoc();
+    else if (addStoneMask && !addStoneMask.classList.contains('hidden')) closeAddStone(); // v206
     else if (!pickMask.classList.contains('hidden')) uiOnPickClose();
     else if (aiSpyMask && !aiSpyMask.classList.contains('hidden')) closeAiSpy();
     else if (pileMask && !pileMask.classList.contains('hidden')) closePiles(); // v187：牌池弹窗

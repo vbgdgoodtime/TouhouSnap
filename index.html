@@ -36,7 +36,7 @@
           <span class="hb-icon">⚔️</span>
           <span class="hb-text">
             <span class="hb-main">开始对战</span>
-            <span class="hb-sub">选择满编卡组出战 · 6 回合 / 3 块地形 / 双倍下注</span>
+            <span class="hb-sub">选择满编卡组出战 · 6 回合（遇「虚假之月」则 7 回合）/ 3 块地形 / 双倍下注</span>
           </span>
           <span class="hb-arrow">›</span>
         </button>
@@ -228,6 +228,7 @@
           <h3><span class="gs-ico">🎯</span>一句话目标</h3>
           <ul>
             <li>一局 <b>6 回合</b>、场上固定 <b>3 块区域</b>：终局<b>赢下区域更多</b>的一方获胜。</li>
+            <li>⚠️ 例外：地形「<b>虚假之月</b> 🌕」在场时本局变成 <b>7 回合</b>（第 7 回合能量 7）；它被变走就退回 6 回合，而一旦已经打到第 7 回合就锁定打完。</li>
             <li>若存在<b>平局区域</b>，改为比<b>三个区域的总点数</b>（高者胜，仍相同才是平局）——所以「大赢两区」和「小赢三区」要自己权衡。</li>
           </ul>
         </div>
@@ -235,7 +236,7 @@
         <div class="guide-sec">
           <h3><span class="gs-ico">⚡</span>回合与能量</h3>
           <ul>
-            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>（个别卡牌效果会提高本局上限，如「哆来咪」每回合 +1）；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
+            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>（个别卡牌效果会提高本局上限，如「哆来咪」每回合 +1；若本局有「虚假之月」🌕 则还有第 7 回合，当天双方各 <b>7 点</b>）；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
             <li>一回合可以<b>暗出任意多张牌</b>，只要费用总和不超过能量。</li>
             <li>出完点右下角「<b>结束回合</b>」把回合交给对手（对手是 AI，会尽量把能量花完）。</li>
             <li>出牌阶段点顶部<b>能量框</b>可重置：本回合暗出的牌按原顺序放回手牌、<b>能量全额返还</b>（本回合移动过的卡也移回原位）。</li>
@@ -256,7 +257,7 @@
           <h3><span class="gs-ico">🗺️</span>地形（区域）</h3>
           <ul>
             <li>开局三块地形都是「<b>未揭示</b> ❓」，在<b>第 1 / 2 / 3 回合开始</b>依次揭晓（左 → 中 → 右），揭晓当刻结算它的「出现时」效果。</li>
-            <li>地形效果举例：出现时给双方生成卡牌（虹龙洞 → 石块）、每回合结束成长 / 衰减 / 摧毁、<b>反转区</b>（点数低的一方反而赢下该区）、限制放牌张数、第 N 回合起才开放……</li>
+            <li>地形效果举例：出现时给双方生成卡牌（虹龙洞 → 石块）、每回合结束成长 / 衰减 / 摧毁、<b>反转区</b>（点数低的一方反而赢下该区）、限制放牌张数、第 N 回合起才开放、把本局延长到 <b>第 7 回合</b>（虚假之月 🌕）……</li>
           </ul>
         </div>
 
@@ -285,7 +286,7 @@
             <li><b>卡组设置</b>：组建 / 改名 / 删除卡组（上限 20 套、每套 12 张、同名卡限 1 张），自动存在本地。</li>
             <li><b>图鉴</b>（📚，v181）：不进对局，直接查看全部卡牌与效果说明（可切换「普通卡牌池 / 衍生卡牌池」，点卡放大查看）。</li>
             <li><b>设置</b>（⚙️，v174）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
-            <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
+            <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🪨 添加石块 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制（「🪨 添加石块」＝选区域 1/2/3 + 用 ◀ ▶ 调数量 → 该区域**双方各生成 N 张石块**，方便验「比那名居天子」「大鲶鱼」这类跟石块有关的机制）。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
           </ul>
         </div>
 
@@ -352,7 +353,7 @@
       <button type="button" class="hud-item hud-home" id="btnHome" title="返回主页面" onclick="Home.show()">
         <span class="hud-home-ico">←</span><span class="hud-label">主页</span>
       </button>
-      <div class="hud-item" id="turnBox"><span class="hud-label">回合</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit">/ 6</span></div>
+      <div class="hud-item" id="turnBox"><span class="hud-label">回合</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit" id="turnMax">/ 6</span></div>
       <div class="hud-item clickable" id="energyBox" title="点击可重置本回合已暗出的牌（能量全额返还）" onclick="Game.ui.onEnergyReset()">
         <span class="hud-label">能量</span><span class="hud-value" id="energyVal">1</span><span class="hud-unit" id="energyUnit">/ 6</span><span class="energy-bonus hidden" id="energyBonus">+1</span><span class="reset-mark">↺</span>
       </div>
@@ -361,6 +362,7 @@
     <div class="top-actions">
       <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()">⚡ 修改能量</button>
       <button id="btnPickLoc" class="btn btn-ghost hidden" onclick="Game.ui.onPickLoc()" title="开发调试：指定并替换区域地形">🗻 指定地形</button>
+      <button id="btnAddStone" class="btn btn-ghost hidden" onclick="Game.ui.onAddStone()" title="开发调试：批量为某个区域生成石块（双方各 N 张）">🪨 添加石块</button>
       <button id="btnPick" class="btn btn-ghost" onclick="Game.ui.onPick()">🎯 指定卡牌</button>
       <button id="btnSwitchSide" class="btn btn-ghost hidden" onclick="Game.ui.onSwitchSide()" title="开发调试：切换落牌立场">⇄ 切换立场</button>
       <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
@@ -414,7 +416,7 @@
       <div class="rules">
         <h3>玩法速览</h3>
         <ul>
-          <li>共 6 回合，能量逐回合 +1（上限 6）；「额外能量」（如斯塔萨菲雅）会让下一回合上限临时 +1，顶栏能量框显示绿色「+N」。</li>
+          <li>共 6 回合（地形「虚假之月」🌕 在场时为 7 回合），能量逐回合 +1（上限 6，第 7 回合为 7）；「额外能量」（如斯塔萨菲雅）会让下一回合上限临时 +1，顶栏能量框显示绿色「+N」。</li>
           <li>开局三块地形皆为「未揭示」，第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。</li>
           <li>每回合可把多张牌暗出到各区域，总费用不超能量；出完点「结束回合」。</li>
           <li>出牌结束后翻牌结算「揭示」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>
@@ -539,6 +541,40 @@
           <span>结算「出现时」效果（如虹龙洞生成石块）</span>
         </label>
         <button class="btn btn-primary" id="btnPickLocConfirm" onclick="Game.ui.onPickLocConfirm()">替换地形</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 开发者：添加石块（先选区域 1/2/3，再用 ◀ ▶ 箭头调数量 → 批量生成石块）
+       v206：口径同「虹龙洞 / 黄瓜田 / 幽灵洋馆」的「区域出现时」——**双方各 N 张**，
+             统一走 placeToken（落地即翻开、占格位、进 fieldQueue），因此也照常尊重
+             限张地形 / 隙间封格 / 大体积卡占满 / v205 的「已破碎」区域（放不下会明确提示）。 -->
+  <div class="modal-mask hidden" id="addStoneMask">
+    <div class="modal codex-modal add-stone-modal">
+      <div class="codex-head">
+        <h2>🪨 添加石块（开发者）</h2>
+        <span class="codex-tip" id="addStoneTip">先选区域，再调数量，最后点「添加石块」</span>
+        <button class="btn btn-ghost codex-close" onclick="Game.ui.onAddStoneClose()">取消 ✕</button>
+      </div>
+      <div class="pick-loc-zone-row" id="addStoneZones" role="group" aria-label="选择要添加石块的区域">
+        <span class="plz-label">目标区域</span>
+        <button type="button" class="btn btn-ghost plz-btn" data-loc="0" aria-pressed="false">区域 1（左）</button>
+        <button type="button" class="btn btn-ghost plz-btn" data-loc="1" aria-pressed="false">区域 2（中）</button>
+        <button type="button" class="btn btn-ghost plz-btn" data-loc="2" aria-pressed="false">区域 3（右）</button>
+      </div>
+      <div class="add-stone-body">
+        <div class="as-count">
+          <span class="as-count-label">双方各生成</span>
+          <button type="button" class="as-step" id="addStoneMinus" title="减少 1 张" aria-label="减少">◀</button>
+          <input type="number" class="as-input" id="addStoneCount" value="1" min="1" max="4" step="1"
+                 inputmode="numeric" aria-label="石块张数" />
+          <button type="button" class="as-step" id="addStonePlus" title="增加 1 张" aria-label="增加">▶</button>
+          <span class="as-count-unit">张「石块」</span>
+        </div>
+        <p class="as-note" id="addStoneNote"></p>
+      </div>
+      <div class="pick-actions">
+        <button class="btn btn-primary" id="btnAddStoneConfirm" onclick="Game.ui.onAddStoneConfirm()">添加石块</button>
       </div>
     </div>
   </div>

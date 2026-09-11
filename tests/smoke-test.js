@@ -184,8 +184,12 @@ const deckNameSet = (deck) => new Set((deck.cards || []).map((d) => d.n));
 // 一列的信息：地形、是否锁定、双方卡牌（名/实时战力/占格，暗牌无卡面 ⇒ 只有占格未知）
 function colInfo(j) {
   const col = colEls()[j];
-  const id = Array.from(col.classList).find((c) => c !== 'location' && c !== 'locked' && c !== 'hoverable' && c !== 'active-hover') || '';
-  const def = locDefById(id) || { id, max: 4, dbl: 1 };
+  // v205：被「天界」摧毁的列整列被换成一块损坏面板（`.location.shattered-loc > .shatter-block`）
+  // ——**没有** `.loc-name` / `.loc-total` / `.zone` 这些 DOM，故单独识别，按「一格不剩、不计分」处理。
+  const shattered = col.classList.contains('shattered-loc');
+  const id = shattered ? 'shattered'
+    : (Array.from(col.classList).find((c) => c !== 'location' && c !== 'locked' && c !== 'hoverable' && c !== 'active-hover') || '');
+  const def = locDefById(id) || (shattered ? { id: 'shattered', max: 0, wt: 0, dbl: 1 } : { id, max: 4, dbl: 1 });
   const readSide = (sel) => Array.from(col.querySelectorAll(sel)).map((el) => {
     const pEl = el.querySelector('.p');
     const nameEl = el.querySelector('.mc-name');
@@ -200,14 +204,15 @@ function colInfo(j) {
   const my = readSide('.zone.mine .mini-card');
   const opp = readSide('.zone.opp .mini-card');
   return {
-    col, def, j,
+    col, def, j, shattered,
     locked: col.classList.contains('locked'),
-    max: def.max || 4,
+    // ⚠️ 不能写 `def.max || 4`：已破碎列的 max 是 0（会被 `||` 吞成 4），必须按数值判定
+    max: (typeof def.max === 'number') ? def.max : 4,
     my, opp,
     myUsed: sum(my.map((c) => c.occ)),
     oppUsed: sum(opp.map((c) => c.occ)),
     myHidden: my.some((c) => !c.revealed),
-    myName: (col.querySelector('.loc-name') || {}).textContent || id,
+    myName: (col.querySelector('.loc-name') || col.querySelector('.shatter-name') || {}).textContent || id,
     myTotalText: (col.querySelector('.my-total .lt-num') || {}).textContent,
     oppTotalText: (col.querySelector('.opp-total .lt-num') || {}).textContent,
   };
@@ -266,6 +271,7 @@ function checkRenderInvariants(tag) {
   //    含暗牌且地形带 fill 时无法从 DOM 推出放满加成（暗牌看不到占格），跳过该区
   colEls().forEach((col, j) => {
     const info = colInfo(j);
+    if (info.shattered) return; // v205：已破碎列没有双方总点数 DOM，跳过（不计分、不参与胜负）
     const dbl = info.def.dbl || 1;
     const check = (cards, used, text, label) => {
       if (info.def.fill && cards.some((c) => !c.revealed)) return; // 口径不可推
@@ -283,6 +289,7 @@ function checkRenderInvariants(tag) {
 
   // 4) 领先着色：谁有效点数高谁 .lead（反转地形取负值口径），平点双方都不亮
   colEls().forEach((col, j) => {
+    if (col.classList.contains('shattered-loc')) return; // v205：已破碎列没有 `.loc-total`，跳过
     const a = parseInt((col.querySelector('.opp-total .lt-num') || {}).textContent, 10);
     const p = parseInt((col.querySelector('.my-total .lt-num') || {}).textContent, 10);
     const inv = !!colInfo(j).def.inv;

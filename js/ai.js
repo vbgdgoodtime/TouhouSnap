@@ -181,7 +181,8 @@ function mdEntry(card) {
   if (e.surv) e.bonus += 0.3 * e.surv;                         // 防摧毁：抗一次摧毁
   if (e.phx) e.bonus += 0.4 * e.phx;                           // 凤凰重生：后续还能回收
   if (d.fx && d.fx.turnStart && d.fx.turnStart.k === 'drawSpell') {
-    e.bonus += 0.8 * Math.max(0, 6 - state.turn);              // 法术调度：后续每回合多一张牌
+    // v203：本局剩余回合数改读 `roundsTotal()`（虚假之月在场 → 本局 7 回合，第 6 回合时仍剩 1 回合可抽）
+    e.bonus += 0.8 * Math.max(0, roundsTotal() - state.turn);  // 法术调度：后续每回合多一张牌
   }
   return e;
 }
@@ -245,7 +246,14 @@ function mdUsed(zone, side, post) {
   }
   return u;
 }
-function mdRoom(m, j, side, post) { return (m.zones[j].def.max || 4) - mdUsed(m.zones[j], side, post); }
+// ⚠️ v205：这里**不能**写 `(def.max || 4)` —— 天界摧毁后的「已破碎」地形 `max` 是 **0**，
+//    会被 `||` 吞成 4，让影子盘面以为那块区域还有 4 个空位（估值/规划白算，与引擎口径不符）。
+//    必须按数值判定：缺 `max` 才是 4，`max: 0` 就是一格不剩。
+function mdRoom(m, j, side, post) {
+  const d = m.zones[j].def;
+  const base = (d && typeof d.max === 'number') ? d.max : 4;
+  return base - mdUsed(m.zones[j], side, post);
+}
 /** 该条目在当前估值口径下是否计入（普通/困难档不看对手暗牌；月狂档全量可见；
     简单档不走本模型，它在 aiThinkLegacy 里直接用 includeHidden 的旧口径） */
 function mdCounted(side, e, meta) {
@@ -325,7 +333,8 @@ function mdProject(m, meta) {
       for (const s of ['p', 'a']) for (const e of z[s]) if (mdCounted(s, e, meta)) e.base += def.rally.add;
     }
     // ③ leave 终局离场（稗田阿求）：最后一回合其战力不计入终局
-    if (out.turn >= 6) {
+    //    v203：改读 `roundsTotal()`（虚假之月在场 → 最终回合是第 7 回合；`out.turn` 恒等于 `state.turn`）
+    if (out.turn >= roundsTotal()) {
       for (const s of ['p', 'a']) z[s] = z[s].filter((e) => !(e.leave && mdCounted(s, e, meta)));
     }
   }
