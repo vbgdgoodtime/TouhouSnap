@@ -973,14 +973,16 @@ body {
 }
 .mini-card .p.up { color: #4ade8f; border-color: #4ade8f; text-shadow: 0 0 6px rgba(70,222,143,.65); }
 .mini-card .p.down { color: #ff6d6d; border-color: #ff6d6d; text-shadow: 0 0 6px rgba(255,109,109,.65); }
-/* v170：法术卡（def.spell）——只显示能量花费，不显示战力；战力位改为「✦ 法术」小标 */
+/* v170：法术卡（def.spell）——只显示能量花费，不显示战力；右上角战力位改为一个「✦」星标
+   （v178：星标**不写「法术」二字**；尺寸/位置与战力数字 `.mini-card .p` 对齐，用淡紫配色区分） */
 .mini-card .mc-spell {
   position: absolute; top: 4px; right: 5px; left: auto;
-  padding: 1px 6px; border-radius: 6px;
-  font-size: 11px; font-weight: 800; letter-spacing: .3px;
+  min-width: 24px; padding: 1px 5px; text-align: center;
+  font-size: 14px; line-height: 1.15; border-radius: 6px;
   color: #d9c9ff; background: rgba(38,26,72,.82);
   border: 1px solid rgba(168,140,255,.65);
   box-shadow: 0 1px 3px rgba(0,0,0,.5), 0 0 8px rgba(140,110,255,.35);
+  text-shadow: 0 0 6px rgba(160,130,255,.5);
   z-index: 2;
 }
 .mini-card.spell { box-shadow: inset 0 0 0 1px rgba(168,140,255,.45), 0 2px 8px rgba(30,20,60,.45); }
@@ -1227,6 +1229,124 @@ body {
   .cost-reveal-note { font-size: 10.5px; }
 }
 
+/* ---- v185：开局「登场」演出（`gs` 卡，现仅 7 费「哆来咪」）----
+   遮幕淡入 → 卡面放大弹入（紫金光环脉冲 + 梦之星光迸发）→ 停留展示 → 上浮淡出，约 1.8s
+   （时长与 game.js 的 playGameStartReveal DUR 对齐，**改时长要两边一起改**；演完才开始抽初始手牌）。
+   结构：.gs-reveal（全屏层，pointer-events:none）
+         ├ .gs-reveal-veil（暗色径向遮幕）
+         └ .gs-reveal-inner（动画主体：整体缩放/抖动）
+             └ .gs-reveal-item ×N（position:relative，＝“登场块”）
+                 ├ .gs-reveal-ring（光环脉冲，v186 起挂在本块上 → 覆盖标签与摘要，且恒为第一子元素，
+                 │                   故卡面永远画在光环之上；外阴影在边框盒内被裁掉，不会罩住文字）
+                 ├ .gs-reveal-tag（顶部来源标签）
+                 ├ .gs-reveal-cardwrap → .zoom-card.gs-reveal-card（大卡面）
+                 └ .gs-reveal-note（底部效果摘要）
+   卡面复用 .zoom-card.hand-card + cardFaceHTML()，故配色/比例与手牌与图鉴完全一致
+   （含 v185 新增的 7 费底色）。 */
+.gs-reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 9520;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.gs-reveal-veil {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(closest-side at 50% 45%, rgba(28, 18, 52, .58), rgba(6, 4, 16, .86));
+  animation: gsVeilFade 1.8s ease-out forwards;
+}
+@keyframes gsVeilFade {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.gs-reveal-inner {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  animation: gsCardPop 1.8s cubic-bezier(.2, .8, .3, 1) forwards;
+}
+@keyframes gsCardPop {
+  0%   { opacity: 0; transform: scale(.42) translateY(26px); filter: brightness(1.8) blur(3px); }
+  14%  { opacity: 1; transform: scale(1.09) translateY(0); filter: brightness(1.4) blur(0); }
+  20%  { transform: scale(.96) rotate(-1.8deg); }
+  26%  { transform: scale(1.03) rotate(1.2deg); }
+  32%  { transform: scale(1) rotate(0deg); filter: brightness(1); }
+  80%  { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(.96) translateY(-28px); filter: brightness(1.3); }
+}
+/* v186：登场块=顶部标签 + 卡面 + 底部摘要；光环挂在本块上（`position:relative` 作定位基准），
+   因此脉冲在**幅度最小时也把上下两条文字说明圈在里面**（原来光环只套卡面，文字落在光环之外）。 */
+.gs-reveal-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.gs-reveal-tag {
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(26, 14, 48, .9);
+  border: 1px solid rgba(201, 166, 255, .85);
+  color: #e2ccff;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  white-space: nowrap;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .5), 0 0 14px rgba(160, 110, 255, .35);
+}
+.gs-reveal-cardwrap { position: relative; }
+/* 光环：以「登场块」为基准外扩一点（左右 16px / 上下 8px）——最小幅度时也完整覆盖标签与摘要 */
+.gs-reveal-ring {
+  position: absolute;
+  inset: -8px -16px;
+  border-radius: 24px;
+  animation: gsRingPulse 1.8s ease-out forwards;
+}
+/* 脉冲两下：① 26% 强脉冲 ② 55% 次脉冲；v186 把**最小幅度抬高**——
+   起止不再是 0 扩散（那样最小瞬间几乎看不见、也盖不到上下文字），而是常驻 3~4px 描边
+   + 12~14px 金色柔光，两次脉冲之间（55% 谷底）也保持 12px 扩散。
+   百分比按 1.8s 全长折算：强脉冲 ≈0.47s、谷底 ≈0.99s、次脉冲 ≈1.17s（30%→80% 为停留段）。 */
+@keyframes gsRingPulse {
+  0%   { box-shadow: 0 0 0 3px rgba(201, 166, 255, .7), 0 0 26px 12px rgba(255, 214, 120, .34); }
+  26%  { box-shadow: 0 0 0 22px rgba(201, 166, 255, .3), 0 0 38px 16px rgba(255, 214, 120, .5); }
+  55%  { box-shadow: 0 0 0 12px rgba(201, 166, 255, .45), 0 0 30px 14px rgba(255, 214, 120, .4); }
+  80%  { box-shadow: 0 0 0 8px rgba(201, 166, 255, .35), 0 0 26px 12px rgba(255, 214, 120, .3); }
+  100% { box-shadow: 0 0 0 4px rgba(201, 166, 255, .18), 0 0 20px 10px rgba(255, 214, 120, .12); }
+}
+/* 提高一级特异度（.gs-reveal .gs-reveal-card）以压过 .hand-card 自身的 box-shadow */
+.gs-reveal .gs-reveal-card {
+  box-shadow: 0 22px 54px rgba(0, 0, 0, .62), 0 0 0 3px rgba(201, 166, 255, .35), 0 0 44px rgba(150, 110, 255, .4);
+}
+.gs-reveal-note {
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: rgba(14, 10, 26, .88);
+  border: 1px solid rgba(201, 166, 255, .5);
+  color: #ffe6b8;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* 星光粒子：复用 .energy-star 的飞行关键帧，换成紫金辉光并提到遮幕之上 */
+.energy-star.gs-star { z-index: 9525; text-shadow: 0 0 10px rgba(198, 160, 255, .95), 0 2px 5px rgba(0, 0, 0, .55); }
+@media (max-width: 700px) {
+  .gs-reveal .zoom-card { width: 186px; padding: 9px 10px 13px; }
+  .gs-reveal .zoom-card .hc-art { width: 100%; margin: 6px auto 4px; }
+  .gs-reveal .zoom-card .hc-name { font-size: 17px; }
+  .gs-reveal .zoom-card .hc-text { font-size: 12.5px; line-height: 1.5; margin-top: 8px; }
+  .gs-reveal .zoom-card .cost-orb, .gs-reveal .zoom-card .p, .gs-reveal .zoom-card .hc-spell { width: 34px; height: 34px; font-size: 16px; }
+  .gs-reveal-tag { font-size: 11px; padding: 3px 10px; }
+  .gs-reveal-note { font-size: 10.5px; padding: 3px 10px; }
+}
+@media (max-height: 640px) {
+  .gs-reveal .zoom-card { width: 168px; }
+  .gs-reveal .zoom-card .hc-text { font-size: 11.5px; }
+}
+
 /* v169：额外能量（斯塔萨菲雅 k='energyNext'）的两段演出
    ① 登记段（揭示当刻、卡位上）：卡位金光闪一下 + 金色光环扩散 + 星光迸发 + 「能量 +1」气泡；
    ② 到账段（下回合开始、顶栏能量框上）：同款但锚点换成能量框，并配合 #energyBonus 的绿色角标。
@@ -1310,6 +1430,25 @@ body {
   .energy-pop .ep-sub { font-size: 11px; }
 }
 
+/* v184：洗入卡组（`shuffleIn`）的轻量演出 —— 锚点＝**牌库计数**
+   （玩家侧＝手牌区「牌库 N」#deckCountVal；对手侧＝侧栏「牌库 N 张」#aiDeck）：
+   计数闪光 + 外扩光环（合并在同一条动画里，避免两条 animation 互相覆盖，同 .energy-box-flash
+   与 .energy-ring 并存时的老问题）+ 星光迸发（复用 .energy-star 的飞行关键帧）+ 「洗入卡组」气泡
+   （复用 .energy-pop 的结构与关键帧，只把主行改成青蓝色）。全部在 body 悬浮层、不挡操作。 */
+.deck-shuffle-flash { animation: deckShuffleFlash 1.4s ease-out; pointer-events: none; }
+@keyframes deckShuffleFlash {
+  0%   { background: rgba(150, 220, 255, 0); box-shadow: 0 0 0 0 rgba(120, 200, 255, .9), 0 0 0 0 rgba(120, 200, 255, 0); }
+  20%  { background: rgba(186, 234, 255, .5); box-shadow: 0 0 20px 8px rgba(110, 196, 255, .8), 0 0 0 6px rgba(120, 200, 255, .35); }
+  55%  { background: rgba(186, 234, 255, .16); box-shadow: 0 0 10px 3px rgba(110, 196, 255, .4), 0 0 0 16px rgba(120, 200, 255, .14); }
+  100% { background: rgba(150, 220, 255, 0); box-shadow: 0 0 0 0 rgba(110, 196, 255, 0), 0 0 0 26px rgba(120, 200, 255, 0); }
+}
+.energy-star.deck-star { text-shadow: 0 0 9px rgba(150, 220, 255, .95), 0 2px 4px rgba(0, 0, 0, .5); }
+.energy-pop.deck-pop .ep-main {
+  color: #d8f0ff;
+  text-shadow: 0 0 10px rgba(120, 200, 255, .95), 0 0 22px rgba(60, 150, 255, .75), 0 2px 4px rgba(0, 0, 0, .7);
+}
+.energy-pop.deck-pop .ep-sub { border-color: rgba(150, 220, 255, .6); }
+
 /* v90：场上“生成/落场”卡牌的诞生演出（1s，节奏同 ±N）——凝聚显形：
    小到弹大 + 提亮 + 淡青光环扩散，尾段回稳 */
 .mini-card.spawned-now {
@@ -1367,7 +1506,12 @@ body {
   margin-bottom: 8px;
   justify-content: center;
   padding: 0 170px;
+  /* v186：条数＝本回合当前可用能量（不再补灰色占位），用完时整排为空——
+     保留一条的高度，避免手牌区随条数变化上下跳动 */
+  min-height: 9px;
 }
+/* 基础样式＝“未点亮”的灰条；v186 起渲染层只产出 .pip.on（有几条可用就画几条），
+   灰底保留作样式备用（例如日后要显示“本回合上限 / 剩余”两段式）。 */
 .pip { width: 26px; height: 9px; border-radius: 5px; background: rgba(126, 160, 112, .42); transition: background .3s, box-shadow .3s; }
 .pip.on { background: linear-gradient(90deg, #e0a316, #f2c94c); box-shadow: 0 0 8px rgba(226, 180, 40, .6); }
 
@@ -1417,14 +1561,16 @@ body {
   text-shadow: 0 0 4px rgba(255,210,63,.5);
 }
 .hand-card .hc-icon { font-size: 30px; text-align: center; margin: 4px 0 2px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
-/* v170：法术卡（def.spell）——卡框不显示战力，右上角战力位改显「✦ 法术」小标 */
+/* v170：法术卡（def.spell）——卡框不显示战力，右上角战力位改为一个「✦」星标
+   （v178：**只画星、不写「法术」二字**；尺寸与费用宝珠 / 战力角标一致（26×26 圆形），
+    下面各处响应式规则里与 `.p` 一起同步收放） */
 .hand-card .hc-spell {
-  font-size: 10px; font-weight: 800; letter-spacing: .3px;
-  padding: 2px 7px; border-radius: 999px;
+  width: 26px; height: 26px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; border-radius: 50%;
   color: #d9c9ff; background: rgba(38,26,72,.85);
-  border: 1px solid rgba(168,140,255,.65);
+  border: 2px solid rgba(168,140,255,.65);
   text-shadow: 0 0 6px rgba(160,130,255,.5);
-  white-space: nowrap;
 }
 /* v103：手牌尺寸统一——无图（emoji 兜底）的卡也占一块与图片卡同款的正方形艺术区，
    白板/短文案的卡预留两行效果文字高度，使手牌各卡高度一致、入场不再互相撑高 */
@@ -1823,7 +1969,7 @@ body {
 .zoom-card .hc-icon { font-size: 64px; margin: 10px 0 4px; }
 .zoom-card .hc-name { font-size: 22px; margin-top: 4px; }
 .zoom-card .hc-text { font-size: 15px; line-height: 1.6; margin-top: 12px; }
-.zoom-card .cost-orb, .zoom-card .p { width: 46px; height: 46px; font-size: 21px; border-width: 2.5px; }
+.zoom-card .cost-orb, .zoom-card .p, .zoom-card .hc-spell { width: 46px; height: 46px; font-size: 21px; border-width: 2.5px; }
 
 .zoom-info { text-align: center; color: #64805c; font-size: 14px; line-height: 1.9; max-width: 420px; }
 .zoom-meta { display: flex; gap: 12px; justify-content: center; margin-bottom: 8px; }
@@ -1876,7 +2022,7 @@ body {
 .deriv-card { width: 260px; }
 .deriv-card .hc-art { width: 224px; margin: 6px auto 4px; }
 .deriv-card .hc-art .hc-icon { font-size: 46px; }
-.deriv-card .hc-top .cost-orb, .deriv-card .hc-top .p { width: 34px; height: 34px; font-size: 16px; }
+.deriv-card .hc-top .cost-orb, .deriv-card .hc-top .p, .deriv-card .hc-top .hc-spell { width: 34px; height: 34px; font-size: 16px; }
 .deriv-card .hc-name { font-size: 17px; }
 .deriv-card .hc-text { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 
@@ -2195,7 +2341,7 @@ body { -webkit-tap-highlight-color: transparent; }
     padding: 4px 4px 6px;
     border-radius: 10px;
   }
-  .hand-card .cost-orb, .hand-card .p { width: 21px; height: 21px; font-size: 11px; border-width: 1.5px; }
+  .hand-card .cost-orb, .hand-card .p, .hand-card .hc-spell { width: 21px; height: 21px; font-size: 11px; border-width: 1.5px; }
   .hand-card .hc-icon { font-size: 25px; margin: 2px 0 0; }
   .hand-card .hc-art { margin: 3px auto 1px; }
   .hand-card .hc-art .hc-icon { font-size: 25px; }
@@ -2234,7 +2380,7 @@ body { -webkit-tap-highlight-color: transparent; }
   .slot-count { font-size: 8.5px; bottom: 3px; left: 5px; }
   .mini-card { padding: 4px 2px 3px; border-radius: 8px; }
   .mini-card .mc-cost { font-size: 11px; min-width: 16px; top: 2px; left: 2px; padding: 0 3px; border-radius: 5px; }
-  .mini-card .p { font-size: 12px; min-width: 17px; top: 2px; right: 2px; padding: 0 3px; border-radius: 5px; }
+  .mini-card .p, .mini-card .mc-spell { font-size: 12px; min-width: 17px; top: 2px; right: 2px; padding: 0 3px; border-radius: 5px; }
   .slot-gap { border-radius: 8px; }
   .slot-gap .gap-glyph { font-size: 12px; }
   .slot-gap .gap-name { font-size: 8px; }
@@ -2258,7 +2404,7 @@ body { -webkit-tap-highlight-color: transparent; }
   .zoom-card { width: min(250px, 76vw); padding: 10px 10px 14px; }
   .zoom-card .hc-art { width: min(230px, 66vw); }
   .zoom-card .hc-icon, .zoom-card .hc-art .hc-icon { font-size: 46px; }
-  .zoom-card .cost-orb, .zoom-card .p { width: 38px; height: 38px; font-size: 18px; }
+  .zoom-card .cost-orb, .zoom-card .p, .zoom-card .hc-spell { width: 38px; height: 38px; font-size: 18px; }
   .undo-btns .btn, .modal-btns .btn { min-width: 0; flex: 1; }
   .undo-btns, .modal-btns { gap: 8px; }
 }
@@ -2277,6 +2423,37 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 
 /* v92：图鉴 / 指定卡牌页 —— 费用筛选条（全部 / 0-1 / 2 / 3 / 4 / 5 / 6 费） */
+/* v178：图鉴 / 「指定卡牌」的两层筛选 —— 第 1 层「卡池切换」按钮条
+   （普通卡牌池 / 衍生卡牌池），第 2 层是它下面的费用档 .card-filter-bar。
+   卡组页 #deckFilter 仍是原来的扁平筛选条，不受这里影响。 */
+.card-pool-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 18px 6px;
+}
+.card-pool-bar .pool-btn {
+  appearance: none;
+  font: inherit;
+  flex: 1 1 0;
+  min-width: 118px;
+  border: 1px solid rgba(124, 164, 110, .55);
+  background: #ffffff;
+  color: #3d5a33;
+  border-radius: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+}
+.card-pool-bar .pool-btn:hover { border-color: #7daa62; background: #f2f9ea; }
+.card-pool-bar .pool-btn.active {
+  background: linear-gradient(160deg, #4a8a3c, #2f5f27);
+  color: #ffffff;
+  border-color: #2f5f27;
+  box-shadow: 0 0 0 2px rgba(63, 122, 51, .25), 0 2px 6px rgba(47, 95, 39, .22);
+}
 .card-filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -2342,8 +2519,10 @@ body { -webkit-tap-highlight-color: transparent; }
   #pickGrid .codex-card .hc-art { margin: 3px auto 2px; }
   #codexGrid .codex-card .cost-orb,
   #codexGrid .codex-card .p,
+  #codexGrid .codex-card .hc-spell,
   #pickGrid .codex-card .cost-orb,
-  #pickGrid .codex-card .p { width: 20px; height: 20px; font-size: 10px; }
+  #pickGrid .codex-card .p,
+  #pickGrid .codex-card .hc-spell { width: 20px; height: 20px; font-size: 10px; }
 }
 
 /* v112：手机端（≤640px）卡牌详情弹窗收小 —— 缩小卡牌本体与立绘，
@@ -2369,7 +2548,8 @@ body { -webkit-tap-highlight-color: transparent; }
   .zoom-card .hc-name { font-size: 15px; }
   .zoom-card .hc-text { font-size: 12px; line-height: 1.45; margin-top: 8px; }
   .zoom-card .cost-orb,
-  .zoom-card .p { width: 30px; height: 30px; font-size: 14px; border-width: 2px; }
+  .zoom-card .p,
+  .zoom-card .hc-spell { width: 30px; height: 30px; font-size: 14px; border-width: 2px; }
   .zoom-info { max-width: 330px; font-size: 12.5px; line-height: 1.7; }
   .power-panel { width: min(300px, 92vw); padding: 12px 12px 10px; }
   .pp-row { font-size: 12px; line-height: 1.4; padding: 4px 8px; }
@@ -2422,6 +2602,19 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 @media (max-width: 700px) {
   .hand-count-chip { font-size: 12px; padding: 5px 12px; }
+}
+
+/* v184：与手牌计数并排的「牌库 N」计数（玩家牌库张数）—— 冷色调以区别于手牌计数，
+   同时是「洗入卡组」玩家侧演出的锚点（.deck-shuffle-flash 会落在它上面）。
+   位置沿用 .corner-center（认输 / 结束回合 之间，flex 横排、居中）；窄屏缩小避免与两侧按钮挤到一起。 */
+.deck-count-chip {
+  color: #1f3d55;
+  border-color: rgba(96, 150, 190, .5);
+  padding: 6px 12px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .deck-count-chip { font-size: 12px; padding: 5px 9px; }
 }
 
 /* ============================================================
@@ -2832,7 +3025,8 @@ body.in-home #battleDeckMask:not(.hidden) {
   .deck-card-slot .hc-art { margin: 2px auto 1px; }
   .deck-card-slot .hc-name { font-size: 8.5px; }
   .deck-card-slot .cost-orb,
-  .deck-card-slot .p { width: 16px; height: 16px; font-size: 8.5px; border-width: 1px; }
+  .deck-card-slot .p,
+  .deck-card-slot .hc-spell { width: 16px; height: 16px; font-size: 8.5px; border-width: 1px; }
   .deck-card-slot.empty { padding: 3px 3px 4px; border-radius: 8px; }
   .dcs-top { height: 16px; }
   .dcs-art { margin: 2px auto 1px; border-radius: 8px; }
@@ -3084,7 +3278,8 @@ body.in-home #battleDeckMask:not(.hidden) {
   /* 手机端卡片简略显示：隐藏效果文字（同图鉴 #codexGrid 的 ≤640px 口径） */
   .deck-grid .deck-pool-card .hc-text { display: none; }
   .deck-grid .deck-pool-card .cost-orb,
-  .deck-grid .deck-pool-card .p { width: 19px; height: 19px; font-size: 9.5px; }
+  .deck-grid .deck-pool-card .p,
+  .deck-grid .deck-pool-card .hc-spell { width: 19px; height: 19px; font-size: 9.5px; }
   /* 小卡下长卡名（如「帕秋莉·诺蕾姬」）改为省略号，避免溢出到相邻卡上 */
   .deck-grid .deck-pool-card .hc-name { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
@@ -3184,7 +3379,8 @@ body.in-home #guideMask:not(.hidden) {
 
 /* ============================================================
    v174：主页面「⚙️ 设置」（#homeBtnSettings 按钮 + #settingsMask 弹窗）
-   - 按钮 = 主入口列里紧接「卡组设置」的第 4 项，样式复用 .home-btn（不加新样式），
+   - 按钮 = 主入口列里紧接「图鉴」的第 5 项（v181 起「图鉴」插在「卡组设置」与它之间），
+     样式复用 .home-btn（不加新样式），
      副标题由 home.js 同步为「对手 AI 强度：<当前档位>」，故这里只需要给弹窗写样式；
    - 弹窗 = 复用 .modal-mask + .codex-modal（z-index 50 / max-height:88vh / 纵向 flex），
      .settings-modal 收窄到 520px；正文 .settings-body 可滚动（同 .guide-body 口径），
@@ -3296,4 +3492,28 @@ body.in-home #settingsMask:not(.hidden) {
   .ai-level-opt .alo-name { font-size: 13.5px; }
   .ai-level-opt .alo-desc { font-size: 11px; }
   .settings-actions .btn { flex: 1 1 auto; min-width: 0; }
+}
+
+/* ============================================================
+   v181：主页面「📚 图鉴」入口（#homeBtnCodex 按钮 + 复用既有图鉴弹窗）
+   - 按钮 = 主入口列里「卡组设置」与「⚙️ 设置」**之间**的第 4 项，样式**复用 .home-btn**
+     （不加新样式；图标用 📚，与对局顶栏的「📖 图鉴」呼应，也与「📖 新手引导」区分开），
+     交互见 js/home.js 的 openCodex / closeCodex / isCodexOpen。
+   - 弹窗 = **完全复用**既有图鉴弹窗 #codexMask（js/card-browser.js 的 window.CardBrowser，
+     与对局顶栏「📖 图鉴」是同一个弹窗），本段只负责“在主页面态把它放出来”：
+       ① 主页面态 `body.in-home .modal-mask { display: none }`（本文件主页面段）会把弹窗
+          一起隐藏，故照 #battleDeckMask(210) / #settingsMask(211) / #guideMask(212) 的写法
+          单独放开显示，z-index 213 —— 图鉴是用户主动打开的顶层内容，与其它主页面弹窗互斥
+          （home.js 的 openCodex 会先关掉新手引导 / 设置 / 出战卡组弹窗）；
+       ② 图鉴里点卡会调 showZoom() 弹出放大层 #zoomMask（游戏里 z-index 60），主页面态
+          同样被隐藏，故再放开一条 z-index 214，保证“放大查看”盖在图鉴之上。
+   - 卡组设置页（body.in-deck）本来就不隐藏 .modal-mask（见上方主页面段注释），无需加规则。
+   ============================================================ */
+body.in-home #codexMask:not(.hidden) {
+  display: flex;
+  z-index: 213;
+}
+body.in-home #zoomMask:not(.hidden) {
+  display: flex;
+  z-index: 214;
 }

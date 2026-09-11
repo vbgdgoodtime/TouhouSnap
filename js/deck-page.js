@@ -13,7 +13,8 @@
            （已放 = 卡面，点它移出；未放 = 与卡面同构的虚线「幽灵卡」空位带序号）。
        容量上限 DeckBuilder.MAX_DECKS = 20 套，每套 DeckBuilder.DECK_SIZE = 12 张。
      - 下方 卡牌区：#deckFilter + #deckGrid ——
-       **v131：费用筛选条与游戏图鉴同款**（全部 / 0-1 费 / 2~6 费 / 衍生卡牌）；
+       **v131：费用筛选条与游戏图鉴同款**（全部 / 0-1 费 / 2 费 / 3 费 / 4 费 / 5 费 /
+       **6 费+**（v185：原「6 费」档改为 6 费及以上，容纳 7 费「哆来咪」）/ 衍生卡牌）；
        「全部」与费用档展示 POOL 人物卡；「衍生卡牌」展示 SPECIAL token（不含隙间），
        **仅可查看、不可加入卡组**（与指定卡牌页口径一致）。
        浏览态：左键 / 右键 = 放大查看（复用游戏 showZoom()）；
@@ -22,7 +23,12 @@
 
    已实装：卡组栏动态扩展、新建 / 删除 / 修改（加入·移出·清空）/ **改名**（v129）/
           **费用筛选**（v131）/ **本地持久化**（v135，`deck-storage.js`）/
-          **编辑中即时按费用→战力排序**（v136）；
+          **编辑中即时按费用→战力排序**（v136；**v181 起补上「卡名」第三关键字**）；
+   **v181：本页排序口径与图鉴 / 指定卡牌统一** —— 卡池网格（`#deckGrid`，含「衍生卡牌」档）
+          与编辑态的 12 个卡槽一律按「**费用↑ → 战力↑ → 卡名字典序**」，比较器**直接复用**
+          `window.CardBrowser.orderDefs`（`js/card-browser.js` 在本文件之前加载，
+          见 index.html 的脚本次序），因此卡组页与图鉴不会出现两套顺序；
+          从本地存档恢复卡组时（`hydrateFromStorage`）也先排一次，旧存档 / 手改存档同样有序。
    待实装：对局使用自建卡组。
 
    入口 / 返回：
@@ -56,7 +62,8 @@
   var rendered = false; // 卡牌网格是否已渲染过（卡池是静态数据）
 
   /* ---------- 卡池筛选（与 card-browser.js 图鉴同款） ---------- */
-  // costs=null 表示全部人物卡；token=true 表示衍生卡牌（SPECIAL，不含 un 占位）
+  // costs=null 表示全部人物卡；min=N 表示“N 费及以上”（v185：原「6 费」档→「6 费+」）；
+  // token=true 表示衍生卡牌（SPECIAL，不含 un 占位）
   var COST_FILTERS = [
     { key: 'all', label: '全部', costs: null },
     { key: '01', label: '0-1 费', costs: [0, 1] },
@@ -64,22 +71,27 @@
     { key: '3', label: '3 费', costs: [3] },
     { key: '4', label: '4 费', costs: [4] },
     { key: '5', label: '5 费', costs: [5] },
-    { key: '6', label: '6 费', costs: [6] },
+    { key: '6', label: '6 费+', min: 6 },
     { key: 'token', label: '衍生卡牌', token: true },
   ];
 
   function allPoolDefs() {
     var POOL = (window.DS_CARDS && window.DS_CARDS.POOL) || {};
     var out = [];
-    for (var c = 0; c <= 6; c++) {
-      var arr = POOL[c];
-      if (!arr) continue;
-      for (var i = 0; i < arr.length; i++) out.push(arr[i]);
-    }
+    // v185：遍历实际存在的费用档（含 7 费档「哆来咪」）——不再写死 0~6
+    Object.keys(POOL)
+      .map(Number)
+      .filter(function (c) { return isFinite(c); })
+      .sort(function (a, b) { return a - b; })
+      .forEach(function (c) {
+        var arr = POOL[c];
+        if (!arr) return;
+        for (var i = 0; i < arr.length; i++) out.push(arr[i]);
+      });
     return out;
   }
-  // 对外兼容：poolDefs = 全部人物卡（不含筛选）
-  function poolDefs() { return allPoolDefs(); }
+  // 对外兼容：poolDefs = 全部人物卡（不含筛选；v181 起按统一口径排序）
+  function poolDefs() { return sortDefsList(allPoolDefs()); }
   function tokenDefs() {
     var SPECIAL = (window.DS_CARDS && window.DS_CARDS.SPECIAL) || {};
     var out = [];
@@ -97,9 +109,14 @@
   }
   function filteredDefs() {
     var f = currentFilter();
-    if (f && f.token) return tokenDefs();
+    // v181：两个分支都按「费用↑ → 战力↑ → 卡名字典序」排序（与图鉴 / 指定卡牌同口径）
+    if (f && f.token) return sortDefsList(tokenDefs());
     var costs = f ? f.costs : null;
-    return allPoolDefs().filter(function (d) { return !costs || costs.indexOf(d.c) >= 0; });
+    var min = f ? f.min : null;
+    return sortDefsList(allPoolDefs()).filter(function (d) {
+      if (min != null) return d.c >= min; // v185：「6 费+」= 6 费及以上（含 7 费「哆来咪」）
+      return !costs || costs.indexOf(d.c) >= 0;
+    });
   }
   function isTokenDef(def) {
     var SPECIAL = (window.DS_CARDS && window.DS_CARDS.SPECIAL) || {};
@@ -120,19 +137,47 @@
     return null;
   }
 
-  /* ---------- 排序（加入/移出时，v136）：费用升序 → 同费用战力升序 → 同战力按卡名 ---------- */
+  /* ---------- 排序（v136 起「加入/移出时重排」；v181 统一口径）----------
+     排序口径 = **费用升序 → 同费用战力升序 → 同战力按卡名字典序**（按字符编码逐位比较）。
+     v181：比较器**复用图鉴 / 指定卡牌那一份**——`js/card-browser.js` 暴露的
+     `window.CardBrowser.orderDefs`（本文件在它之后加载，index.html 的脚本次序保证可用），
+     这样卡组页 / 卡池 / 图鉴永远是同一套顺序，日后只改一处；
+     取不到时（脚本未加载 / 有人单独引入本文件）退回下面这份**等价实现**，行为不变。
+     本文件的两个使用点：① 卡池网格 `filteredDefs()` / `poolDefs()`（sortDefsList）；
+     ② 卡组内 12 张的卡槽顺序 `sortDeckCards()`（加入 / 移出 / 读取存档后各排一次）。 */
+  function localOrderDefs(a, b) {
+    var ca = a && a.c != null ? a.c : 0;
+    var cb = b && b.c != null ? b.c : 0;
+    if (ca !== cb) return ca - cb;
+    var pa = a && a.p != null ? a.p : 0;
+    var pb = b && b.p != null ? b.p : 0;
+    if (pa !== pb) return pa - pb;
+    var na = (a && a.n) || '';
+    var nb = (b && b.n) || '';
+    return na < nb ? -1 : na > nb ? 1 : 0;
+  }
+  // 当前生效的比较器：优先用 CardBrowser 的共享实现
+  function orderDefs() {
+    var api = window.CardBrowser;
+    if (api && typeof api.orderDefs === 'function') return api.orderDefs;
+    return localOrderDefs;
+  }
+  // 排一份卡池列表（不改原数组；元素为空时排到末尾，避免比较器读到 null）
+  function sortDefsList(list) {
+    var base = orderDefs();
+    return (list || []).slice().sort(function (a, b) {
+      if (!a) return b ? 1 : 0;
+      if (!b) return -1;
+      return base(a, b);
+    });
+  }
   function sortDeckCards(deck) {
     if (!deck || !deck.cards) return;
+    var base = orderDefs();
     deck.cards.sort(function (a, b) {
-      var ca = a && a.c != null ? a.c : 0;
-      var cb = b && b.c != null ? b.c : 0;
-      if (ca !== cb) return ca - cb;
-      var pa = a && a.p != null ? a.p : 0;
-      var pb = b && b.p != null ? b.p : 0;
-      if (pa !== pb) return pa - pb;
-      var na = (a && a.n) || '';
-      var nb = (b && b.n) || '';
-      return na < nb ? -1 : na > nb ? 1 : 0;
+      if (!a) return b ? 1 : 0;
+      if (!b) return -1;
+      return base(a, b);
     });
   }
 
@@ -184,6 +229,10 @@
         if (cards.indexOf(def) >= 0) continue; // 同名限 1
         cards.push(def);
       }
+      // v181：读回来的卡组也整理成统一顺序（费用↑ → 战力↑ → 卡名）——
+      // 现行 UI 存的就是有序的，这里主要照顾旧存档 / 手工改过的存档，
+      // 保证一进「卡组编辑」看到的 12 个卡槽就是有序的，与加入 / 移出后的呈现一致。
+      cards = sortDefsList(cards);
       next.push({
         id: String(row.id),
         name: String(row.name || ('卡组 ' + (next.length + 1))).slice(0, 12),

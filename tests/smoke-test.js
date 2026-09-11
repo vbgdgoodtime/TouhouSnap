@@ -162,7 +162,10 @@ async function waitFor(fn, desc, timeout = 45000) {
 function allPoolDefs() {
   const pool = (win.DS_CARDS && win.DS_CARDS.POOL) || {};
   const out = [];
-  for (let c = 0; c <= 6; c++) for (const d of (pool[c] || [])) out.push(d);
+  // v185：遍历**实际存在**的费用档（含新增的 7 费档「哆来咪」）——这里写死 0~6 会让
+  // 「图鉴卡数 = 卡池人物卡数」的断言与 UI（含 7 费卡）不符，故改为动态取键。
+  const keys = Object.keys(pool).map(Number).filter((c) => Number.isFinite(c)).sort((a, b) => a - b);
+  for (const c of keys) for (const d of (pool[c] || [])) out.push(d);
   return out;
 }
 function allTokenDefs() {
@@ -332,7 +335,9 @@ async function stageInit() {
 }
 
 /* ==================== 阶段 B：随机卡组构造（走卡组设置页 UI） ==================== */
-// 随机 12 张互不相同的人物卡：默认 1~6 费；有 ZERO_COST_CHANCE 概率换入 0 费「稗田阿求」
+// 随机 12 张互不相同的人物卡：默认 1 费及以上（**v185 起含 7 费「哆来咪」**——
+// 被抽中时该局牌库会变成 22 张、每回合能量 +1，正好顺带覆盖 `gs` 开局效果）；
+// 有 ZERO_COST_CHANCE 概率换入 0 费「稗田阿求」
 function randomDeckNames() {
   const names = shuffled(allPoolDefs().filter((d) => d.c >= 1)).slice(0, 12).map((d) => d.n);
   if (rnd() < ZERO_COST_CHANCE) names[Math.floor(rnd() * names.length)] = '稗田阿求';

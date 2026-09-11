@@ -19,12 +19,19 @@
         （AI.ORDER / AI.LEVELS[key].{name,desc,tip} / AI.DEFAULT_LEVEL / AI.getLevel() / AI.setLevel()），
         因此日后增删难度档只改 ai.js；按钮副标题同步显示当前档位（#homeSettingsSub），
         非当前档的默认档会带一个灰色「默认」徽标。
+     9) v181：「卡组设置」与「⚙️ 设置」**之间**新增「📚 图鉴」按钮（#homeBtnCodex）——不进入对局，
+        只调用既有的图鉴弹窗 window.CardBrowser.openCodex()（与对局顶栏「📖 图鉴」是同一个
+        #codexMask，内含「放大查看」层 #zoomMask）；本文件只管开关、Esc 兜底与「与其它主页面
+        弹窗互斥」，弹窗内容仍全部由 js/card-browser.js 渲染（v181 起卡池内按
+        「费用↑ → 战力↑ → 卡名字典序」排序）。
 
    按钮：
      - 开始对战（#homeBtnBattle）：先弹出 #battleDeckMask 选卡组 → 确认后隐藏主页面
        并调用 Game.restart({ playerDeckDefs })；取消则留在主页面。
      - 卡组设置（#homeBtnDeck）：隐藏主页面 → window.DeckBuilder.open()
      - 设置（#homeBtnSettings，v174）：留在主页面 → 弹出 #settingsMask（对手 AI 强度）
+     - 图鉴（#homeBtnCodex，v181）：留在主页面 → 弹出 #codexMask（既有图鉴弹窗，内含
+       放大查看层 #zoomMask；关闭途径＝弹窗内「关闭 ✕」/ 点遮罩空白 / Esc）
      - 开发调试（#homeBtnDev）：隐藏主页面 → window.DevTools.open()
        （不校验卡组，直接开战；玩家空牌库、AI 随机）
      - 新手引导（#homeBtnGuide，v172）：留在主页面 → 弹出 #guideMask 机制速览弹窗
@@ -95,6 +102,7 @@
     hideBattleDeckPicker();
     closeGuide();     // v172：回到主页面时不残留新手引导弹窗
     closeSettings();  // v174：也不残留设置弹窗
+    closeCodex();     // v181：也不残留图鉴弹窗（含其中的放大查看层）
     syncSettingsSub(); // v174：副标题始终显示当前 AI 强度（可能被别处改过）
   }
 
@@ -106,6 +114,7 @@
     hideBattleDeckPicker();
     closeGuide();     // v172：离开主页面时一并关闭新手引导
     closeSettings();  // v174：一并关闭设置弹窗
+    closeCodex();     // v181：一并关闭图鉴弹窗（进对局 / 进卡组页 / 进开发调试时都不残留）
   }
 
   /* ---------- v137：出战卡组选择 ---------- */
@@ -191,6 +200,7 @@
       return;
     }
     renderBattleDeckList();
+    closeCodex(); // v181：与「图鉴」互斥（图鉴遮罩盖住主页面时也走这里收尾，避免叠层）
     var m = battleMask();
     if (m) m.classList.remove('hidden');
   }
@@ -249,6 +259,7 @@
     if (!m) { toast('新手引导弹窗缺失（请检查 index.html 是否完整）。'); return; }
     hideBattleDeckPicker(); // 与「选出战卡组」互斥，避免两层遮罩叠加
     closeSettings();        // v174：与「设置」互斥
+    closeCodex();           // v181：与「图鉴」互斥
     hideToast();
     m.classList.remove('hidden');
   }
@@ -372,6 +383,7 @@
     if (!m) { toast('设置弹窗缺失（请检查 index.html 是否完整）。'); return; }
     hideBattleDeckPicker(); // 与其它主页面弹窗互斥，避免多层遮罩叠加
     closeGuide();
+    closeCodex();           // v181：与「图鉴」互斥
     hideToast();
     renderAiLevels();
     syncSettingsSub();
@@ -380,6 +392,55 @@
   function closeSettings() {
     var m = settingsMask();
     if (m) m.classList.add('hidden');
+  }
+
+  /* ---------- v181：主页面「📚 图鉴」入口（#homeBtnCodex） ----------
+     位置＝主入口列里「卡组设置」与「⚙️ 设置」**之间**（index.html 的静态标记）。
+     点它**不进入对局**，只打开**既有**的图鉴弹窗（js/card-browser.js 的
+     window.CardBrowser.openCodex()，与对局顶栏「📖 图鉴」同一个 #codexMask）——
+     因此本文件不复制任何卡池 / 费用档 / 卡片渲染逻辑，日后图鉴改版只改 card-browser.js。
+     关闭途径：
+       · 弹窗内「关闭 ✕」（index.html 的 onclick=Game.ui.onCodex() → CardBrowser.closeCodex）；
+       · 点遮罩空白（game.js initOverlays 的委托）；
+       · Esc（game.js 的全局 Esc **逐层**关：先放大层 #zoomMask、再图鉴层 #codexMask）——
+         故这里不再往本文件的 Esc 链里加图鉴，避免一次 Esc 连关两层。
+     主页面态原本 `body.in-home .modal-mask { display: none }` 会连弹窗一起隐藏，故
+     style.css 另有 `body.in-home #codexMask:not(.hidden)`（213）与
+     `body.in-home #zoomMask:not(.hidden)`（214）两条放开显示。 */
+  function codexApi() { return window.CardBrowser || null; }
+  function isCodexOpen() {
+    var m = $('codexMask');
+    return !!m && !m.classList.contains('hidden');
+  }
+  function openCodex() {
+    var api = codexApi();
+    if (!api || typeof api.openCodex !== 'function') {
+      toast('图鉴脚本未就绪（请检查 js/card-browser.js 是否加载成功）。');
+      return;
+    }
+    hideBattleDeckPicker(); // 与其它主页面弹窗互斥，避免多层遮罩叠加
+    closeGuide();
+    closeSettings();
+    hideToast();
+    try {
+      api.openCodex();
+    } catch (err) {
+      console.error('[home] 打开图鉴失败：', err);
+      toast('打开图鉴失败（详情见控制台）。');
+    }
+  }
+  function closeCodex() {
+    var api = codexApi();
+    if (api && typeof api.closeCodex === 'function') {
+      try { api.closeCodex(); } catch (e) { /* 忽略：下面仍会兜底收起遮罩 */ }
+    }
+    // 兜底（card-browser.js 未加载 / 抛错时）：直接收起两层面板，避免残留遮罩挡住主页面
+    var m = $('codexMask');
+    if (m) m.classList.add('hidden');
+    var z = $('zoomMask');
+    if (z) z.classList.add('hidden');
+    var pp = $('powerPanel');
+    if (pp) pp.classList.add('hidden');
   }
 
   /* ---------- 后续页面入口 ---------- */
@@ -405,11 +466,13 @@
     var deck = $('homeBtnDeck');
     var guide = $('homeBtnGuide');     // v172：主页面最下方「新手引导」
     var settings = $('homeBtnSettings'); // v174：卡组设置下方的「设置」（对手 AI 强度）
+    var codex = $('homeBtnCodex');       // v181：「卡组设置」与「设置」之间的「图鉴」
     if (battle) battle.addEventListener('click', startBattle);
     if (dev) dev.addEventListener('click', function () { openPage('dev'); });
     if (deck) deck.addEventListener('click', function () { openPage('deck'); });
     if (guide) guide.addEventListener('click', openGuide);
     if (settings) settings.addEventListener('click', openSettings);
+    if (codex) codex.addEventListener('click', openCodex); // v181：主页面「📚 图鉴」
     syncSettingsSub(); // v174：按钮副标题显示当前 AI 强度
 
     // v174：设置弹窗的关闭途径（关闭 ✕ / 知道了 / 遮罩空白 / Esc）
@@ -477,5 +540,9 @@
     isSettingsOpen: isSettingsOpen,
     setAiLevel: setAiLevel,
     currentAiLevel: currentAiKey,
+    // v181：主页面「📚 图鉴」入口（内容仍由 window.CardBrowser 渲染）——暴露出来便于调试与自动化验证
+    openCodex: openCodex,
+    closeCodex: closeCodex,
+    isCodexOpen: isCodexOpen,
   };
 })();

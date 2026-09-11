@@ -56,7 +56,23 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- v174：设置入口 —— 紧接「卡组设置」下方（主入口的第 4 项）。
+        <!-- v181：图鉴入口 —— 主入口列里「卡组设置」与「⚙️ 设置」**之间**（第 4 项）。
+             点它**不进入对局**，只打开既有的图鉴弹窗 #codexMask —— 与对局顶栏「📖 图鉴」
+             是**同一个弹窗**（实现仍在 js/card-browser.js 的 window.CardBrowser，
+             卡池 / 费用档筛选与卡池排序都沿用同一套）；交互见 js/home.js
+             （openCodex / closeCodex / isCodexOpen）。
+             主页面态原本 `body.in-home .modal-mask { display: none }` 会隐藏弹窗，
+             故 style.css 另有 `body.in-home #codexMask:not(.hidden)`（z-index 213）
+             与 `body.in-home #zoomMask:not(.hidden)`（214：图鉴里放大查看的那一层）放开显示。 -->
+        <button type="button" class="home-btn" id="homeBtnCodex">
+          <span class="hb-icon">📚</span>
+          <span class="hb-text">
+            <span class="hb-main">图鉴</span>
+            <span class="hb-sub">查看全部卡牌与效果说明（含衍生卡牌）</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
+        <!-- v174：设置入口 —— 紧接「图鉴」下方（主入口的第 5 项）。
              打开 #settingsMask：目前用于切换**对手 AI 强度**（v175 起四档：简单 / 普通 / 困难 / 月狂，
              默认「简单」），选项与文案统一来自 js/ai.js 的 window.AI.LEVELS（本页不另写一份），
              交互见 js/home.js（openSettings / closeSettings / setAiLevel）。
@@ -70,7 +86,7 @@
           <span class="hb-arrow">›</span>
         </button>
       </nav>
-      <!-- v172：新手引导 —— 主页面最下方的次级入口（四个主入口之下的轻量按钮）。
+      <!-- v172：新手引导 —— 主页面最下方的次级入口（五个主入口之下的轻量按钮）。
            打开只读的机制速览弹窗（#guideMask，纯静态文案）；交互见 js/home.js，
            样式见 style.css 的 .home-guide-btn / .guide-modal。 -->
       <button type="button" class="home-guide-btn" id="homeBtnGuide">
@@ -123,7 +139,7 @@
 
     <!-- 下方 2/3：全部卡牌。浏览态点卡牌=放大查看；
          编辑态（点卡组位）左键=加入卡组、右键=放大查看。
-         v131：费用筛选条与游戏图鉴同款（全部 / 0-1 / 2~6 费 / 衍生卡牌）。 -->
+         v131：费用筛选条与游戏图鉴同款（全部 / 0-1 / 2~5 费 / **6 费+**（6 费及以上，v185）/ 衍生卡牌）。 -->
     <section class="deck-pool">
       <div class="deck-pool-head">
         <span class="dp-title">全部卡牌</span>
@@ -219,7 +235,7 @@
         <div class="guide-sec">
           <h3><span class="gs-ico">⚡</span>回合与能量</h3>
           <ul>
-            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
+            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>（个别卡牌效果会提高本局上限，如「哆来咪」每回合 +1）；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
             <li>一回合可以<b>暗出任意多张牌</b>，只要费用总和不超过能量。</li>
             <li>出完点右下角「<b>结束回合</b>」把回合交给对手（对手是 AI，会尽量把能量花完）。</li>
             <li>出牌阶段点顶部<b>能量框</b>可重置：本回合暗出的牌按原顺序放回手牌、<b>能量全额返还</b>（本回合移动过的卡也移回原位）。</li>
@@ -267,6 +283,7 @@
           <ul>
             <li><b>开始对战</b>：先选一套<b>满 12 张</b>的出战卡组再开打（对手每局随机组牌）。</li>
             <li><b>卡组设置</b>：组建 / 改名 / 删除卡组（上限 20 套、每套 12 张、同名卡限 1 张），自动存在本地。</li>
+            <li><b>图鉴</b>（📚，v181）：不进对局，直接查看全部卡牌与效果说明（可切换「普通卡牌池 / 衍生卡牌池」，点卡放大查看）。</li>
             <li><b>设置</b>（⚙️，v174）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
             <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
           </ul>
@@ -277,7 +294,7 @@
           <ul>
             <li>点场上<b>已翻开</b>的卡可以放大查看，并弹出「<b>战力影响历史</b>」逐条列出它当前的战力来源（基础 / 增益台账 / 持续效果 / 区域加成）。</li>
             <li>卡面<b>左上角是费用</b>、<b>右上角是当前战力</b>：战力比基础高显示绿色、低显示红色；费用被改高后显示红字。</li>
-            <li>「图鉴」（对局中顶栏）可查看全部卡牌与说明；手牌<b>右键</b>也能直接放大查看。</li>
+            <li>「图鉴」（主页面「📚 图鉴」或对局中顶栏）可查看全部卡牌与说明；手牌<b>右键</b>也能直接放大查看。</li>
             <li>区域中间带会实时显示双方点数，领先的一方亮黄；同区谁先翻牌看的是这个实时盘面。</li>
           </ul>
         </div>
@@ -431,6 +448,8 @@
         <span class="codex-tip">点击任意卡牌可放大查看</span>
         <button class="btn btn-ghost codex-close" onclick="Game.ui.onCodex()">关闭 ✕</button>
       </div>
+      <!-- v178：第 1 层筛选=卡池切换（普通卡牌池 / 衍生卡牌池），由 card-browser.js 渲染按钮 -->
+      <div class="card-pool-bar" id="codexPool"></div>
       <div class="card-filter-bar" id="codexFilter"></div>
       <div class="codex-grid" id="codexGrid"></div>
     </div>
@@ -490,6 +509,8 @@
         <span class="codex-tip" id="pickTip">点选 1 张卡牌，点「确认加入手牌」</span>
         <button class="btn btn-ghost codex-close" onclick="Game.ui.onPickClose()">取消 ✕</button>
       </div>
+      <!-- v178：第 1 层筛选=卡池切换（普通卡牌池 / 衍生卡牌池），由 card-browser.js 渲染按钮 -->
+      <div class="card-pool-bar" id="pickPool"></div>
       <div class="card-filter-bar" id="pickFilter"></div>
       <div class="codex-grid" id="pickGrid"></div>
       <div class="pick-actions">
@@ -536,9 +557,12 @@
   <div class="corner-actions corner-left">
     <button id="btnRetreat" class="btn btn-danger" onclick="Game.ui.onRetreat()">🏳️ 认输</button>
   </div>
-  <!-- v118：认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7） -->
+  <!-- v118：认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7）；
+       v184：并排补一个「牌库 N」计数（玩家牌库张数原本不可见；「洗入卡组」会改变它，
+       该计数同时是洗入演出的锚点，见 game.js 的 updateDeckCount / playShuffleInFx） -->
   <div class="corner-actions corner-center" id="handCountBox">
     <span class="hand-count-chip" id="handCountVal">0/7</span>
+    <span class="hand-count-chip deck-count-chip" id="deckCountVal">牌库 12</span>
   </div>
   <div class="corner-actions corner-right">
     <button id="btnPass" class="btn btn-pass" onclick="Game.ui.onPass()">跳过回合</button>
