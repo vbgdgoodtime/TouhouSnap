@@ -24,6 +24,10 @@
         #codexMask，内含「放大查看」层 #zoomMask）；本文件只管开关、Esc 兜底与「与其它主页面
         弹窗互斥」，弹窗内容仍全部由 js/card-browser.js 渲染（v181 起卡池内按
         「费用↑ → 战力↑ → 卡名字典序」排序）。
+    10) v187：特殊牌池弹窗（#pileMask，摧毁池 / 弃牌池 / 放逐池）**只在对局内由侧栏打开**，
+        本文件不渲染它的内容，只在 show() / hide()（回主页面、进卡组页 / 开发调试）时调用
+        closePiles() 把它收起来——body.in-deck 不会隐藏 .modal-mask，若不收起，进卡组页时
+        它会在遮罩之上重新露出来（详见下方 closePiles 注释）。
 
    按钮：
      - 开始对战（#homeBtnBattle）：先弹出 #battleDeckMask 选卡组 → 确认后隐藏主页面
@@ -103,6 +107,7 @@
     closeGuide();     // v172：回到主页面时不残留新手引导弹窗
     closeSettings();  // v174：也不残留设置弹窗
     closeCodex();     // v181：也不残留图鉴弹窗（含其中的放大查看层）
+    closePiles();     // v187：也不残留特殊牌池弹窗（该弹窗只在对局内可用）
     syncSettingsSub(); // v174：副标题始终显示当前 AI 强度（可能被别处改过）
   }
 
@@ -115,6 +120,7 @@
     closeGuide();     // v172：离开主页面时一并关闭新手引导
     closeSettings();  // v174：一并关闭设置弹窗
     closeCodex();     // v181：一并关闭图鉴弹窗（进对局 / 进卡组页 / 进开发调试时都不残留）
+    closePiles();     // v187：一并关闭特殊牌池弹窗（否则进卡组页时它会从遮罩里重新露出来）
   }
 
   /* ---------- v137：出战卡组选择 ---------- */
@@ -441,6 +447,21 @@
     if (z) z.classList.add('hidden');
     var pp = $('powerPanel');
     if (pp) pp.classList.add('hidden');
+  }
+
+  /* ---------- v187：收起特殊牌池弹窗（#pileMask，只在对局内可用） ----------
+     本文件不渲染牌池内容（全部由 js/game.js 的 renderPilePanel 负责），这里只在
+     「回主页面 / 离开主页面（进卡组页、开发调试等）」时把它收起来：
+       · body.in-home 会隐藏 .modal-mask，但 **body.in-deck 不会**——
+         若不在离开对局时收起，之前打开过的牌池弹窗会在卡组设置页上重新露出来；
+       · 与 closeCodex 同款：优先调用 game.js 的关闭入口，取不到时直接兜底加 .hidden。 */
+  function closePiles() {
+    var api = window.Game && window.Game.ui;
+    if (api && typeof api.closePiles === 'function') {
+      try { api.closePiles(); } catch (e) { /* 忽略：下面仍会兜底收起遮罩 */ }
+    }
+    var m = $('pileMask');
+    if (m) m.classList.add('hidden');
   }
 
   /* ---------- 后续页面入口 ---------- */

@@ -772,7 +772,10 @@ function aiPlanMoves(meta) {
   const m0 = mdBuild();
   const affordable = pl.hand
     .map((c) => ({ card: c, cost: cardCost(c) }))
-    .filter((o) => o.cost <= pl.energyLeft);
+    // v196：卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）——与玩家路径同一个校验收口
+    //   （`js/game.js` 的 playReqCheck）：AI 自己场上已翻开的石块 < 4 张时，这张牌不进候选，
+    //   免得计划把能量预算花在打不出来的牌上（执行前还会再复核一次，见 aiThinkScoreEngine）。
+    .filter((o) => o.cost <= pl.energyLeft && playReqCheck('a', o.card).ok);
   const baseScore = mdEvaluate(m0, meta, true);
   if (!affordable.length) return { plays: [], score: baseScore, model: m0, baseScore };
   return meta.beam ? aiBeamPlan(meta, m0, affordable) : aiGreedyPlan(meta, m0, affordable);
@@ -815,6 +818,8 @@ function aiReasonText(card, locIdx) {
   if (isSpell(card)) parts.push('法术（揭示后消散）');
   parts.push(AI_KEY_TIP[def.k] || '有特殊效果');
   if (def.occ > 1) parts.push(`大体积占 ${def.occ} 格`);
+  // v196：卡级放置条件（`playReq`，现仅「大鲶鱼」）——避免把这张牌说成“纯战力（无效果）”
+  if (def.playReq) parts.push(`放置条件：需己方场上 ≥${def.playReq.n || 1} 张已翻开的「${tokenNameLabel(def.playReq.tk)}」`);
   if (def0 && def0.inv) parts.push('反转区：压低点数');
   if (def0 && def0.purge) parts.push('反应炉：小心回合末摧毁最低牌');
   if (def0 && def0.fill) parts.push('该区放满有额外加成');
@@ -877,7 +882,7 @@ function aiThinkLegacy(meta) {
   // 贪心循环：把本方剩余能量花完为止（v145：读 players.a 独立能量）
   while (true) {
     const rem = pl.energyLeft;
-    const affordable = pl.hand.filter((c) => cardCost(c) <= rem);
+    const affordable = pl.hand.filter((c) => cardCost(c) <= rem && playReqCheck('a', c).ok); // v196：放置条件
     if (affordable.length === 0) break;
     const cands = [];
     for (const card of affordable) {
@@ -1004,7 +1009,8 @@ function aiThinkScoreEngine(meta) {
   for (const p of plan.plays) {
     const zone = pl.zones[p.loc];
     // 防御：执行前再校验一次合法性（模型与真实盘面理论上一致，异常时跳过而不是硬塞）
-    if (!locOpen(p.loc) || sideRoom('a', p.loc) < occOf(p.card) || pl.hand.indexOf(p.card) < 0) continue;
+    // v196：加上卡级放置条件 `playReq`（现仅「大鲶鱼」）的复核——计划阶段已过滤，这里再兜一层
+    if (!locOpen(p.loc) || sideRoom('a', p.loc) < occOf(p.card) || pl.hand.indexOf(p.card) < 0 || !playReqCheck('a', p.card).ok) continue;
     p.card.side = 'a';
     zone.push(p.card);
     enqueueField(p.card);                       // 暗出：进入场上放置顺序队列（v55）

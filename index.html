@@ -375,6 +375,29 @@
     </section>
 
     <aside class="side" id="sidePanel">
+      <!-- v187：特殊牌池入口 —— 位置＝**地形区域的下方、对手信息的上方**：它是侧栏
+           #sidePanel 的第一个区块（桌面端侧栏在场地右侧；≤900px 时侧栏整体排到场地
+           下方，两种布局下都落在“地形下方、对手信息上方”）。
+           两个按钮分别打开**己方 / 对手**的特殊牌池弹窗 #pileMask（摧毁池 / 弃牌池 /
+           放逐池三个页签）；按钮上的数字＝该方三个池的合计张数，由 game.js 的
+           renderPiles() 刷新（分项写在按钮 title 里，如「摧毁池 2 · 弃牌池 0 · 放逐池 1」）。
+           数据与口径见 js/game.js 的 PILE_KINDS / pushToPile / recordDestroy / recordSpellExile
+           段与 docs/现有机制.md §6「特殊牌池」条。 -->
+      <section class="pile-card" id="pileCard">
+        <div class="side-title">特殊牌池</div>
+        <div class="pile-btns">
+          <button type="button" class="btn btn-ghost pile-btn" id="btnPileMine" onclick="Game.ui.onPiles('p')">
+            <span class="pb-ico">🃏</span>
+            <span class="pb-txt">己方特殊牌池</span>
+            <span class="pb-count" id="pileCountP">0</span>
+          </button>
+          <button type="button" class="btn btn-ghost pile-btn" id="btnPileOpp" onclick="Game.ui.onPiles('a')">
+            <span class="pb-ico">🃏</span>
+            <span class="pb-txt">对手特殊牌池</span>
+            <span class="pb-count" id="pileCountA">0</span>
+          </button>
+        </div>
+      </section>
       <div class="opponent">
         <div class="side-title">对手（AI）</div>
         <div class="avatar-row">
@@ -471,6 +494,25 @@
         <div class="ai-spy-h">牌库 <span id="aiSpyDeckCount">0</span> 张 <span class="ai-spy-note">（左＝下一张将抽到）</span></div>
         <div class="ai-spy-grid" id="aiSpyDeck"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- v187：特殊牌池弹窗（摧毁池 / 弃牌池 / 放逐池）——由侧栏「特殊牌池」区块的两个按钮
+       （#btnPileMine 己方 / #btnPileOpp 对手）打开：上方三个切换按钮（页签与张数由
+       game.js 的 buildPileTabs 从 PILE_KINDS 渲染，标签唯一数据源在 game.js），
+       下方按**入池顺序（旧 → 新）**用卡面网格列出该方该池里的牌（每张卡下方一行小字给出
+       入池序号与入池回合，悬停显示来源 / 区域 / 入池时战力，点卡复用放大查看）。
+       关闭途径＝「关闭 ✕」、点遮罩空白、Esc。 -->
+  <div class="modal-mask hidden" id="pileMask">
+    <div class="modal codex-modal pile-modal">
+      <div class="codex-head">
+        <h2 id="pileTitle">己方特殊牌池 · 摧毁池</h2>
+        <span class="codex-count" id="pileCount">0 张</span>
+        <span class="codex-tip" id="pileTip">按入池顺序（旧 → 新）显示</span>
+        <button class="btn btn-ghost codex-close" onclick="Game.ui.closePiles()">关闭 ✕</button>
+      </div>
+      <div class="card-filter-bar pile-tabs" id="pileTabs"></div>
+      <div class="codex-grid pile-grid" id="pileGrid"></div>
     </div>
   </div>
 

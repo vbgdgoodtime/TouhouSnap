@@ -78,7 +78,7 @@
   function allPoolDefs() {
     var POOL = (window.DS_CARDS && window.DS_CARDS.POOL) || {};
     var out = [];
-    // v185：遍历实际存在的费用档（含 7 费档「哆来咪」）——不再写死 0~6
+    // v185：遍历实际存在的费用档（含 7 费档「哆来咪」、v194 的 8 费档「纯狐」）——不再写死 0~6
     Object.keys(POOL)
       .map(Number)
       .filter(function (c) { return isFinite(c); })
@@ -114,7 +114,7 @@
     var costs = f ? f.costs : null;
     var min = f ? f.min : null;
     return sortDefsList(allPoolDefs()).filter(function (d) {
-      if (min != null) return d.c >= min; // v185：「6 费+」= 6 费及以上（含 7 费「哆来咪」）
+      if (min != null) return d.c >= min; // v185：「6 费+」= 6 费及以上（含 7 费「哆来咪」、v194 的 8 费「纯狐」）
       return !costs || costs.indexOf(d.c) >= 0;
     });
   }

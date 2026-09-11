@@ -26,6 +26,9 @@ const GRADS = {
   // 手牌/场上/图鉴/卡组页/放大视图的卡面会整体透明（v185 修）。
   // 配色＝梦之世界的深紫罗兰 → 淡紫（与 4 费档的紫 #5b3a94→#c79bff 区分开）。
   7: 'linear-gradient(150deg,#3a2565,#c9a6ff)',
+  // v194：**8 费档**（「纯狐」）——同样必须在这里补一条底色（口径同上面的 7 费档）。
+  // 配色＝月夜的深靛蓝 → 冷银白（与 1 费档的蓝 #2e5f96→#7cc0ff 区分开：更深、更冷、偏银）。
+  8: 'linear-gradient(150deg,#1b2140,#d7e0ff)',
 };
 const BACK_GRAD = 'linear-gradient(160deg,#2b314a,#151929)';
 
@@ -94,9 +97,23 @@ function cardPower(card) { return isSpell(card) ? 0 : card.def.p + card.buff; }
 // 都随之结束，重新开局卡实例重建故自然失效。`def.c` 始终是**印刷费用/基础费用**，不被改写
 // （区域「雾之湖」的 cb 费用加成、卡组排序、图鉴与开发者「指定卡牌」都按印刷费用判定）。
 // 现仅桑尼米尔克 `k:'costUp'` 使用（对方手牌随机一张 +1 费；上限 6 费的卡不可再涨）。
+// ---- v194：费用**随摧毁递减**（卡级持续机制 `costDown`，现仅 8 费「纯狐」）----
+// `costDown: N` = **本场战斗中双方每有一张牌被摧毁**，此牌的能量消耗 −N（下限 **0** 费，用户口径）。
+//   ① 计数来源＝**摧毁池**（v187）：只算**真正离场的那次摧毁**（`dw`/`dwh`/`dwb`/地形 `purge`
+//      把牌实际移出场上，各计 1 张）＝**双方摧毁池张数之和**（`destroyCount()` 实时读取）；
+//      **摧毁失败不计**（`phx` 凤凰重生 / `surv` 防摧毁 / `ind` 自身不可摧毁 / 地形 `prot`·蕾蒂），
+//      **其它离场方式也不计**（弃牌 `discard`、法术消散、终局离场 `leave`、撤回手牌、移动、换边）。
+//   ② **实时动态**：读的是当前合计，因此纯狐**还没抽到手之前**双方被摧毁的牌也一并计入。
+//   ③ 减费**不写进** `card.costMod`、也**不改** `def.c`（印刷费用恒为 8：图鉴 / 卡组页 / 费用档筛选
+//      一律按 8 费），只在 `cardCost` 里算出来 ⇒ 手牌费用角标变绿（`.cost-orb.down`）、
+//      放大视图写「本场战斗费用修正 −N」——与 v169 加费共用同一套显示逻辑。
+//   ④ 与 `costUp` 叠加：`cardCost = max(0, def.c + costMod − costDown × 摧毁数)`。
+//   ⑤ 非“摧毁”/非增减/非放置：不触发 surv/phx/prot/ind、不动区域字段与格位、不进 powerLog/fieldQueue。
 function cardCost(card) {
   if (!card) return 0;
-  return card.def.c + (card.costMod || 0);
+  const base = card.def.c + (card.costMod || 0);
+  const down = (card.def.costDown || 0) * destroyCount(); // v194
+  return down > 0 ? Math.max(0, base - down) : base;
 }
 /** 费用修正的记录（inst=实例，srcCard=来源卡；tag 可选=自定义来源名），与战力影响历史同一思路 */
 function addCostLog(card, d, srcCard, tag) {
@@ -446,6 +463,467 @@ function playShuffleInFx(side, n, cardName, srcName) {
   setTimeout(() => { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1700);
 }
 
+/* ==================== v187：特殊牌池（摧毁池 / 弃牌池 / 放逐池；v189 起弃牌池有实际入池来源）====================
+   口径：**每局、每一方各自持有三个独立的牌池**（`state.players[side]` 上三条队列），
+   都是**先进先出**的队列——牌按“入池先后”push 到队尾，界面按同一顺序（旧 → 新）展示。
+   入池的是**牌本体**（同一个卡实例，不做复制、不改 def），并在实例上记一份入池元数据。
+
+   三个池各自的入池条件：
+     · **摧毁池** `destroyPile`：**真正离场的那次摧毁**——`dw`（最弱）/`dwh`（最强）/
+       `dwb`（双方最弱随机一张）/ 地形 `purge`（回合末最低，并列全删）把牌**实际移出场上**时，
+       把该牌本体放进**它归属方**（`card.side`，换边后按新归属）的摧毁池。
+       ⚠️ **不算摧毁、因此不入池**的情形：`phx` 凤凰重生（改回手 +N）、`surv` 防摧毁
+       （改永久 −N、卡不离场）、`ind` 自身不可摧毁（判定失败、什么都不发生）、
+       地形 `prot`／「蕾蒂」的区域免摧毁（整条拦下）——这些都属于“摧毁失败”。
+       法术（`spell`）永远不会成为摧毁目标（`dw/dwh/dwb/purge` 均排除它），故不会进摧毁池。
+       其他离场方式也都不算：`leave` 终局离场、法术消散、撤回手牌、移动（`mv`/`fly`/`shift`/
+       `roam`/`gust`）、换边（`switch`/`gift`）。
+     · **弃牌池** `discardPile`：**被弃掉的牌**（v187 建占位队列，**v189 起弃牌机制实装**）——
+       「弃牌」= 把牌从**手牌**移出（`discard` 效果键 / `discardFromHand` 收口），与摧毁的分工是
+       **区域不同、互不重叠**：摧毁只作用于场上（→ 摧毁池），弃牌只作用于手牌（→ 弃牌池）；
+       口径见下方 v189「弃牌」段。手牌不在场上，故入池元数据的 `pileLoc` 记 null、
+       `pilePower` 记该卡被弃时的战力（基础 + 永久 buff；法术记 0）。
+     · **放逐池** `exilePile`：**用过的法术**——法术在揭示效果结算完之后**自行消散**
+       （`vanishSpell`，口径见 v170「法术」段；这不属于被摧毁）时，把该法术本体放进
+       其归属方的放逐池。
+
+   入池元数据（直接挂在卡实例上；三个池共用同一套字段名）：
+     · `pileKind`  = 'destroy' | 'discard' | 'exile'
+     · `pileTurn`  = 入池时的回合数
+     · `pileBy`    = 来源名（卡名 / 地形名；法术放逐记 '法术消散'）
+     · `pileLoc`   = 入池时所在区域的显示名（**弃牌**的牌本来就在手牌、不在场上 → 记 null）
+     · `pilePower` = 入池时的**实时战力**（`cardPowerIn`；法术记 0；**弃牌**记手牌口径的
+       `cardPower`＝基础 + 永久 buff，手牌没有区域/持续加成）
+   非“摧毁”/非“增减”类机制：入池**不**触发 `surv`/`phx`/`prot`/`ind`、不动区域字段、
+   不改战力台账；牌本体已不在场上（zone 里已移除、`fieldQueue` 已出队），因此不影响任何结算。 */
+const PILE_KINDS = [
+  { key: 'destroy', label: '摧毁池', tip: '被摧毁的牌（真正离场的那次摧毁）按入池先后存放' },
+  { key: 'discard', label: '弃牌池', tip: '被弃掉的牌（弃牌效果把牌从手牌移出）按入池先后存放，v189 起有实际入池来源' },
+  { key: 'exile',   label: '放逐池', tip: '用过的法术（揭示结算完后自行消散）按入池先后存放' },
+];
+/** 某个池键对应的 state 字段名（三个池一一对应） */
+const PILE_FIELDS = { destroy: 'destroyPile', discard: 'discardPile', exile: 'exilePile' };
+function pileKindDef(kind) {
+  for (const k of PILE_KINDS) if (k.key === kind) return k;
+  return PILE_KINDS[0];
+}
+/** 取某方某个池的队列数组（始终返回数组；字段缺失时就地补一个，防御旧状态对象） */
+function pileOf(side, kind) {
+  const pl = state.players[side];
+  if (!pl) return [];
+  const field = PILE_FIELDS[kind] || PILE_FIELDS.destroy;
+  if (!Array.isArray(pl[field])) pl[field] = [];
+  return pl[field];
+}
+/** 某方三个池的合计张数（侧栏按钮的计数徽标用） */
+function pileTotalOf(side) {
+  let n = 0;
+  for (const k of PILE_KINDS) n += pileOf(side, k.key).length;
+  return n;
+}
+/** v194：**本场战斗中双方被摧毁的牌数** ＝ 双方摧毁池张数之和（实时读取，随入池单调增长）。
+    唯一使用者＝`cardCost` 的「费用随摧毁递减」（卡级机制 `costDown`，现仅 8 费「纯狐」）——
+    只算真正离场的那次摧毁（`dw`/`dwh`/`dwb`/地形 `purge`），摧毁失败与其它离场方式都不在池里，
+    因此“摧毁池合计”天然就是这份口径的唯一数据源。 */
+function destroyCount() {
+  return pileOf('p', 'destroy').length + pileOf('a', 'destroy').length;
+}
+/** 把**牌本体**放进某方某个池的队尾；meta = { turn, by, loc, power }（缺省取当前回合）。
+    返回 { pile, n, kind }，供调用方记日志/演出（不进 zone、不进 fieldQueue、不改任何战力）。 */
+function pushToPile(side, kind, card, meta) {
+  if (!card || !card.def) return null;
+  const m = meta || {};
+  const pile = pileOf(side, kind);
+  card.pileKind = kind;
+  card.pileTurn = (m.turn != null) ? m.turn : state.turn;
+  card.pileBy = m.by || null;
+  card.pileLoc = (m.loc != null) ? m.loc : null;
+  card.pilePower = (m.power != null) ? m.power : null;
+  pile.push(card);
+  return { pile, n: pile.length, kind };
+}
+/** v187：摧毁入池收口 —— **必须在把该牌移出区域之前调用**（此刻才读得到它“被摧毁时”的
+    区域与实时战力）；写入元数据 + 入池 + 记一条日志。`srcName` = 来源（卡名 / 地形名）。 */
+function recordDestroy(card, locIdx, srcName) {
+  if (!card || !card.def) return null;
+  const locName = (locIdx >= 0 && state.locs[locIdx]) ? state.locs[locIdx].def.n : null;
+  const power = (locIdx >= 0) ? cardPowerIn(locIdx, card) : cardPower(card);
+  const r = pushToPile(card.side, 'destroy', card, {
+    turn: state.turn,
+    by: srcName || null,
+    loc: locName,
+    power,
+  });
+  if (!r) return null;
+  log('danger', `⚰️ 「${card.def.n}」被摧毁 → 进入${card.side === 'p' ? '你' : '对手'}的摧毁池（第 ${state.turn} 回合 · 来源：${srcName || '效果'} · ${locName || '未知区域'} · 当时战力 ${power}；现 ${r.n} 张）。`);
+  renderPiles(); // 侧栏计数即时刷新（牌池弹窗若开着，列表也一并重渲染）
+  return r;
+}
+/** v187：法术放逐入池（由 vanishSpell 在消散成功之后调用；法术无战力，`pilePower` 记 0）。 */
+function recordSpellExile(card, locName) {
+  if (!card || !card.def) return null;
+  const r = pushToPile(card.side, 'exile', card, {
+    turn: state.turn,
+    by: '法术消散',
+    loc: locName || null,
+    power: 0,
+  });
+  if (!r) return null;
+  log('sys', `🗝️ 「${card.def.n}」用完消散 → 进入${card.side === 'p' ? '你' : '对手'}的放逐池（第 ${state.turn} 回合 · ${locName || '未知区域'}；现 ${r.n} 张）。`);
+  renderPiles();
+  return r;
+}
+
+/* ==================== v189：弃牌（`discard` 效果键）与弃牌演出 ====================
+   （取牌方式 `pick`：v190 加 `'right'`/`'left'`，**v191 再加 `'maxCost'`＝取印刷费用最高、并列随机**）
+   一句话口径：**弃牌 = 把牌从「手牌」移出**，放进该牌**归属方**的**弃牌池**（v187 的
+   `discardPile`：先进先出、入池的是牌本体 + 入池元数据）。
+
+   与「摧毁」的分工是**区域不同、互不重叠**（用户口径）：
+     · **摧毁**（`dw`/`dwh`/`dwb`/地形 `purge`）只作用于**场上**的牌 → 进**摧毁池**；
+     · **弃牌**只作用于**手牌**（隐藏区）→ 进**弃牌池**。
+   因此弃牌**不是**“摧毁”：不触发 `surv`（防摧毁）/ `phx`（凤凰重生）/ `prot`（区域免摧毁）/
+   `ind`（自身不可摧毁）等任何“被摧毁时”的替代与防护，也不进 `powerLog`、不改战力
+   （牌只是从手牌消失，没有任何战力变化）；手牌本就不在场上，故也不动区域字段、格位
+   （`sideUsed`/`sideRoom`）、放满加成与场上放置顺序队列 `fieldQueue`。
+   被弃的牌**带着自己的一切**进池：`def` 不被改写，永久增益台账 `powerLog`、本场战斗的
+   费用修正 `costMod`（如被桑尼米尔克加过费）都随这一个实例保留，可在「弃牌池」弹窗里查看、
+   放大（口径与摧毁池/放逐池一致）。
+
+   数据写法（`data/cards.js` 的 `discard=` 字段说明）：
+     discard: {
+       n: 1,            // 张数，缺省 1；写 'all' = 命中多少弃多少
+       to: 'own',       // 'own'（缺省）＝弃**自己**手牌；'opp'（也接受 'a' / 'enemy'）＝弃**对方**手牌
+       pick: 'random',  // v190：取牌位置/取牌方式——'random'（缺省）候选里随机 / 'right' 从**最右侧**起 /
+                        // 'left' 从**最左侧**起 / **'maxCost'（v191）取印刷费用 def.c 最高的那些（并列随机）**
+       card: '琪露诺',   // 可选：按**卡名**筛选（字符串或数组；也接受 SPECIAL 键名，如 'stone'）
+       cost: 3,         // 可选：按**印刷费用 def.c** 筛选（数字＝恰好该费用；或 { min, max } 区间，含端点）
+       give: { card: 'stone', n: 1, powerFromCost: true },
+                        // **v198 可选子句**：弃牌**真的发生之后**，每弃掉 1 张就给**施放方自己**
+                        // 加入 give.n（缺省 1）张 give.card（SPECIAL 键名）的**新卡实例**到**手牌**；
+                        // powerFromCost: true ⇒ 战力 ＝ **那一张被弃牌的印刷费用 def.c**（不是 cardCost）。
+                        // 见下方 v198「`discard.give`」段。
+     }
+   口径要点：
+     ① **目标方**由 `to` 决定，归属对双方一视同仁（AI 抽到带本键的卡也会弃玩家的手牌）；
+     ② **候选筛选**：`card` 命中卡名、`cost` 命中**印刷费用**（不是 `cardCost`——与区域 `cb`
+        费用加成、`og.cost`、图鉴分档同口径：被加费只改实际能量消耗，不改变费用档位）；
+        两个筛选都**不写**时＝该方整副手牌都是候选。候选**保持手牌顺序**（左 → 右＝数组顺序），
+        故位置筛选（`pick`）读到的就是玩家看到的手牌左右位置；
+     ③ **张数 + 取牌方式（`n` + v190 新增、**v191 扩展**的 `pick`）**：命中候选里取 n 张（`n: 'all'` 则命中即全弃）——
+        `pick: 'random'`（缺省）＝候选里**随机**取；`pick: 'right'`＝从**最右侧**起取（即手牌最右那张）；
+        `pick: 'left'`＝从**最左侧**起取；`pick: 'maxCost'`（**v191**）＝取**印刷费用 `def.c` 最高**的那些，
+        并列最高的多张之间**随机**（口径同 dw/dwh/dwb 的“并列里随机挑一张”）；候选不足时弃掉手上有的那些
+        （部分弃，日志写明）；一张都没有则**无事发生**、只记一条日志；`n: 'all'` 时 `pick` 不起作用（全都要）；
+     ④ **公开**：弃牌是**双方可见**的——不是只写日志：日志点名被弃的牌 + 中央弹出**被弃那张牌的
+        完整卡面**并播**斜切两半**演出（见 `playDiscardFx`，约 1.6s，任何一种归属组合都一样可见）；
+        被弃的牌此后会出现在该方「弃牌池」里（侧栏徽标 + 弹窗页签），故对玩家而言是**明牌**；
+     ⑤ **不进手牌上限的账**：手牌上限 7 张只约束“加入/抽牌”，弃牌是**减少**手牌，与本机制无关；
+        被弃的牌也不会回到任何地方（不返场、不返牌库）；
+     ⑥ **与「重置暗牌」无冲突**：`state.playHandOrder`（回合初手牌顺序）里若含已被弃的牌 id，
+        `undoPlacedCards` 重建手牌时按 id 取不到该卡、自然跳过（安全，无需额外处理）；
+     ⑦ **v198 可选子句 `give`**：弃牌**真的发生之后**，按被弃掉的那张牌的**印刷费用**给**施放方
+        自己**加入手牌衍生物（现由「姬虫百百世」使用 → 1 张战力＝该卡费用的「石块」）。完整口径
+        见下方 v198「`discard.give`」段；弃牌落空时本条**完全不结算**。 */
+const DISCARD_ANIM_MS = 1600; // 弃牌演出总时长（v190：2.0s → 1.6s——切得更晚、消散更快）；与 style.css 的 discard* 关键帧时长对齐，改时长要两边一起改
+
+/** v189：`discard.card` 的筛选归一化 —— 卡名（字符串/数组）或 SPECIAL 键名 → **卡名数组**。
+    键名先经 `TOKENS` 解析成该 token 的卡名（如 'stone' → '石块'），解析不到就按字面比较；
+    ⚠️ 同名卡（如法术「祖母绿巨石」与占位 token「祖母绿巨石」）会一起命中。返回 null = 不筛选。 */
+function discardNameFilter(spec) {
+  if (!spec || spec.card == null) return null;
+  const arr = Array.isArray(spec.card) ? spec.card : [spec.card];
+  const names = [];
+  for (const k of arr) {
+    if (k == null) continue;
+    const tk = TOKENS[k];
+    names.push(tk && tk.n ? tk.n : String(k));
+  }
+  return names.length ? names : null;
+}
+
+/** v189：`discard.cost` 的区间口径 —— 数字＝恰好该印刷费用；`{ min, max }`＝含端点的区间
+    （缺省端点为无界）。返回 null = 不筛选。 */
+function discardCostRange(spec) {
+  if (!spec || spec.cost == null) return null;
+  const c = spec.cost;
+  if (typeof c === 'number') return { min: c, max: c };
+  const min = (typeof c.min === 'number') ? c.min : -Infinity;
+  const max = (typeof c.max === 'number') ? c.max : Infinity;
+  return { min, max };
+}
+
+/** v189：筛选条件的可读文案（日志/开发指令用），如「卡名 琪露诺 · 印刷费用 ≥5」；无筛选返回 ''。 */
+function discardSpecText(spec) {
+  const bits = [];
+  const names = discardNameFilter(spec);
+  if (names) bits.push(`卡名 ${names.join(' / ')}`);
+  const range = discardCostRange(spec);
+  if (range) {
+    if (range.min === range.max) bits.push(`印刷费用 ${range.min}`);
+    else if (range.max === Infinity) bits.push(`印刷费用 ≥${range.min}`);
+    else if (range.min === -Infinity) bits.push(`印刷费用 ≤${range.max}`);
+    else bits.push(`印刷费用 ${range.min}~${range.max}`);
+  }
+  const n = spec && spec.n;
+  bits.push(n === 'all' ? '数量 全部' : `数量 ${Math.max(1, Math.floor((spec && spec.n) || 1))}`);
+  // v190：取牌位置（'random' 是缺省口径、不写进文案，避免日志噪音）；v191：'maxCost'＝印刷费用最高
+  if (spec && (spec.pick === 'right' || spec.pick === 'left' || spec.pick === 'maxCost')) {
+    bits.push(spec.pick === 'right' ? '取牌 最右侧'
+      : spec.pick === 'left' ? '取牌 最左侧'
+      : '取牌 印刷费用最高');
+  }
+  return bits.join(' · ');
+}
+
+/** v189：某方手牌里符合 `discard` 筛选条件的候选（按手牌原顺序）。
+    ⚠️ 费用筛选走**印刷费用 `def.c`**（与区域 `cb` 加成、`og.cost`、图鉴与卡组页分档同口径），
+    不是 `cardCost`；`un` 占位卡（隙间）绝不会在手牌，仍作防御性排除。 */
+function discardCandidates(side, spec) {
+  const pl = state.players[side];
+  if (!pl) return [];
+  const names = discardNameFilter(spec);
+  const range = discardCostRange(spec);
+  return pl.hand.filter((c) => {
+    if (!c || !c.def || c.def.un) return false;
+    if (names && names.indexOf(c.def.n) < 0) return false;
+    if (range && (c.def.c < range.min || c.def.c > range.max)) return false;
+    return true;
+  });
+}
+
+/** v189：**弃牌核心** —— 把 `side` 方手牌里符合 `spec` 的牌移出，并放进该方（＝牌的归属方，
+    换边 `switch`/`gift` 后的新归属）的**弃牌池**，同时播双方可见的弃牌演出。
+    返回 { ok, side, cards, cands, want, by, why }：`ok=false` 时 `cards` 为空、`why` 说明原因。
+    ⚠️ 调用方负责记日志（本函数只做数据 + 演出 + 入池；入池沿用 `pushToPile` 的收口）。
+    v197：新增第 5 个参数 **`onlyCard`** —— 只允许弃**这一张卡实例**（候选先按 `spec` 过滤、
+    再收窄到该实例），供「手牌回合结束效果」`fx.handEnd` 的**自我丢弃**使用：
+    这样即便手里有**两张同名卡**，也只弃掉触发的那一张（不误伤另一张），
+    且入池元数据 / 演出 / 日志口径与既有弃牌**完全一致**（同一个收口）。 */
+function discardFromHand(side, spec, srcCard, tag, onlyCard) {
+  const sp = spec || {};
+  const pl = state.players[side];
+  if (!pl) return { ok: false, side, cards: [], cands: 0, want: 0, by: null, why: 'no-side' };
+  const all = discardCandidates(side, sp);
+  const cands = onlyCard ? all.filter((c) => c === onlyCard) : all;
+  const want = sp.n === 'all' ? cands.length : Math.max(1, Math.floor(sp.n || 1));
+  if (!cands.length) return { ok: false, side, cards: [], cands: 0, want, by: null, why: 'no-candidate' };
+  // 取牌（v190 新增 `pick` 口径；**v191 补 `'maxCost'`**）：缺省 'random'＝在候选里**随机**取
+  // （沿用全局 Math.random，可被冒烟测试替换成种子化 PRNG）；'right' / 'left'＝按**手牌左右位置**取
+  // ——候选数组已保持手牌顺序（左 → 右），故最右＝队尾、最左＝队首；'maxCost'（**v191**）＝取
+  // **印刷费用 `def.c` 最高**的那些，**并列最高时随机**（口径同 dw/dwh/dwb 的“并列里随机挑一张”）；
+  // `n: 'all'` 时位置与费用排序都无意义（全都要）。
+  const pick = (sp.pick === 'right' || sp.pick === 'left' || sp.pick === 'maxCost') ? sp.pick : 'random';
+  let picked;
+  if (pick === 'right') picked = cands.slice(Math.max(0, cands.length - want));
+  else if (pick === 'left') picked = cands.slice(0, Math.min(want, cands.length));
+  else if (pick === 'maxCost') {
+    // v191：先 shuffle 再按**印刷费用**降序稳定排序 —— sort 稳定 + 先洗牌 ⇒ 同费用的相对顺序随机，
+    // 因此「并列最高」天然是“在其中随机挑”，与 dw/dwh/dwb 的口径一致；只比较 def.c（不走 cardCost，
+    // 与 discard.cost 筛选、区域 cb、图鉴分档同口径：加费只改实际能量消耗、不改贵贱排序）。
+    picked = shuffle(cands.slice())
+      .sort((a, b) => b.def.c - a.def.c)
+      .slice(0, Math.min(want, cands.length));
+  }
+  else picked = shuffle(cands.slice()).slice(0, Math.min(want, cands.length));
+  const by = (srcCard && srcCard.def && srcCard.def.n) || tag || '弃牌';
+  const cards = [];
+  for (const c of picked) {
+    const i = pl.hand.indexOf(c);
+    if (i < 0) continue;
+    pl.hand.splice(i, 1);
+    // 入池元数据（三个池共用字段名）：手牌不在场上 → pileLoc 记 null；
+    // pilePower 记**被弃那一刻的战力**（基础 + 永久 buff；法术恒为 0；手牌没有区域/持续加成）
+    pushToPile(side, 'discard', c, { turn: state.turn, by, loc: null, power: cardPower(c) });
+    cards.push(c);
+  }
+  if (!cards.length) return { ok: false, side, cards: [], cands: cands.length, want, by, why: 'no-candidate' };
+  // 玩家自己的手牌被弃 → 立刻重渲染手牌（并顺带复位选中项，避免 selected 指到别的牌上）
+  if (side === 'p') {
+    state.selected = -1;
+    renderHand();
+  }
+  playDiscardFx(cards, side, by); // 双方可见：弹出被弃牌的完整卡面 + 斜切两半（约 1.6s）
+  return { ok: true, side, cards, cands: cands.length, want, by, why: null };
+}
+
+/* ==================== v198：`discard.give`（弃牌后按被弃牌的印刷费用加手牌衍生物）====================
+   （首个使用者：**2 费 / 2 战力「姬虫百百世」** —— 揭示：随机丢弃自己手牌中的 1 张卡，
+     并将 1 张战力等于该卡**能量消耗（印刷费用）**的「石块」加入**自己**的手牌。）
+   一句话口径：`discard` 键的**可选子句** —— 弃牌**真的发生之后**，**每弃掉 1 张**就给**施放方自己**
+   加入 `give.n`（缺省 1）张 `give.card`（SPECIAL 键名，如 `'stone'`＝石块）的**新卡实例**到**手牌**。
+
+   口径（用户确认，v198）：
+    ① **触发前提＝弃牌成功**：`discardFromHand` 返回 `ok:false`（手牌为空 / 没有符合筛选的候选）
+       时**本条完全不结算**——既不弃牌也不加任何卡；调用方只记一条“想弃但没牌”的日志；
+    ② **战力口径**：`powerFromCost: true` ⇒ 加入的衍生物战力 ＝ **那一张被弃牌的印刷费用 `def.c`**
+       （**不是** `cardCost`）——与 `discard.cost` 筛选、`dwc` 按费用全场摧毁、`og.cost`、图鉴与卡组页
+       分档**同口径**：被桑尼米尔克加过费的牌只改实际能量消耗、**不改变**造出的衍生物战力。
+       **逐张对应**：弃掉 n 张就产生 n 组衍生物，每组按“被弃掉的那一张自己”的印刷费用算（`give.n`
+       与 `discard.n` 相互独立）；`powerFromCost` 缺省 false ＝ 用衍生物自身的印刷战力（如石块＝0）；
+    ③ **战力差额记永久增益**：走 `applyPermBuff(t, pw − tk.p, srcCard, '弃牌转化')` 收口 —— 因此
+       卡面显示“基础战力 + 绿色 +N”（口径同「赫卡提亚的分身」的快照对齐）、台账 `powerLog` 里
+       来源记**本卡**（放大视图可见）；衍生物本体仍是既有 token（如 `SPECIAL.stone`：同名、1 费、
+       `tk: 'rock'`）⇒ 照常被大鲶鱼 `playReq` 计数、照吃天子 `og` /「地精的起床」`tkBuff` 的强化；
+    ④ **进的是手牌、不是场上**：`newCard` 新实例 + `justHandAdded`（`flushHandAdd` 播“滑入”演出），
+       仍需**手动暗出**；`def` / `costMod` 都是全新的（自然为 0）、不继承任何被弃牌的修正；
+    ⑤ **手牌上限 7 张照常约束**（同 `give` 口径）：满则加不进、日志写明；本卡实际情形是“先弃 1 张、
+       再加 1 张”，故位置一定够（防御分支仅为兜底）；
+    ⑥ **加入目标恒为「施放方自己」**：与 `discard.to` 无关——即使弃的是对手的手牌，衍生物也进
+       施放方自己的手牌（现无此用法，口径先固定）；
+    ⑦ 非“摧毁”/非放置/非增减类机制：与 `surv`/`phx`/`prot`/`ind`、区域字段与格位
+       （`sideUsed`/`sideRoom`/`fill`）、`fieldQueue` 全无交互（手牌本就不在场上）；
+    ⑧ **只做数据 + 渲染**，日志由调用方（`applyEffect` 的 `case 'discard'`）负责。
+   返回 { added, want, name, powers, full, missing }；`spec.give` 缺失时返回 null（＝本子句不参与）。 */
+function discardGiveTokens(side, spec, res, srcCard) {
+  const gv = spec && spec.give;
+  if (!gv) return null;
+  const per = Math.max(1, Math.floor(gv.n || 1));
+  const tkDef = TOKENS[gv.card]; // 同 `give` 口径：只认衍生池（SPECIAL）键名
+  if (!tkDef) return { added: 0, want: 0, name: null, powers: [], full: false, missing: true };
+  const hand = state.players[side].hand;
+  const base = tkDef.p || 0;
+  const powers = [];
+  let added = 0;
+  let full = false;
+  const list = (res && res.cards) || [];
+  for (const c of list) {
+    // ②/③ 战力 = 这一张被弃牌的**印刷费用**（powerFromCost 时），差额走永久增益收口
+    const pw = gv.powerFromCost ? ((c.def && c.def.c) || 0) : base;
+    for (let i = 0; i < per; i++) {
+      if (hand.length >= 7) { full = true; break; } // ⑤ 手牌满则加不进（同 give 口径）
+      const t = newCard(tkDef);
+      t.side = side;              // ④ 归属＝施放方自己
+      t.justHandAdded = true;     // v90：加入手牌演出（渲染后播 .hand-new 滑入）
+      const diff = pw - base;
+      if (diff !== 0) applyPermBuff(t, diff, srcCard, '弃牌转化'); // ③ 记进这一份实例的永久增益
+      hand.push(t);
+      added++;
+      powers.push(pw);
+    }
+    if (full) break;
+  }
+  if (added > 0) flushHandAdd(side); // ④ 立刻渲染手牌 → 本次的“滑入”演出才看得到（同 give v180 口径）
+  return { added, want: per * list.length, name: tkDef.n, powers, full, missing: false };
+}
+
+/* 弃牌演出（v189 新增；**v190 调整节奏**：切得更晚、消散更快）：**任何一种归属组合**
+   （自己弃自己 / 自己弃对方 / 对方弃对方 / 对方弃自己）都**双方可见**——在场地中央弹出**被弃那张牌
+   的完整卡面**（复用 `cardFaceHTML` 与 `.zoom-card` 大卡尺寸，故配图 / 费用 / 战力 / 卡名 /
+   效果文案与手牌完全一致），随后**从右上到左下**斜切一刀，卡面裂成两半、两半沿对角线垂直方向
+   分离（左上那一半往左上飞、右下那一半往右下飞，带轻微旋转）并淡出，全程约 **1.6s**：
+     0 ~ 0.27s   卡面放大弹入落定
+     0.27 ~ 0.68s **停留展示**（让玩家看清是哪张牌；用户口径：切得晚一点）
+     ≈0.68s      斩击线沿对角线**从右上扫到左下**闪一刀，同时卡面在切线处裂成两半
+     0.68 ~ 1.30s 两半**快速**分离、下沉、旋转、渐隐（约 0.62s；用户口径：消散快一点）
+     1.30 ~ 1.60s 整层收尾淡出
+   实现要点：
+     ① 元素全部放 body 悬浮层（`.discard-reveal`，z-index 9510）且 `pointer-events:none`，
+        不挡操作、不受盘面重渲染影响；播前先清掉可能残留的上一次演出（连续弃牌不会叠层）；
+     ② 斜切用 **clip-path 三角**实现：切线＝右上角 → 左下角，两半分别是
+        `polygon(0 0, 100% 0, 0 100%)`（上半三角）与 `polygon(100% 0, 100% 100%, 0 100%)`
+        （下半三角），两半内部各放一份**同一张卡面的拷贝**（像素级重合），故切开后仍是同一张卡；
+        另有一张“基准整卡”在切开那一瞬由 CSS 隐去（与两半完全重合，切换不可见）；
+     ③ 斩击线的角度**按卡面实测长宽比**算出（`atan2(h, w)`，`--discard-slash-angle`），
+        因此在竖长卡面上也严格贴着右上→左下那条对角线；
+     ④ 多张同时被弃时并排展示、逐张错开 80ms（最多错开 320ms），总时长仍在 1.6s 出头；
+     ⑤ 收尾用 `setTimeout`（**不依赖** Web Animations 的 finished），保证一定清理掉。 */
+function playDiscardFx(cards, side, by) {
+  const list = (cards || []).filter((c) => c && c.def);
+  if (!list.length) return;
+  if (typeof document === 'undefined' || !document.body) return;
+  const stale = document.querySelector('.discard-reveal');
+  if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'discard-reveal';
+  // 多张并排时逐张错开 80ms；整层的时长按“最大错开量”一起延长（CSS 的 --discard-tail），
+  // 否则末张的“切开 + 消散”会被整层淡出提前掐掉
+  wrap.style.setProperty('--discard-tail', Math.min(list.length - 1, 4) * 80 + 'ms');
+
+  const tag = document.createElement('div');
+  tag.className = 'discard-reveal-tag';
+  tag.textContent = `🗑️ 弃牌 · ${side === 'p' ? '你的手牌' : '对手的手牌'}${by ? ` · ${by}` : ''}`;
+  wrap.appendChild(tag);
+
+  const inner = document.createElement('div');
+  inner.className = 'discard-reveal-inner';
+  const slashes = [];
+  list.forEach((card, i) => {
+    const def = card.def;
+    const live = cardPower(card);
+    const sign = live > def.p ? 'up' : live < def.p ? 'down' : '';
+    const liveCost = cardCost(card);
+    const costSign = liveCost > def.c ? 'up' : liveCost < def.c ? 'down' : '';
+    const faceHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign });
+    const grad = gradOf(def);
+    const box = document.createElement('div');
+    box.className = 'discard-card-wrap';
+    box.style.setProperty('--discard-stagger', Math.min(i, 4) * 80 + 'ms');
+    const mkFace = () => {
+      const f = document.createElement('div');
+      f.className = 'discard-face zoom-card hand-card';
+      f.style.setProperty('--cgrad', grad);
+      f.innerHTML = faceHTML;
+      return f;
+    };
+    box.appendChild(mkFace()); // ① 基准整卡（切开那一瞬隐去）
+    for (const half of ['a', 'b']) { // ② 斜切的两半（各含一份同样的卡面拷贝）
+      const h = document.createElement('div');
+      h.className = 'discard-half discard-half-' + half;
+      h.appendChild(mkFace());
+      box.appendChild(h);
+    }
+    // ③ 斩击线：沿“右上 → 左下”的对角线，角度按实测卡面长宽比设定
+    const layer = document.createElement('div');
+    layer.className = 'discard-slash-layer';
+    const slash = document.createElement('span');
+    slash.className = 'discard-slash';
+    layer.appendChild(slash);
+    box.appendChild(layer);
+    slashes.push({ box, slash });
+    inner.appendChild(box);
+  });
+  wrap.appendChild(inner);
+
+  const note = document.createElement('div');
+  note.className = 'discard-reveal-note';
+  const names = list.map((c) => `「${c.def.n}」`).join('');
+  note.textContent = `${names} → 移入${side === 'p' ? '你' : '对手'}的弃牌池（现 ${pileOf(side, 'discard').length} 张）`;
+  wrap.appendChild(note);
+
+  document.body.appendChild(wrap);
+  // 卡面尺寸要等入 DOM 后才量得到（弹入动画是 transform，不影响 offsetWidth/Height）
+  for (const it of slashes) {
+    const w = it.box.offsetWidth, h = it.box.offsetHeight;
+    if (w > 1 && h > 1) {
+      it.slash.style.setProperty('--discard-slash-angle', (Math.atan2(h, w) * 180 / Math.PI).toFixed(2) + 'deg');
+    }
+  }
+  // 末尾 +260ms 余量：给最后一两半的渐隐留时间（无动画能力时同样会清理干净）
+  setTimeout(() => { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }, DISCARD_ANIM_MS + 260 + Math.min(list.length, 5) * 80);
+}
+
+/** v189：弃牌的**控制台 / 开发调试探针** —— **v190 起已有卡引用本键**（「莉莉黑」：弃自己最右侧的 1 张），
+    **v191 又添「小野塚小町」**（弃自己手牌里印刷费用最高的一张）；探针仍用于验证任意口径，
+    与卡牌结算走**同一个** `discardFromHand` 收口，故流程 / 日志 / 入池 / 演出完全一致。
+    例：`Game._discard('a', { n: 1 })` / `Game._discard('p', { card: '琪露诺' })` /
+    `Game._discard('a', { cost: { min: 5 }, n: 'all' })` / `Game._discard('p', { pick: 'right' })`（弃自己最右那张）/
+    `Game._discard('p', { pick: 'maxCost' })`（弃自己手里印刷费用最高的那张，v191）。 */
+function devDiscard(sideKey, spec) {
+  const side = sideKey === 'a' ? 'a' : 'p';
+  const who = side === 'p' ? '你' : '对手';
+  const r = discardFromHand(side, spec || {}, null, '开发者指令');
+  const cond = spec ? `（${discardSpecText(spec)}）` : '';
+  if (!r.ok) {
+    log('sys', `🗑️ 开发者指令：想弃掉${who}手牌里的牌${cond}，但没有符合条件的牌（现手牌 ${state.players[side].hand.length} 张）。`);
+  } else {
+    log('sys', `🗑️ 开发者指令：弃掉${who}手牌里的 ${r.cards.length} 张${r.cards.map((c) => `「${c.def.n}」`).join('')} → 移入${who}的弃牌池（现 ${state.players[side].discardPile.length} 张）。`);
+  }
+  renderAll();
+  return r;
+}
+
 // 区域-阵营加成：区域 aff 给“所属该阵营（card.def.g）”的卡牌加固定威力。
 // 属于常驻实时加成：该卡在此区域的任何实时读取（卡面/总数/摧毁/落后判定/图鉴放大）都计入。
 function locRoleBonus(locIdx, card) {
@@ -544,8 +1022,14 @@ const state = {
   players: {
     // v145：能量分边（energyTotal / energyLeft 各自独立；回合开始写入相同基数，之后可单独改）
     // v169：energyGain = 本回合由「额外能量」机制多出来的点数（HUD 显示「N+1」，回合结束归零）
-    p: { key: 'p', name: '你', zones: [[], [], []], deck: [], hand: [], energyTotal: 1, energyLeft: 1, energyGain: 0 },
-    a: { key: 'a', name: '对手', zones: [[], [], []], deck: [], hand: [], energyTotal: 1, energyLeft: 1, energyGain: 0 },
+    // v187：特殊牌池（三方各自独立的三条队列，均为“先进先出”的入池顺序）——
+    //   destroyPile 摧毁池：真正离场的那次摧毁（dw/dwh/dwb/purge）把**牌本体**入池；
+    //   discardPile 弃牌池：**被弃掉的牌**（v189 起实装：弃牌 = 把牌从**手牌**移出，
+    //     与摧毁的分工是区域不同——摧毁只作用于场上、弃牌只作用于手牌）；
+    //   exilePile   放逐池：用过的法术（揭示结算完后自行消散 vanishSpell）入池。
+    // 口径见本文件 PILE_KINDS / pushToPile 段注释与 docs/现有机制.md §6「特殊牌池」条。
+    p: { key: 'p', name: '你', zones: [[], [], []], deck: [], hand: [], energyTotal: 1, energyLeft: 1, energyGain: 0, destroyPile: [], discardPile: [], exilePile: [] },
+    a: { key: 'a', name: '对手', zones: [[], [], []], deck: [], hand: [], energyTotal: 1, energyLeft: 1, energyGain: 0, destroyPile: [], discardPile: [], exilePile: [] },
   },
   selected: -1,        // 手牌下标
   // v169：能量机制挂钩（斯塔萨菲雅 k='energyNext'）——
@@ -599,6 +1083,12 @@ async function restart(opts) {
   state.playHandOrder = [];
   state.players.p.zones = [[], [], []]; state.players.p.hand = [];
   state.players.a.zones = [[], [], []]; state.players.a.hand = [];
+  // v187：清空上一局的特殊牌池（摧毁池 / 弃牌池 / 放逐池——每局重新开始，见 §6「特殊牌池」条）
+  state.players.p.destroyPile = []; state.players.p.discardPile = []; state.players.p.exilePile = [];
+  state.players.a.destroyPile = []; state.players.a.discardPile = []; state.players.a.exilePile = [];
+  pileSide = 'p';   // v187：特殊牌池弹窗的默认查看对象（新一局回到己方）
+  pileKind = 'destroy';
+  closePiles();     // v187：新一局收起牌池弹窗，避免残留旧局的列表
   // v169：清掉上一局的能量挂钩（额外能量登记、本回合额外能量提示、登记来源）
   state.pendingEnergyGain = { p: 0, a: 0 };
   state.pendingEnergySrc = { p: [], a: [] };
@@ -871,7 +1361,9 @@ function placeToken(side, locIdx, tkDef, cnt, out) {
                     再进入卡牌时机效果
                     （v153 口径：每回合结束时**先结算地形，再结算场上「回合结束」卡牌**）
      ⑤ runTurnEndEffects：全场“回合结束”卡牌效果（按放置队列序结算）
-     ⑥ runHandEndEffects：手牌回合结束效果（挂点，现空）
+     ⑥ runHandEndEffects：手牌回合结束效果（**v197 起由稗田阿求使用**，时机键 `fx.handEnd`：
+                    只结算“回合结束时**仍在手牌里**”的牌；与 ⑤ 的 `fx.turnEnd`（只结算场上的牌）
+                    分工明确、互不串场）
    第 6 回合 ⑤-0 / ⑤ / ⑥ 之后：
      ⑦ runGameEndEffects：全场“游戏结束”效果（按放置队列序）→ finishMatch 结算胜负
    注：①⑤⑦ 结算的都是“带时机效果 fx 的场上卡牌”，先后顺序 = 场上放置顺序队列
@@ -931,7 +1423,7 @@ function resolveTimedEffects(timing) {
      ① **触发条件**：开局时该卡在**自己一方的牌库/起手中**（＝它被放进了那 12 张卡组）→ 触发，
         且**整局永久生效**：之后它被抽到手、被打出、被摧毁都不回收已洗入的牌与已加的能量；
         开局时它不在牌库（开发调试的空牌库、或没把它放进卡组）则什么都不发生。
-     ② `gs.shuffleN`：从**普通卡牌池 `POOL`**（1~6 费，**含池内法术**）不放回随机抽 N 张互不相同，
+     ② `gs.shuffleN`：从**普通卡牌池 `POOL`**（**v194 起为 1 费及以上**，8 费「纯狐」也参与；**含池内法术**）不放回随机抽 N 张互不相同，
         洗入自己牌库并重洗（复用 v184 的 `shuffleCardsIntoDeck` 收口）；**完全不碰衍生池 `SPECIAL`**。
      ③ `gs.energyAdd`：登记本局**每回合最大能量 +N**（`state.energyAddPerTurn` → `grantTurnEnergy`）。
      ④ 每张带 `gs` 的卡各结算一次（正常只能带 1 张，多张则效果叠加）。
@@ -940,19 +1432,22 @@ function resolveTimedEffects(timing) {
         `revealEffectWillChange` 都不需要分支。 */
 
 /** v185：从「普通卡牌池」POOL 里**不放回**随机抽 n 张互不相同的牌 def（供 `gs.shuffleN` 用）。
-    口径：① 只取 **1~6 费**——0 费「稗田阿求」按“0 费组不进洗牌”的既有口径排除，
-    7 费及以上（哆来咪自己所在档）不参与；② **完全不取衍生卡池 SPECIAL**（法术 token 与
-    石块/厄运/无限生命泉等普通 token 都抽不到）；③ 排除 `un` 占位卡与**带 `gs` 的卡自己**
-    （避免自我复制）；④ **包含 POOL 里的法术卡**（三妖精集结 / 镇守大地之石 / 地精的起床）；
-    ⑤ 池子不足 n 张时返回手上有的那些（可能为空数组）。返回 def 数组（不是卡实例）。 */
+    口径：① 只取 **1 费及以上**（v194 放宽，原为 1~6 费）——0 费档按“0 费组不进洗牌”
+    的既有口径排除（**v197 起 0 费档已无卡牌**：稗田阿求搬到 1 费组，故它**现在也会被洗入**）；
+    **7 费「哆来咪」自己因带 `gs` 被排除、8 费「纯狐」可被抽到**；② **完全不取
+    衍生卡池 SPECIAL**（法术 token 与石块/厄运/无限生命泉等普通 token 都抽不到）；
+    ③ 排除 `un` 占位卡与**带 `gs` 的卡自己**（避免自我复制——**v194 用户口径的硬性要求**：
+    洗入池放宽后仍**不会洗出第二张哆来咪**）；④ **包含 POOL 里的法术卡**（三妖精集结 /
+    镇守大地之石 / 地精的起床）；⑤ 池子不足 n 张时返回手上有的那些（可能为空数组）。
+    返回 def 数组（不是卡实例）。 */
 function randomPoolCards(n) {
   const want = Math.max(0, Math.floor(n || 0));
   if (!want) return [];
   const cands = [];
   for (const c of POOL_COST_KEYS) {
-    if (c < 1 || c > 6) continue;
+    if (c < 1) continue; // v194：只排除 0 费档（v197 起该档无卡；原写法为 `c < 1 || c > 6`）
     for (const d of (POOL[c] || [])) {
-      if (!d || d.un || d.gs) continue;
+      if (!d || d.un || d.gs) continue; // 带 gs 的卡（哆来咪）不参与抽取 → 不会自我复制
       cands.push(d);
     }
   }
@@ -1158,13 +1653,57 @@ function runTurnEndEffects() {
   resolveTimedEffects('turnEnd');
 }
 
-// 阶段 ⑥：手牌回合结束效果 —— 全场“回合结束”卡牌效果之后执行（现无注册效果）
-function runHandEndEffects() {}
+/* ==================== v197：手牌回合结束效果（时机键 `fx.handEnd`）====================
+   实装自 v54 起预留的空挂点 **阶段 ⑥ `runHandEndEffects()`**：在**阶段 ⑤-0 地形类回合结束效果 →
+   阶段 ⑤ 全场「回合结束」卡牌效果（`fx.turnEnd`，只结算**场上**放置队列里的牌）之后**结算，
+   逐个检查**双方手牌里仍在手上的牌**自己的 `def.fx.handEnd` 条目。
+   ⇒ 与 `fx.turnEnd` 的分工是**区域不同、互不串场**：`turnEnd` **只对场上的牌**触发，
+     `handEnd` **只对还在手牌里的牌**触发；同一张牌若两种时机都写，则各自在自己的区域结算。
+   首个（也是当前唯一）使用者＝**稗田阿求（v197 重做为 1 费 / 4 战力）**：
+     `fx: { handEnd: { k: 'discard', discard: { self: true }, t: '…' } }`
+     —— 卡面效果＝**回合结束：若此牌依然在手牌中，则自动丢弃**。
+   口径（用户确认）：
+    ① **两个子句都要成立**：“回合结束”**且**“此牌仍在手牌中”——打到场上之后（或已被别的效果弃掉、
+       被交换、被洗走等任何“不在手牌”的情况）**不再触发**，只记一条无事发生的日志；
+    ② **双方一视同仁**：玩家手牌与对手手牌都逐张检查（对手手里的阿求同样会在回合末被丢弃）；
+    ③ **每个回合末都结算一次，含第 6 回合末**（阶段 ⑥ 在 ⑦ 终局结算之前；手牌本来不计入终局总点数，
+       故它只影响该方「弃牌池」的记录与演出）；
+    ④ 逐张**按手牌顺序**结算、逐张入池：同一方手里有 2 张就各弃 1 张（各是各的条目、各记一条日志）；
+    ⑤ **走既有弃牌收口** `discardFromHand(side, spec, srcCard, tag, onlyCard)`（v197 新增的
+       `onlyCard` 参数把候选收窄到**触发的那一张实例**，故同名双卡不会互相误伤）——
+       因此**弃的是「弃牌池」**、**播完整的弃牌演出**（中央弹出完整卡面 + 右上→左下斜切两半，约 1.6s，
+       双方可见）、入池元数据（`pileTurn`/`pileBy`/`pileLoc: null`/`pilePower`）与既有弃牌完全一致；
+    ⑥ **不是“摧毁”**：不触发 `surv`/`phx`/`prot`/`ind`、不改战力、不动区域字段与格位
+       （`sideUsed`/`sideRoom`/`fill`）、不进 `powerLog`、不进 `fieldQueue`（手牌本就不在场上）；
+    ⑦ 其它键的 `handEnd`（未来扩展）暂未实装：只记一条 `sys` 日志，不会静默失败。 */
+function runHandEndEffects() {
+  for (const side of ['p', 'a']) {
+    const pl = state.players[side];
+    if (!pl) continue;
+    const who = side === 'p' ? '你' : '对手';
+    for (const card of pl.hand.slice()) { // 快照：结算途中会从手牌移除
+      const he = card.def && card.def.fx && card.def.fx.handEnd;
+      if (!he || !he.k) continue;
+      if (pl.hand.indexOf(card) < 0) continue; // 防御：前面某张的效果已把它移出手牌
+      if (he.k === 'discard') {
+        const r = discardFromHand(side, he.discard || {}, card, null, card); // 只弃触发的那一张实例
+        if (!r.ok) {
+          log('sys', `📖 「${card.def.n}」：回合结束时已不在${who}的手牌中，本次无事发生。`);
+          continue;
+        }
+        log('sys', `🗑️ 「${card.def.n}」：回合结束时依然在${who}的手牌中 → 自动丢弃（移入${who}的弃牌池，现 ${pileOf(side, 'discard').length} 张）。`);
+        continue;
+      }
+      log('sys', `📖 「${card.def.n}」：手牌回合结束效果「${he.k}」尚未实装，本次无事发生。`);
+    }
+  }
+}
 
 // 阶段 ⑦：全场“游戏结束”效果 —— 第 6 回合所有阶段结束后、结算胜负前执行：
 // 1) 按场上放置顺序队列先后结算各卡 def.fx.gameEnd；
-// 2) 带 leave 的卡（如稗田阿求）终局离场：从场上消失（非摧毁，不触发摧毁类机制、
-//    增益随卡一并消失），不再计入终局结算。
+// 2) 带 leave 的卡（**v197 起本机制无使用者**：唯一使用者「稗田阿求」已重做为
+//    `fx.handEnd` 的回合末自我弃牌，`leave` 作为预留机制保留、`runGameEndEffects` 照常处理）终局离场：
+//    从场上消失（非摧毁，不触发摧毁类机制、增益随卡一并消失），不再计入终局结算。
 function runGameEndEffects() {
   resolveTimedEffects('gameEnd');
   for (const card of state.fieldQueue.slice()) {
@@ -1491,6 +2030,43 @@ function tryMoveFlyTo(locIdx) {
   return true;
 }
 
+/* ==================== v196：卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）====================
+   一句话口径：`playReq: { tk, n }` ＝ **这张牌还在手牌里、即将被打出的那一刻**必须满足的条件；
+   不满足就**打不出来**（点区域不落牌 / 区域不高亮 / AI 不出这张），满足才允许暗出。
+   ① **时点＝“手牌 → 场上”这一条路径**，且**只查一次**：**打出后不再追踪**——条件依赖的 token
+      之后被摧毁/移走/换边（数量掉到 n 以下），这张牌**照常留在场上**，不移除、不变动。
+   ② **计数口径**：打出方**自己三个区域**里 **已翻开** 的卡，按 `def.tk` 匹配（现 `'rock'` → 石块）；
+      **暗牌不计**、**对方场上的同类 token 不计**、不带该标记的 token 也不计（`un` 占位卡与法术
+      本来就不带 tk）。判定方＝这张牌的**打出方**（`side`），与归属方一致。
+   ③ **其它“上场”路径一律不检查**（用户口径）：复活弃牌池 `reviveDiscard`、变身 `morph` 的复制体、
+      落场生成（`placeToken` / `clone` / `spawn*`）都不受限；`give` 塞进手牌后**再由手牌打出时**
+      照常检查（检查的就是“手牌里这张牌”）。
+   ④ **不是“摧毁”/非增减/非放置类**：不触发 `surv`/`phx`/`prot`/`ind`、不动区域字段与格位
+      （`sideUsed`/`sideRoom`/`fill`）、不进 `powerLog`、不进 `fieldQueue`。
+   返回 { ok, need, have, label }；不带 `playReq` 的卡恒为 ok。 */
+function playReqCheck(side, card) {
+  const req = card && card.def && card.def.playReq;
+  if (!req || !req.tk) return { ok: true, need: 0, have: 0, label: '' };
+  const need = Math.max(1, req.n || 1);
+  let have = 0;
+  for (let j = 0; j < 3; j++) {
+    for (const c of state.players[side].zones[j]) {
+      if (!c.revealed || c.def.un || c.def.spell) continue; // 只算已翻开的普通卡
+      if (c.def.tk !== req.tk) continue;
+      have++;
+    }
+  }
+  return { ok: have >= need, need, have, label: tokenNameLabel(req.tk) };
+}
+// v196：由 token 种类标记（`def.tk`，如 'rock'）反推一个可读标签（现 'rock' → 石块）——
+// `tkBuff` 段与新增的 `playReq` 共用（tk 标记没有中文名表，只能从带该标记的 token 卡名反推）。
+function tokenNameLabel(tk) {
+  const names = Object.keys(TOKENS)
+    .filter((k) => TOKENS[k] && TOKENS[k].tk === tk)
+    .map((k) => TOKENS[k].n);
+  return names.length ? names.filter((n2, i2) => names.indexOf(n2) === i2).join('/') : tk;
+}
+
 function tryPlayAt(locIdx) {
   const st = state;
   if (st.phase !== 'play') return false;
@@ -1501,6 +2077,15 @@ function tryPlayAt(locIdx) {
   const card = st.players.p.hand[st.selected];
   if (!card || cardCost(card) > st.players.p.energyLeft) return false;
   const side = playSide(); // v144：开发调试可切到敌方立场落牌
+  // v196：卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）——只在“从手牌打出”这一刻检查，
+  //   不满足就**不落牌、不扣能量**，并说明当前数量（打出后不再追踪，见 playReqCheck 注释）。
+  const reqR = playReqCheck(side, card);
+  if (!reqR.ok) {
+    const who = side === 'a' ? '对手' : '你';
+    setStatus(`「${card.def.n}」不能打出：需要${who}的场上已有至少 ${reqR.need} 张已翻开的「${reqR.label}」（现 ${reqR.have} 张）。`);
+    log('sys', `⚠️ 「${card.def.n}」放置条件不满足：需要${who}场上已翻开的「${reqR.label}」≥ ${reqR.need} 张（现 ${reqR.have} 张），本次未打出。`);
+    return false;
+  }
   const zone = st.players[side].zones[locIdx];
   if (!locOpen(locIdx)) {
     setStatus(`「${locDef(locIdx).n}」还没开放，要到第 ${locDef(locIdx).minTurn} 回合才能放牌。`);
@@ -1736,6 +2321,10 @@ async function revealRound() {
         // v171：三妖精集结——按区域顺序逐区生成并揭示（第 1→2→3 区），每区之间 0.5s；
         // 三区都揭示完并做完“己方三妖精 +N 战力”之后才返回，随后才轮到本法术消散。
         await applyGatherReveal(mv.side, card);
+      } else if (card.def.k === 'reviveDiscard') {
+        // v193：四季映姬的复活弃牌池——**逐张**推进（复活 → 渲染「凝聚显形」→ 结算该张的揭示
+        // → 停 500ms → 下一张），避免一次性复活一大把牌（连锁揭示叠加 / 演出互相盖住）。
+        await applyReviveDiscardReveal(mv.side, card);
       } else {
         applyEffect(mv.side, mv.loc, card);
       }
@@ -1802,6 +2391,18 @@ function revealEffectWillChange(side, locIdx, card) {
       let minBoth = Infinity;
       for (const c of both) minBoth = Math.min(minBoth, cardPowerIn(locIdx, c));
       return both.filter((c) => cardPowerIn(locIdx, c) === minBoth).some(isDestroyable);
+    }
+    case 'dwc': {
+      // v195（妖精大战争）：摧毁**双方三个区域**所有印刷费用为 `dwc.cost`（缺省 1）的已翻开卡牌——
+      // 只要**任一区域**存在「不在免摧毁区 + 会被判定选中 + 真能产生变化」的该费用牌就为 true
+      // （逐区判 `locNoDestroy`，与 dw/dwh/dwb 同口径；`isDestroyable` 排除 ind，但保留 phx/surv）
+      const wantC = (def.dwc && def.dwc.cost != null) ? def.dwc.cost : 1;
+      for (let j = 0; j < 3; j++) {
+        if (locNoDestroy(j)) continue; // 该区免摧毁 → 整区跳过，不产生变化
+        const z = st.players[side].zones[j].concat(st.players[other].zones[j]);
+        if (z.some((c) => c.def.c === wantC && isDestroyable(c))) return true;
+      }
+      return false;
     }
     case 'deAll': {
       // v180（蓬莱的玉枝·法术）：敌方**三个区域**所有已翻开卡牌各 −N——只要对方场上
@@ -1917,6 +2518,29 @@ function revealEffectWillChange(side, locIdx, card) {
       // 不像 `give` 那样会因“手牌已满”而落空 → 照常走结算前的停顿与演出；键名写错时不空等。
       const si = def.shuffleIn;
       return !!si && !!findCardDefByKey(si.card) && (si.n || 1) > 0;
+    }
+    case 'reviveDiscard': {
+      // v192（复活弃牌池）：只要**弃牌池里存在至少一张能落地的角色卡牌**就真的会产生变化——
+      // 「能落地」＝存在一个已开放（locOpen）且自己该侧放得下（sideRoom ≥ 占格数）的区域；
+      // 池空 / 只有法术 / 三个区域都满或未开放 → 本次揭示落空，跳过结算前的 400ms 停顿。
+      const rp = pileOf(side, 'discard');
+      return rp.some((c) => {
+        if (!c || !c.def || c.def.spell) return false; // ① 只复活角色卡牌（法术不参与）
+        for (let j = 0; j < 3; j++) {
+          if (locOpen(j) && sideRoom(side, j) >= occOf(c)) return true; // ③ 有可落地的随机区域
+        }
+        return false;
+      });
+    }
+    case 'discard': {
+      // v189（弃牌）：只有目标方手牌里**真的存在**符合 `card`/`cost` 筛选的候选时才会产生变化
+      // （手牌为空、或手里的牌都不满足条件 → 本次揭示落空，跳过结算前的 400ms 停顿）。
+      // v198：可选子句 `give`（弃牌后加手牌衍生物）**只在弃牌成功时才结算**，故本判定无需改动
+      // ——候选为 0 时弃牌与加衍生物一起落空，候选 ≥1 时两者都会发生。
+      const dc = def.discard;
+      if (!dc) return false;
+      const toOpp = dc.to === 'opp' || dc.to === 'a' || dc.to === 'enemy';
+      return discardCandidates(toOpp ? other : side, dc).length > 0;
     }
     case 'xform': {
       const t = findLocDef(def.xf);
@@ -2065,6 +2689,7 @@ function vanishSpell(card) {
   const i = zone.indexOf(card);
   if (i >= 0) zone.splice(i, 1);
   dequeueField(card); // 离开场上：后续时机效果（fx）不再结算它
+  recordSpellExile(card, locName); // v187：用过的法术 → 牌本体进归属方的「放逐池」（不是被摧毁，不进摧毁池）
   playSpellVanish(card); // 消散演出（克隆卡面上浮淡出，放 body 悬浮层不受重渲染影响）
   log('sys', `🪄 ${card.side === 'p' ? '你' : '对手'}的法术「${card.def.n}」揭示结算完毕，自行消散：让出「${locName}」的 1 个格位（不属于被摧毁）。`);
   return true;
@@ -2431,6 +3056,110 @@ async function applyGatherReveal(side, card) {
   }
 }
 
+/* ==================== v192：复活弃牌池（`reviveDiscard` 效果键，现仅 6 费「四季映姬」）====================
+   v193：**分步演出** —— 正常翻牌流程里由异步版 `applyReviveDiscardReveal` 驱动：
+   逐张推进「**从池中捞出一张 → 渲染（播「凝聚显形」）→ 结算它自己的揭示 → 停 500ms → 下一张**」，
+   避免一次性复活一大把牌（连锁揭示/生成叠加、演出互相盖住、极端情况下的渲染压力）。
+   下面三个收口被同步版（applyEffect 的 case 'reviveDiscard'，供 morph / fx 时机效果 /
+   落场生成等非翻牌路径使用）与异步分步版共用，保证两条路径口径完全一致：
+     · reviveTargetZones(side, card)：候选区（**只在已开放且该侧放得下的区域里随机**，v192 用户口径）
+     · reviveCardFromPile(side, card, pile)：离池 + 落地即翻开 + 占格位 + 进放置队列，返回落点区
+     · reviveStuckLog(...)：收尾日志（法术不参与 / 无处可放 / 汇总）
+   节奏常量 REVIVE_STEP_MS = 500（相邻两张之间；与 v171「集结」的 0.5s 同款口径；
+   它是**纯 JS 计时**、没有对应的 CSS 关键帧，改节奏只改这一个数）。 */
+
+/** v192：某张弃牌池里的牌**能落到哪些区**——候选 = 已开放（`locOpen`，避开七夕坂等 minTurn 锁定）
+    且**自己该侧放得下**（`sideRoom ≥ occOf`，含大体积卡占格）。返回区域下标数组（可能为空）。 */
+function reviveTargetZones(side, card) {
+  const out = [];
+  for (let j = 0; j < 3; j++) {
+    if (!locOpen(j)) continue;                  // 未开放不算候选
+    if (sideRoom(side, j) < occOf(card)) continue; // 该侧放不下（含大体积卡占格）不算候选
+    out.push(j);
+  }
+  return out;
+}
+
+/** v192/v193：把牌从弃牌池**捞回场上**（共用核心，只做数据层）——
+    ① 在候选区里**等概率随机**选一个（候选为空 → 返回 -1，调用方按“留在池里”处理）；
+    ② 从池中移出并清掉入池元数据；③ `side` 归属、`revealed = true` 落地即翻开、`justSpawned`
+    触发 v90 的「凝聚显形」演出；④ 占格位 + 进场上放置顺序队列（`fieldTurn`＝本回合 ⇒ 其
+    `fx.turnStart` 按 v160 当回合不结算）。
+    ⚠️ **不负责**结算揭示与渲染/节奏——由调用方（同步版 / 分步版）各自处理。 */
+function reviveCardFromPile(side, card, pile) {
+  const targets = reviveTargetZones(side, card);
+  if (!targets.length) return -1;
+  const i = pile.indexOf(card);
+  if (i < 0) return -1; // 防御：已被连锁复活走
+  const dst = targets.length === 1 ? targets[0] : targets[Math.floor(Math.random() * targets.length)];
+  pile.splice(i, 1); // 离池（牌本体带走自己的一切：powerLog / costMod）
+  delete card.pileKind; delete card.pileTurn; delete card.pileBy; delete card.pileLoc; delete card.pilePower;
+  card.side = side;        // 归属按复活方
+  card.revealed = true;    // 落地即翻开
+  card.justSpawned = true; // v90：落场演出（凝聚显形）
+  state.players[side].zones[dst].push(card);
+  enqueueField(card);
+  return dst;
+}
+
+/** v192/v193：`reviveDiscard` 的两条收尾日志（法术不参与复活 / 哪些牌留在池里 / 本次汇总）。
+    同步版与分步版共用，避免两份措辞不一致。 */
+function reviveStuckLog(side, card, revived, stuck, spellN, poolLeft) {
+  const who = side === 'p' ? '你' : '对手';
+  log(side, revived.length
+    ? `✦ ${card.def.n}：本次共复活 ${revived.length} 张角色卡牌（${who}的弃牌池现 ${poolLeft} 张）。`
+    : `✦ ${card.def.n}：本次没有任何卡牌成功复活（三个区域都放不下或未开放）。`);
+  if (spellN) log('sys', `✦ ${card.def.n}：${spellN} 张法术不参与复活，仍留在${who}的弃牌池里。`);
+  if (stuck.length) log('sys', `✦ ${card.def.n}：「${stuck.join('」「')}」因三个区域都放不下或未开放，本次未能复活（留在${who}的弃牌池）。`);
+}
+
+/* v193：复活弃牌池的**分步揭示演出**（只在正常翻牌流程 revealRound 里使用）——
+   逐张推进：**第 1 张复活（渲染 → 播「凝聚显形」）→ 结算它自己的揭示 → 停 0.5s →
+   第 2 张 …依次类推**，全部复活完再做收尾日志。
+   与同步版（applyEffect 的 case 'reviveDiscard'）口径完全一致，只多出节奏与逐步渲染；
+   中途重新开局（`state.gen` 变化）会立即中断（同 applyShiftReveal / applyGatherReveal 口径）。
+   ⚠️ 连锁例外：若池里还有**另一张四季映姬**（哆来咪的 `gs.shuffleN` 可能从卡池带进第二张），
+   她被复活时会在结算链内部**同步**再触发一次本效果（那一批一次性复活），回到本循环后继续按
+   500ms 节奏推进——已被连锁复活走的条目由 `pile.indexOf(c) < 0` 自动跳过。 */
+const REVIVE_STEP_MS = 500; // v193：相邻两张之间的间隔（口径同 v171「集结」的 0.5s；纯 JS 计时、无 CSS 关键帧）
+async function applyReviveDiscardReveal(side, card) {
+  const gen = state.gen;
+  const st = state;
+  const who = side === 'p' ? '你' : '对手';
+  const pile = pileOf(side, 'discard');
+  const all = pile.slice();
+  if (!all.length) {
+    log(side, `✦ ${card.def.n}：${who}的弃牌池是空的，没有可复活的角色卡牌。`);
+    return;
+  }
+  const cands = all.filter((c) => c && c.def && !c.def.spell); // ① 只复活角色卡牌（非法术）
+  const spellN = all.length - cands.length;
+  if (!cands.length) {
+    log(side, `✦ ${card.def.n}：${who}的弃牌池里只有 ${spellN} 张法术（法术不参与复活），本次无事发生。`);
+    return;
+  }
+  const order = shuffle(cands.slice()); // ② 随机顺序（先定序，再逐张推进）
+  const revived = [];
+  const stuck = [];
+  for (const c of order) {
+    if (gen !== state.gen) return;      // 重新开局等中断
+    if (pile.indexOf(c) < 0) continue;  // 防御：已被连锁复活（另一张四季映姬）先复活走了
+    const dst = reviveCardFromPile(side, c, pile);
+    if (dst < 0) { stuck.push(c.def.n); continue; } // ③ “若可能”不成立 → 留在弃牌池
+    revived.push({ card: c, loc: dst });
+    renderZones(); // ③-1 先让这张牌在场上显形（.spawned-now → 「凝聚显形」入场动画）
+    log(side, `✦ ${card.def.n}：「${c.def.n}」从${who}的弃牌池复活到「${st.locs[dst].def.n}」（落地即翻开，第 ${revived.length} 张；随后结算其揭示）。`);
+    // ③-2 结算**这一张**自身的「揭示」（按它当前所在区域；若它已被自己的效果挪走也照常读到新位置）
+    const nowLoc = fieldLocOf(c);
+    if (c.def.k && nowLoc >= 0) applyEffect(side, nowLoc, c);
+    renderZones(); // 让本次揭示的 ±N / 生成 / 摧毁等演出显示出来（与 v171 集结同款逐步渲染）
+    await sleep(REVIVE_STEP_MS); // ③-3 等这一张“复活并翻开、揭示结算完”之后，停 0.5s 再复活下一张
+    if (gen !== state.gen) return;
+  }
+  reviveStuckLog(side, card, revived, stuck, spellN, pile.length); // 收尾（汇总 / 法术跳过 / 放不下）
+  renderZones();
+}
+
 /* v172/v179：`spawnS`（本区**自己一侧**生成特殊卡）的共用实现——
    `spawnS` 键本身（v172 祖母绿巨石 / v179 镇守大地之石）与 `tkBuff` 键的**可选落场生成子句**
    （v179 地精的起床：先在本区生成 1 张石块，再统一给己方石块 +N）共用同一套口径，
@@ -2539,6 +3268,7 @@ function applyEffect(side, locIdx, card, spec) {
       if (indestructibleBlock(target, def.n)) break; // v180：ind → 摧毁失败、判定结束（不改打其他牌）
       if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      recordDestroy(target, locIdx, def.n); // v187：真正离场 → 牌本体进归属方的摧毁池（须在移出区域之前记）
       playShatter(target); // 分崩离析演出（v88）
       theirs.splice(theirs.indexOf(target), 1);
       dequeueField(target); // 被摧毁：移出放置队列（后续时机不再结算它）
@@ -2567,10 +3297,71 @@ function applyEffect(side, locIdx, card, spec) {
       if (indestructibleBlock(lowTarget, def.n)) break; // v180：ind → 摧毁失败、判定结束（不改打其他牌）
       if (phoenixRevive(lowTarget, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(lowTarget)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      recordDestroy(lowTarget, locIdx, def.n); // v187：真正离场 → 牌本体进归属方的摧毁池（须在移出区域之前记）
       playShatter(lowTarget); // 分崩离析演出（v88）
       lowZone.splice(lowZone.indexOf(lowTarget), 1);
       dequeueField(lowTarget); // 被摧毁：移出放置队列（后续时机不再结算它）
       log('danger', `✦ ${def.n} 摧毁了${lowSide === side ? '己方' : '对方'}「${lowTarget.def.n}」（威力 ${minBoth}${lowPool.length > 1 ? `；并列最低共 ${lowPool.length} 张，随机选中这一张` : ''}）`);
+      break;
+    }
+    case 'dwc': {
+      // v195（妖精大战争·法术）：揭示——摧毁**双方场上**（**三个区域**、敌我两侧）所有
+      // **印刷费用 `def.c` 恰为 `dwc.cost`**（缺省 1，即“一费牌”）的**已翻开**卡牌。
+      // 口径（**用户确认**）：
+      //   ① 目标＝**已翻开**（`revealed`）＋ 非 `un` 占位卡（隙间）＋ **非法术**；
+      //      **暗牌不可被提前摧毁** —— 与 dw/dwh/dwb/地形 purge 的候选口径完全一致；
+      //   ② **含落场 token**（用户口径）：石块 / v184 冰块 / 祖母绿巨石占位 / 水银 的印刷费用
+      //      都是 1，照常被扫掉（口径同 dw/dwh/dwb/purge「含落场 token」）；
+      //   ③ 筛选按**印刷费用 `def.c`**（不是 `cardCost`）—— 与 `discard.cost` / `og.cost` /
+      //      区域 `cb` / 图鉴与卡组页分档同口径：被桑尼米尔克加过费**不改变“是不是 1 费牌”**；
+      //   ④ **逐区结算（左 → 中 → 右）**，每区先己方后对方；某区存在**免摧毁**（地形 `prot`
+      //      「睡鼠神祠」/ 卡级 `prot`「蕾蒂」，`locNoDestroy`）时**该区整区跳过**（不选目标、
+      //      也不触发 surv/phx）—— 与其它摧毁点的“整条拦下”口径一致（保护按区生效）；
+      //   ⑤ 每张依次走 **ind（自身不可摧毁）→ phx（凤凰重生回手 +N）→ surv（防摧毁改降 N）→
+      //      `recordDestroy`（真正离场 → 进**其归属方**的摧毁池）→ 分崩离析演出 → 出区 → 出放置队列**；
+      //      ⚠️ `ind` 与 purge 同款：**逐张 continue**（它自己打不死，同区其它 1 费牌照常被摧毁），
+      //      不像 dw/dwh/dwb 那样“判定结束、不改打别的”；
+      //   ⑥ **没有“并列随机”**：命中的牌**全部摧毁**（不像 dwh/dwb 只挑一张）；
+      //   ⑦ **可能摧毁己方自己的卡**（卡面写的就是“双方”）；
+      //   ⑧ 非增减/非放置：不进 powerLog、不动区域字段；格位由出区自然腾出；
+      //      法术自身结算完仍按 v170 口径自行消散（进放逐池）。
+      const wantCost = (fx.dwc && fx.dwc.cost != null) ? fx.dwc.cost : 1;
+      let goneAll = 0;
+      const zoneSkipped = [];
+      for (let j = 0; j < 3; j++) {
+        const zP = st.players.p.zones[j];
+        const zA = st.players.a.zones[j];
+        // 快照：结算途中会 splice（本函数不新增卡，但 phx 会把它移去手牌）
+        const hitZ = zP.concat(zA).filter((c) => c.revealed && !c.def.un && !c.def.spell && c.def.c === wantCost);
+        if (!hitZ.length) continue;
+        if (locNoDestroy(j)) { zoneSkipped.push(locDef(j).n); continue; } // ④ 该区免摧毁 → 整区跳过
+        const goneZ = [];
+        for (const c of hitZ) {
+          if (indestructibleBlock(c, def.n)) continue; // ind：这一张打不死，同区其它牌照常摧毁
+          if (phoenixRevive(c, j)) continue; // 凤凰重生：回手 +N
+          if (surviveDestroy(c)) continue; // 防摧毁：改永久 −N、卡不离场
+          const owner = c.side; // 归属方（换边后按新归属）——进池与日志都用它
+          recordDestroy(c, j, def.n); // v187：真正离场 → 牌本体进归属方的摧毁池（须在移出区域之前记）
+          playShatter(c); // 分崩离析演出（v88）
+          const inP = zP.indexOf(c) >= 0;
+          if (inP) zP.splice(zP.indexOf(c), 1);
+          else zA.splice(zA.indexOf(c), 1);
+          dequeueField(c); // 被摧毁：移出放置队列（后续时机不再结算它）
+          goneAll++;
+          goneZ.push(`${owner === side ? '己方' : '对方'}「${c.def.n}」(${cardPowerIn(j, c)})`);
+        }
+        if (goneZ.length) {
+          log('danger', `✦ ${def.n}：摧毁「${locDef(j).n}」双方场上所有 ${wantCost} 费卡牌 → ${goneZ.join('、')}`);
+        }
+      }
+      if (!goneAll) {
+        const why = zoneSkipped.length
+          ? `（「${zoneSkipped.join('」「')}」存在免摧毁效果、整区跳过；其余区域没有符合条件的已翻开卡牌，或都被防护/替代机制拦下）`
+          : '（双方场上没有符合条件的已翻开卡牌，或都被防护/替代机制拦下）';
+        log(side, `✦ ${def.n} 想摧毁双方场上所有 ${wantCost} 费卡牌，但没有任何一张真正离场${why}。`);
+      } else if (zoneSkipped.length) {
+        log('sys', `✦ ${def.n}：本次共摧毁 ${goneAll} 张 ${wantCost} 费卡牌；「${zoneSkipped.join('」「')}」存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），该区整区跳过。`);
+      }
       break;
     }
     case 'spawn': {
@@ -2671,10 +3462,8 @@ function applyEffect(side, locIdx, card, spec) {
       if (!tb || !tb.tk) break;
       const add = tb.a || 0;
       // tk 标记没有中文名表：直接由 TOKENS 里带该标记的卡名反推一个可读标签（现 'rock' → 石块）
-      const tkNames = Object.keys(TOKENS)
-        .filter((k) => TOKENS[k] && TOKENS[k].tk === tb.tk)
-        .map((k) => TOKENS[k].n);
-      const tkLabel = tkNames.length ? tkNames.filter((n2, i2) => tkNames.indexOf(n2) === i2).join('/') : tb.tk;
+      // v196：该反推抽成共用函数 tokenNameLabel()，与 `playReq` 的提示/标签共用同一口径
+      const tkLabel = tokenNameLabel(tb.tk);
       const sides = tb.own ? [side] : ['p', 'a'];
       const hit = [];
       for (const s2 of sides) {
@@ -3012,6 +3801,117 @@ function applyEffect(side, locIdx, card, spec) {
       playShuffleInFx(tgtSide, got, inDef.n, def.n);
       break;
     }
+    case 'discard': {
+      // v189（弃牌）：把牌从**手牌**移出 → 放进**该牌归属方**的「弃牌池」，并播双方可见的
+      // 「弹出完整卡面 + 从右上到左下斜切两半」演出（约 1.6s）。
+      // ⚠️ 与「摧毁」的分工是**区域不同、互不重叠**（用户口径）：摧毁只作用于**场上**的牌、
+      //   弃牌只作用于**手牌**；因此弃牌**不是**“摧毁”——不触发 `surv`/`phx`/`prot`/`ind`
+      //   等任何摧毁类机制，不动区域字段 / 格位 / 放满加成 / `fieldQueue` / 战力台账。
+      // 数据写法与逐条口径见本文件上方的 v189「弃牌」段（`discardFromHand` / `discardCandidates`）：
+      //   `discard: { n, to, pick, card, cost }` —— `to` 缺省 `'own'`＝弃**自己**手牌、
+      //   `'opp'`（也接受 `'a'`/`'enemy'`）＝弃**对方**手牌；`card` 按卡名（或 SPECIAL 键名）筛选、
+      //   `cost` 按**印刷费用**筛选（数字＝恰好，或 `{min,max}` 区间）；两者都不写＝整副手牌都是候选；
+      //   `pick`（**v190**）缺省 `'random'`＝候选里随机取，`'right'`/`'left'`＝从手牌**最右侧/最左侧**起取；
+      //   `n` 缺省 1，写 `'all'` 则命中即全弃；候选不足时弃掉手上有的那些。
+      //   **`give`（v198 可选子句）**＝弃牌成功后按**被弃牌的印刷费用**给**施放方自己**加手牌衍生物
+      //   （`powerFromCost: true`），现由「姬虫百百世」使用；口径见上方 `discardGiveTokens` 段。
+      // 目标公开：被弃的牌此后躺在该方「弃牌池」（侧栏徽标 + 弹窗页签）里，对玩家是明牌。
+      const dc = fx.discard;
+      if (!dc) {
+        log('sys', `✦ ${def.n}：弃牌的条目缺失（def.discard 未写），本次无事发生。`);
+        break;
+      }
+      const toOpp = dc.to === 'opp' || dc.to === 'a' || dc.to === 'enemy';
+      const tgtSide = toOpp ? other : side;
+      const dWho = tgtSide === 'p' ? '你' : '对手';
+      const r = discardFromHand(tgtSide, dc, card);
+      if (!r.ok) {
+        const cond = discardSpecText(dc);
+        log('sys', `✦ ${def.n} 想弃掉${dWho}手牌里的牌（${cond}），但${dWho}手里没有符合条件的牌（现手牌 ${st.players[tgtSide].hand.length} 张），本次无事发生。`);
+        break;
+      }
+      const dNames = r.cards.map((c) => `「${c.def.n}」`).join('');
+      // 弃对手的牌走红色（danger，与加费/摧毁/洗入对手牌库同款：公开且带对抗性）
+      log(toOpp ? 'danger' : 'sys',
+        `🗑️ ${def.n}：把${dWho}手牌里的 ${r.cards.length} 张${dNames}丢弃 → 移入${dWho}的弃牌池（现 ${pileOf(tgtSide, 'discard').length} 张${r.cards.length < r.want ? `；符合条件的牌不足，本来要弃 ${r.want} 张` : ''}）。`);
+      // v198：可选子句 `discard.give` —— 弃牌**真的发生之后**，按**被弃掉的那张牌的印刷费用**为
+      //   **施放方自己**加入手牌衍生物（现由「姬虫百百世」使用 → 1 张战力＝该卡费用的「石块」）。
+      //   口径与逐条说明见上方 `discardGiveTokens` 段：弃牌落空时上面已 return（本条不结算）、
+      //   加入目标恒为自己（与 `to` 无关）、手牌上限 7 张照常约束、加入后仍需手动暗出。
+      const gvR = discardGiveTokens(side, dc, r, card);
+      if (gvR) {
+        if (gvR.missing) {
+          log('sys', `✦ ${def.n}：弃牌衍生物的条目缺失（discard.give.card 键名写错），本次只弃了牌、未加入任何卡。`);
+        } else if (!gvR.added) {
+          log(side, `✦ ${def.n}：想把「${gvR.name}」加入手牌，但手牌已满（7/7），本次未能加入。`);
+        } else {
+          const sideWho = side === 'p' ? '你' : '对手';
+          log(side, `🪨 ${def.n}：按被弃的牌加入 ${gvR.added} 张「${gvR.name}」（战力 ${gvR.powers.join('、')}）到${sideWho}的手牌（现 ${st.players[side].hand.length}/7）。${gvR.added < gvR.want ? '（手牌已满，部分未能加入）' : ''}`);
+        }
+      }
+      break;
+    }
+    case 'reviveDiscard': {
+      // v192（四季映姬）：**复活弃牌池** —— 把**自己一方**的**弃牌池**（v187 的 `discardPile`，
+      // 唯一入池来源是弃牌机制 `discard`）里**所有「角色卡牌」（非法术）**以**随机顺序**复活到场上。
+      // ⚠️ **v193：正常翻牌流程走的是异步分步版 `applyReviveDiscardReveal`**（逐张复活：
+      //    捞出一张 → 渲染「凝聚显形」→ 结算它的揭示 → **停 500ms** → 下一张）；
+      //    本同步版供 morph 变身 / fx 时机效果 / 落场生成等非翻牌路径复用（一次性结算、无节奏），
+      //    两条路径共用 `reviveTargetZones` / `reviveCardFromPile` / `reviveStuckLog` 三个收口，
+      //    口径完全一致。
+      // 用户口径（v192）：
+      //   ① **只复活角色卡牌**：`def.spell === true` 的**法术不参与复活**，留在弃牌池（日志点名）；
+      //   ② **随机顺序**：对候选快照做一次 `shuffle` 后逐张依次复活；
+      //   ③ **随机区域**：每张牌**只在「已开放（`locOpen`，避开七夕坂等 minTurn 锁定）且己方该侧
+      //      放得下（`sideRoom` ≥ 占格数 `occOf`，含大体积卡）」的区域里等概率随机**选一个 —— 因此
+      //      **不会出现“掷到一个满区就复活失败”**（用户明确口径）；三区都放不下/未开放 → 该牌
+      //      **留在弃牌池**（“若可能”），日志点名；
+      //   ④ **落地即翻开**：`revealed = true`、占格位、进场上放置顺序队列（`enqueueField` 会记
+      //      `fieldTurn`＝本回合，故其 `fx.turnStart` 按 v160 口径**当回合不结算**、下回合起才结算），
+      //      并播「凝聚显形」演出（`justSpawned`，口径同 placeToken / 分身）；
+      //   ⑤ **逐张重新结算其自身「揭示」**（用户口径）：每张复活后立刻按它**当前所在区域**调用
+      //      `applyEffect`（白板跳过；同步结算，无 400ms 停顿与翻牌演出）——口径同 v166 的
+      //      `spawn.reveal` / v171「集结」，所以复活辉夜会再抽 2 张神宝、复活魔理沙会再给 1 张极限火花；
+      //      连锁复活（弃牌池里还躺着另一张四季映姬）走同一条路径，且每张复活后即从池中移出 ⇒ 必然收敛
+      //      （循环里用 `pile.indexOf(c) < 0` 防御“已被连锁复活走”的条目）；
+      //   ⑥ **同一卡实例、保留一切**：牌本体从池中移出后直接落到场上，永久增益台账 `powerLog` 与本场
+      //      战斗的费用修正 `costMod` 都随实例保留（与 v187「入池的是牌本体」一致）；离池时清掉入池
+      //      元数据（`pileKind`/`pileTurn`/`pileBy`/`pileLoc`/`pilePower`）；
+      //   ⑦ **不是“打出”、也不是“暗出”**：不消耗能量、**不写 `playerMoves`/`aiMoves`** —— 因此
+      //      不会被阶段 ④ 的翻牌流程二次结算，也不会被「重置暗牌」收回（重置只处理本回合暗出的牌）；
+      //   ⑧ **不是“摧毁”、非增减**：与 `surv`/`phx`/`prot`/`ind`、摧毁池、战力台账均无交互；区域
+      //      「翻开时」博彩 `gamble` 与「揭示后吹飞」`gust` 都只作用于“本回合在 revealRound 里翻开的
+      //      牌”，复活卡落地即已翻开 ⇒ **不参与**（口径自然一致）；
+      //   ⑨ 归属按**牌的所属方**（`side`）：玩家打出复活自己的弃牌池，AI 打出复活 AI 自己的。
+      const pile = pileOf(side, 'discard');
+      const who = side === 'p' ? '你' : '对手';
+      const all = pile.slice();
+      if (!all.length) {
+        log(side, `✦ ${def.n}：${who}的弃牌池是空的，没有可复活的角色卡牌。`);
+        break;
+      }
+      const cands = all.filter((c) => c && c.def && !c.def.spell); // ① 只复活角色卡牌（非法术）
+      const spellN = all.length - cands.length;
+      if (!cands.length) {
+        log(side, `✦ ${def.n}：${who}的弃牌池里只有 ${spellN} 张法术（法术不参与复活），本次无事发生。`);
+        break;
+      }
+      const order = shuffle(cands.slice()); // ② 随机顺序
+      const revived = [];
+      const stuck = [];
+      for (const c of order) {
+        if (pile.indexOf(c) < 0) continue; // 防御：已被本次连锁复活（另一张四季映姬）先复活走了
+        const dst = reviveCardFromPile(side, c, pile); // ③ 候选区里随机 + 离池 + 落地即翻开（共用核心）
+        if (dst < 0) { stuck.push(c.def.n); continue; }   // “若可能”不成立 → 留在弃牌池
+        revived.push({ card: c, loc: dst });
+        log(side, `✦ ${def.n}：「${c.def.n}」从${who}的弃牌池复活到「${st.locs[dst].def.n}」（落地即翻开，并重新结算其揭示）。`);
+        const nowLoc = fieldLocOf(c);
+        if (c.def.k && nowLoc >= 0) applyEffect(side, nowLoc, c); // ⑤ 逐张重新结算其自身「揭示」
+      }
+      renderZones(); // 让复活的卡在场上显形（「凝聚显形」演出；末尾会顺带刷新侧栏牌池计数）
+      reviveStuckLog(side, card, revived, stuck, spellN, pile.length); // 收尾（汇总 / 法术跳过 / 放不下）
+      break;
+    }
     case 'dwh': {
       // 揭示：摧毁本区对方一张“已翻开且战力最高”的卡。
       // 现使用者：token「废弃列车」与 v177 新增的法术「极限火花」（雾雨魔理沙 give 加入手牌）。
@@ -3030,6 +3930,7 @@ function applyEffect(side, locIdx, card, spec) {
       if (indestructibleBlock(target, def.n)) break; // v180：ind → 摧毁失败、判定结束（不改打其他牌）
       if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      recordDestroy(target, locIdx, def.n); // v187：真正离场 → 牌本体进归属方的摧毁池（须在移出区域之前记）
       playShatter(target); // 分崩离析演出（v88）
       theirs.splice(theirs.indexOf(target), 1);
       dequeueField(target); // 被摧毁：移出放置队列（后续时机不再结算它）
@@ -3451,6 +4352,7 @@ function reactorPurge() {
       if (indestructibleBlock(c, def.n)) continue; // v180：ind 卡摧毁失败（并列最低的其他牌照常被判摧毁）
       if (phoenixRevive(c, j)) continue; // 凤凰重生（如藤原妹红）：回手 +N 战力
       if (surviveDestroy(c)) continue; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
+      recordDestroy(c, j, def.n); // v187：真正离场 → 牌本体进归属方的摧毁池（须在移出区域之前记）
       playShatter(c); // 分崩离析演出（v88）
       const inP = zoneP.indexOf(c) >= 0;
       if (inP) zoneP.splice(zoneP.indexOf(c), 1);
@@ -3715,6 +4617,7 @@ function canPlaceP(idx) {
   const card = st.players.p.hand[st.selected];
   if (!card || cardCost(card) > st.players.p.energyLeft) return false;
   if (!locOpen(idx)) return false;
+  if (!playReqCheck(playSide(), card).ok) return false; // v196：卡级放置条件（playReq）
   if (occOf(card) > 1 && !occZoneOk(card, idx)) return false; // 大体积卡需上限恰为占格数
   return sideRoom(playSide(), idx) >= occOf(card);
 }
@@ -3814,6 +4717,7 @@ function renderZones() {
   }
   flushBuffFlash(); // v80：本次渲染后触发“永久 +N”绿色动画（bf/ba/bl/oc/phx 等收口排队）
   flushCostFlash(); // v169：本次渲染后触发“费用 ±N”动画（costUp 等收口排队）
+  renderPiles();    // v187：侧栏「特殊牌池」两个计数徽标（弹窗开着时同步重渲染当前页签）
 }
 
 /* 把区域的一侧 2×2 格位按规则填充：
@@ -3907,6 +4811,13 @@ function renderHand() {
     el.className = 'hand-card' + (card.def.img ? '' : ' no-img');
     const afford = cardCost(card) <= st.players.p.energyLeft; // v169：按修正后的费用判断能否打出
     if (!afford) el.classList.add('unaffordable');
+    // v196：卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）不满足时同样置灰，并给出数量提示
+    //   （此时“费用够、但条件不够”，点击后 tryPlayAt 会说明现 N 张、不会白扣能量）
+    const reqR = playReqCheck('p', card);
+    if (!reqR.ok) {
+      el.classList.add('unaffordable');
+      el.title = `放置条件未满足：需要你的场上已有至少 ${reqR.need} 张已翻开的「${reqR.label}」（现 ${reqR.have} 张）`;
+    }
     if (st.selected === index) el.classList.add('selected');
     if (card.justHandAdded) { el.classList.add('hand-new'); card.justHandAdded = false; } // v90 加入手牌演出
     // v95：抽牌入场回退为浏览器原生 CSS transform 动画（.hand-drawn，从右侧滑入），
@@ -4285,10 +5196,28 @@ function kindTags(def) {
     if (def.gs.energyAdd) bits.push(`每回合最大能量 +${def.gs.energyAdd}`);
     parts.push('游戏开始时 · 在卡组中即触发' + (bits.length ? `（${bits.join('、')}）` : ''));
   }
+  // v194：费用随摧毁递减（`costDown`，现仅 8 费「纯狐」）——同样避免被误标成纯白板
+  if (def.costDown) parts.push(`持续 · 双方每有一张牌被摧毁，此牌能量消耗 −${def.costDown}（最低 0 费）`);
+  // v196：卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）——避免把这张无揭示的牌误标成纯白板
+  if (def.playReq) parts.push(`放置条件 · 仅当你场上已有 ≥ ${def.playReq.n || 1} 张已翻开的「${tokenNameLabel(def.playReq.tk)}」时可从手牌打出`);
+  // v197：手牌回合结束效果（`fx.handEnd`，现仅 1 费「稗田阿求」）——它只在**手牌里**生效，
+  //   打到场上之后不再触发，故与 ⑤ 的 `fx.turnEnd`（场上的牌）分开标注
+  if (def.fx && def.fx.handEnd) parts.push('手牌回合结束 · 仅当此牌仍在手牌中时触发（打到场上后不再生效）');
   // 有其它机制标签时不再前置「无特殊效果（白板）」；纯白板卡仍显示白板标签
   const base = (def.k || !parts.length) ? (KIND_LABEL[def.k] || '') : '';
   if (base && parts.length) return base + '；' + parts.join('、');
   return base || parts.join('、');
+}
+
+/* v194：费用随摧毁递减（`costDown`，现仅 8 费「纯狐」）在放大视图里的补充说明行 ——
+   把「当前双方摧毁池合计」与「因此减了多少费」写清楚，方便核对本机制（没有该字段则返回空串）。
+   显示点两处：showHandCard（手牌 / 特殊牌池卡）与 showFieldCard（场上已翻开卡）。 */
+function costDownNote(def) {
+  if (!def || !def.costDown) return '';
+  const n = destroyCount();
+  const cut = def.costDown * n;
+  const atZero = cut >= def.c;
+  return `<div class="zm-kind cost-mod-note">费用随摧毁递减（每张 −${def.costDown}）：本场战斗中双方已有 ${n} 张牌被摧毁 → 能量消耗 −${cut}${atZero ? '（已减到最低 0 费）' : ''}</div>`;
 }
 
 // 手牌卡放大查看：显示该实例的“当前战力”（基础 + 永久 buff，如凤凰重生后的妹红），
@@ -4314,6 +5243,7 @@ function showHandCard(card) {
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${liveCost}</span>${isSpellDef(def) ? '<span class="zm-pow">法术 · 无战力</span>' : `<span class="zm-pow">当前威力 ${live}</span>`}</div>
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
+    ${costDownNote(def)}
     ${isSpellDef(def)
       ? '<div class="zm-kind">法术：只有能量花费与「揭示」效果 —— 无战力，任何增减都不影响它；揭示结算完后自行消散</div>'
       : (diff !== 0 ? `<div class="zm-kind">基础威力 ${def.p} · 永久增益 ${diff > 0 ? '+' : ''}${diff}</div>` : `<div class="zm-kind">基础威力 ${def.p}</div>`)}
@@ -4420,6 +5350,7 @@ function showFieldCard(card, locIdx) {
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${liveCost}</span>${isSpellDef(def) ? '<span class="zm-pow">法术 · 无战力</span>' : `<span class="zm-pow">场上威力 ${live}</span>`}</div>
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
+    ${costDownNote(def)}
     <div class="zm-kind">${isSpellDef(def) ? '法术 · 无战力（揭示结算完后即自行消散）' : `基础威力 ${def.p}`}</div>
     <div class="zm-kind">${kindTags(def)}</div>
     <div class="zm-desc">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
@@ -4513,6 +5444,160 @@ function uiOnAiSpy() {
   else closeAiSpy();
 }
 
+/* ==================== v187：特殊牌池（侧栏入口 + 弹窗） ====================
+   数据侧见本文件上方的 PILE_KINDS / pushToPile / recordDestroy / recordSpellExile 段
+   （摧毁池 / 弃牌池占位 / 放逐池），这里只做界面：
+     · 入口 `#pileCard` —— 位于 **地形区域的下方、对手信息的上方**：它是侧栏 `#sidePanel`
+       的第一个区块（桌面端侧栏在场地右侧、移动端 ≤900px 侧栏整体排在场地下方，
+       两种布局下它都正好落在“地形下方、对手信息（.opponent）上方”），
+       里面两个按钮分别打开**己方 / 对手**的特殊牌池，各带一个合计张数徽标；
+     · 弹窗 `#pileMask` —— 顶部三个切换按钮（摧毁池 / 弃牌池 / 放逐池，标签取自 PILE_KINDS，
+       按钮上带各自张数），下方按**入池顺序（旧 → 新）**用卡面网格列出该池里的牌，
+       每张卡下方另起一行显示入池序号（#N）与入池回合，悬停显示完整元数据
+       （来源 / 区域 / 入池时战力），点击复用 showHandCard 放大查看（关闭放大层后回到牌池弹窗）。
+   刷新：renderPiles() 更新两个计数徽标，弹窗开着时顺带重渲染当前页签；
+   调用点＝renderZones() 末尾 + 入池收口（recordDestroy / recordSpellExile）。
+   Esc / 点遮罩空白关闭：见本文件底部 initOverlays。 */
+let pileSide = 'p';       // 弹窗当前查看的一方（'p' 己方 / 'a' 对手）
+let pileKind = 'destroy'; // 弹窗当前页签（PILE_KINDS 的 key）
+function pileSideLabel(side) { return side === 'a' ? '对手' : '己方'; }
+function isPilesOpen() {
+  const m = $('pileMask');
+  return !!m && !m.classList.contains('hidden');
+}
+// 侧栏两个按钮的计数徽标（合计三个池的张数；分项写进 title）+ 弹窗开着时的列表刷新
+function renderPiles() {
+  for (const side of ['p', 'a']) {
+    const el = $(side === 'p' ? 'pileCountP' : 'pileCountA');
+    if (!el) continue;
+    el.textContent = String(pileTotalOf(side));
+    const btn = el.closest('.pile-btn');
+    if (btn) {
+      btn.title = `${pileSideLabel(side)}特殊牌池：`
+        + PILE_KINDS.map((k) => `${k.label} ${pileOf(side, k.key).length}`).join(' · ')
+        + '（点击查看，按入池顺序排列）';
+    }
+  }
+  if (isPilesOpen()) renderPilePanel();
+}
+/* 调试探针用：某方三个池的入池清单（`Game._dbg().pileP / pileA`）——按入池顺序列出卡名与元数据 */
+function pileDbg(side) {
+  const out = { total: pileTotalOf(side) };
+  for (const k of PILE_KINDS) {
+    const list = pileOf(side, k.key).map((c) => ({
+      n: c.def.n, turn: c.pileTurn, by: c.pileBy, loc: c.pileLoc, power: c.pilePower,
+    }));
+    out[k.key] = list;
+    out[k.key + 'Count'] = list.length;
+  }
+  return out;
+}
+function buildPileTabs() {
+  const holder = $('pileTabs');
+  if (!holder) return;
+  holder.innerHTML = '';
+  for (const k of PILE_KINDS) {
+    const on = pileKind === k.key;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + (on ? ' active' : '');
+    b.textContent = `${k.label} ${pileOf(pileSide, k.key).length}`;
+    b.title = k.tip;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      if (pileKind === k.key) return;
+      pileKind = k.key;
+      renderPilePanel();
+    });
+    holder.appendChild(b);
+  }
+}
+function renderPilePanel() {
+  const mask = $('pileMask');
+  if (!mask) return;
+  const pile = pileOf(pileSide, pileKind);
+  const kd = pileKindDef(pileKind);
+  const title = $('pileTitle');
+  if (title) title.textContent = `${pileSideLabel(pileSide)}特殊牌池 · ${kd.label}`;
+  const cnt = $('pileCount');
+  if (cnt) cnt.textContent = `${pile.length} 张`;
+  const tip = $('pileTip');
+  if (tip) tip.textContent = '按入池顺序（旧 → 新）显示 · ' + kd.tip;
+  buildPileTabs();
+  const grid = $('pileGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  if (!pile.length) {
+    const none = document.createElement('div');
+    none.className = 'codex-empty';
+    none.textContent = pileEmptyText(pileSide, pileKind);
+    grid.appendChild(none);
+    return;
+  }
+  pile.forEach((card, i) => grid.appendChild(pileCardEl(card, i + 1)));
+}
+// 空池文案（三个池各写一句，说明“为什么现在是空的”）
+function pileEmptyText(side, kind) {
+  const who = pileSideLabel(side);
+  if (kind === 'discard') return `${who}的弃牌池还是空的 —— 本局还没有牌被弃掉（弃牌只把手牌里的牌移出，与场上的摧毁是两回事）。`;
+  if (kind === 'exile') return `${who}的放逐池还是空的 —— 本局还没有法术被使用（法术揭示结算完后消散时入池）。`;
+  return `${who}的摧毁池还是空的 —— 本局还没有牌被摧毁（只有真正离场的摧毁才会入池）。`;
+}
+// 牌池里的一张卡：卡面（战力取“入池时”的记录值）+ 下方入池序号/回合小字 + 元数据悬停提示。
+// 图标角标不叠在卡面上（卡面左上角是费用宝珠、右上角是战力），改为独立的一行小字，手机端同样可见。
+function pileCardEl(card, ord) {
+  const def = card.def;
+  const power = (card.pilePower != null) ? card.pilePower : cardPower(card);
+  const sign = power > def.p ? 'up' : power < def.p ? 'down' : '';
+  // 费用按实例的实时费用显示（被桑尼米尔克加过费的牌入池后仍显示修正值与红字，口径同手牌）
+  const liveCost = cardCost(card);
+  const costSign = liveCost > def.c ? 'up' : liveCost < def.c ? 'down' : '';
+  const meta = [
+    `第 ${ord} 个入池`,
+    `第 ${card.pileTurn} 回合入池`,
+    `来源：${card.pileBy || '效果'}`,
+    card.pileLoc ? `区域：${card.pileLoc}` : null,
+    card.pileKind === 'exile' ? '法术 · 无战力' : `入池时战力 ${power}`,
+  ].filter(Boolean).join(' · ');
+  const cell = document.createElement('div');
+  cell.className = 'pile-cell';
+  cell.title = `${def.n}（${meta}）· 点击放大查看`;
+  const face = document.createElement('div');
+  face.className = 'codex-card hand-card pile-item' + (def.img ? '' : ' no-img');
+  face.style.setProperty('--cgrad', gradOf(def));
+  face.innerHTML = cardFaceHTML(def, { power, sign, cost: liveCost, costSign });
+  face.addEventListener('click', () => showHandCard(card)); // 复用放大查看（关掉放大层仍回到牌池弹窗）
+  const cap = document.createElement('div');
+  cap.className = 'pile-cap';
+  const ordEl = document.createElement('span');
+  ordEl.className = 'pile-ord';
+  ordEl.textContent = '#' + ord;
+  const turnEl = document.createElement('span');
+  turnEl.className = 'pile-turn';
+  turnEl.textContent = `第 ${card.pileTurn} 回合`;
+  cap.appendChild(ordEl);
+  cap.appendChild(turnEl);
+  cell.appendChild(face);
+  cell.appendChild(cap);
+  return cell;
+}
+function openPiles(side) {
+  pileSide = (side === 'a') ? 'a' : 'p';
+  pileKind = 'destroy'; // 每次打开都从「摧毁池」这一页开始
+  renderPilePanel();
+  const mask = $('pileMask');
+  if (mask) mask.classList.remove('hidden');
+}
+function closePiles() {
+  const mask = $('pileMask');
+  if (mask) mask.classList.add('hidden');
+}
+// 侧栏按钮：点一次打开；已打开时再点则收起（与「👁️ 查看」同款开关手感）
+function uiOnPiles(side) {
+  if (isPilesOpen()) { closePiles(); return; }
+  openPiles(side);
+}
+
 /* ---------------- 弹窗 ---------------- */
 function hideModal() { $('modalMask').classList.add('hidden'); }
 
@@ -4554,6 +5639,9 @@ window.Game = {
     onSwitchSide: uiOnSwitchSide,
     onAiSpy: uiOnAiSpy,
     closeAiSpy,
+    // v187：特殊牌池（摧毁池 / 弃牌池 / 放逐池）——'p' 己方 / 'a' 对手
+    onPiles: uiOnPiles,
+    closePiles,
     onEnergyReset: uiEnergyReset,
     confirmEnergyReset,
     cancelEnergyReset,
@@ -4573,7 +5661,20 @@ window.Game = {
     pMoves: (state.playerMoves || []).length, aiMoves: (state.aiMoves || []).length,
     pZones: state.players.p.zones.map((z) => z.length),
     aZones: state.players.a.zones.map((z) => z.length),
+    // v187：特殊牌池（摧毁池 / 弃牌池 / 放逐池）——按入池顺序列出卡名，便于核对机制
+    pileP: pileDbg('p'),
+    pileA: pileDbg('a'),
   }),
+  /* v189/v190/v191：弃牌的**控制台探针** —— 已有两张卡引用本键（**「莉莉黑」**：弃自己最右侧手牌；
+      **v191「小野塚小町」**：弃自己手牌里**印刷费用最高**的一张），探针仍用于任意口径的验证
+      （与卡牌结算同一个 `discardFromHand` 收口，流程/日志/入池/演出一致）：
+       Game._discard('a', { n: 1 })                        → 弃对手手牌随机 1 张
+       Game._discard('p', { pick: 'right' })                → 弃自己手牌**最右侧**那张（v190 口径）
+       Game._discard('p', { pick: 'maxCost' })              → 弃自己手牌里**印刷费用最高**的那张（v191 口径）
+       Game._discard('p', { card: '琪露诺' })               → 弃自己手里的「琪露诺」
+       Game._discard('a', { cost: { min: 5 }, n: 'all' })  → 弃对手手里所有 ≥5 费（印刷费用）的牌
+     返回 { ok, side, cards, cands, want, by, why }（cards = 实际被弃的卡实例）。 */
+  _discard: devDiscard,
 };
 
 // 遮罩层点击空白处关闭 / Esc 逐层关闭
@@ -4584,6 +5685,7 @@ window.Game = {
   const pickMask = $('pickMask');
   const pickLocMask = $('pickLocMask');
   const aiSpyMask = $('aiSpyMask');
+  const pileMask = $('pileMask'); // v187：特殊牌池弹窗
   codexMask.addEventListener('click', (e) => { if (e.target === codexMask) closeCodex(); });
   zoomMask.addEventListener('click', (e) => { if (e.target === zoomMask) closeZoom(); });
   undoMask.addEventListener('click', (e) => { if (e.target === undoMask) cancelEnergyReset(); });
@@ -4601,6 +5703,7 @@ window.Game = {
     }
   }
   if (aiSpyMask) aiSpyMask.addEventListener('click', (e) => { if (e.target === aiSpyMask) closeAiSpy(); });
+  if (pileMask) pileMask.addEventListener('click', (e) => { if (e.target === pileMask) closePiles(); }); // v187
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!zoomMask.classList.contains('hidden')) closeZoom();
@@ -4608,6 +5711,7 @@ window.Game = {
     else if (pickLocMask && !pickLocMask.classList.contains('hidden')) closePickLoc();
     else if (!pickMask.classList.contains('hidden')) uiOnPickClose();
     else if (aiSpyMask && !aiSpyMask.classList.contains('hidden')) closeAiSpy();
+    else if (pileMask && !pileMask.classList.contains('hidden')) closePiles(); // v187：牌池弹窗
     else if (!undoMask.classList.contains('hidden')) cancelEnergyReset();
   });
 })();

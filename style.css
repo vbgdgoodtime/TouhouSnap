@@ -3517,3 +3517,283 @@ body.in-home #zoomMask:not(.hidden) {
   display: flex;
   z-index: 214;
 }
+
+/* ============================================================
+   v187：特殊牌池（侧栏入口 #pileCard + 弹窗 #pileMask）
+   数据口径见 js/game.js 的 PILE_KINDS / pushToPile / recordDestroy / recordSpellExile
+   段与 docs/现有机制.md §6「特殊牌池」条；本段只管样式。
+   - 入口区块 .pile-card：侧栏 #sidePanel 的第一个区块（地形区域的下方、对手信息的上方），
+     外观沿用 .opponent / .rules 的白色透光卡片，里面两个按钮各带一个计数徽标；
+   - 弹窗 .pile-modal：复用 .codex-modal / .codex-head / .card-filter-bar(.chip) /
+     .codex-grid / .codex-card / .codex-empty 的既有样式，另补三处：
+       ① .pile-grid 的高度上限（弹窗内网格自身滚动）；
+       ② 每张卡的“入池顺序”小字（.pile-cell 容器 + .pile-cap 小字 + .pile-ord 序号药丸）
+          ——**不叠在卡面上**（卡面左上角是费用宝珠、右上角是战力），改为卡片下方独立一行，
+          手机端同样可见；
+       ③ **三个池的卡牌尺寸统一**（固定轨道宽 `--pile-card-w` + 卡名/效果文字各预留固定行数，
+          详见下方 `.pile-grid` 段的口径注释）。
+   ============================================================ */
+.pile-card {
+  background: rgba(255, 255, 255, .66);
+  border: 1px solid rgba(108, 148, 100, .32);
+  border-radius: 12px;
+  padding: 10px;
+}
+.pile-card .side-title { margin-bottom: 6px; }
+.pile-btns { display: flex; flex-direction: column; gap: 6px; }
+.pile-btn {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 10px;
+  font-size: 12.5px; font-weight: 700; text-align: left;
+}
+.pile-btn .pb-ico { flex: 0 0 auto; font-size: 13px; }
+.pile-btn .pb-txt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pile-btn .pb-count {
+  flex: 0 0 auto; min-width: 22px; text-align: center;
+  font-size: 11.5px; font-weight: 800; color: #3d5a33;
+  background: #eef6e4; border: 1px solid rgba(124, 164, 110, .55);
+  border-radius: 999px; padding: 1px 6px;
+}
+.pile-modal { width: min(900px, 94vw); max-width: min(900px, 94vw); --pile-card-w: 116px; }
+/* v187：**三个池（摧毁池 / 弃牌池 / 放逐池）的卡牌尺寸完全统一** —— 口径：
+     ① **宽度**：网格改用**固定轨道宽** `var(--pile-card-w)`（不再用 `minmax(..., 1fr)` 随容器
+        拉伸），并 `justify-content: center` 让余量落在两侧 —— 因此**任何池、任何屏宽、
+        第几行第几张都是同一个宽度**（响应式只在断点处整体改这一个变量）；
+     ② **高度**：卡内各段全部固定 —— 顶部角标行 26px、艺术区（有图 `.hc-art` / 缺图 emoji
+        兜底）都是 `aspect-ratio: 1/1` 的正方形、卡名预留 2 行、效果文字固定 2 行，
+        于是“宽度一致 ⇔ 高度一致”，长文案卡与白板卡同高；
+     ③ 卡名不再把卡撑高：短名在 2 行区域内垂直居中（现有最长卡名 10 字＝正好 2 行）；
+     ④ 效果文字超 2 行省略号截断（与手牌 `#hand` 同款口径），完整文案点卡放大查看。 */
+.pile-grid {
+  grid-template-columns: repeat(auto-fill, var(--pile-card-w));
+  justify-content: center;
+  max-height: 58vh;
+}
+.pile-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pile-cell .codex-card { width: 100%; }
+.pile-cell .hc-name {
+  line-height: 1.3; min-height: 2.6em;
+  display: flex; align-items: center; justify-content: center;
+}
+.pile-cell .hc-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.6em;
+}
+.pile-cap {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 0;
+  font-size: 10.5px; font-weight: 700; color: #64805c;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pile-ord {
+  flex: 0 0 auto;
+  background: linear-gradient(135deg, #e0a316, #f4c948);
+  color: #3d2c00; font-weight: 800;
+  border-radius: 999px; padding: 1px 6px;
+}
+.pile-turn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) {
+  .pile-btn { font-size: 12px; padding: 6px 8px; }
+  .pile-grid { max-height: 52vh; }
+}
+@media (max-width: 640px) {
+  /* 手机端：卡牌整体缩小（仍走同一个变量 → 三个池依旧完全同宽同高），
+     并按图鉴 / 指定卡牌的既有口径隐藏效果文字（对所有卡一视同仁，故高度仍统一） */
+  .pile-modal { --pile-card-w: 92px; }
+  #pileGrid { gap: 8px; }
+  #pileGrid .codex-card .hc-text { display: none; }
+  #pileGrid .codex-card { padding: 5px 3px 7px; }
+}
+
+/* ==================== v189：弃牌演出（`discard` 效果键） ====================
+   口径：弃牌 = 把牌从**手牌**移出 → 进该方「弃牌池」；演出**双方可见**（任何一种归属组合都一样）：
+   中央弹出**被弃那张牌的完整卡面**（JS 用 cardFaceHTML + .zoom-card 生成，配图/费用/战力/卡名/
+   效果文案与手牌完全一致）→ **从右上到左下**斜切一刀、卡面裂成两半 → 两半沿对角线的垂直方向
+   分离（上半三角往左上飞、下半三角往右下飞，带轻微旋转）并淡出，全程约 **1.6s**。
+   ⚠️ 时长与 js/game.js 的 `DISCARD_ANIM_MS`（1600）对齐，改时长要两边一起改。
+   ⏱️ **节奏（v190 微调，用户口径：切得晚一点、消散快一点）**：卡面弹入后**停留展示约 0.4s**
+   （让玩家看清是哪张牌）→ 约 **0.68s** 才斜切一刀 → 两半在 **约 0.62s** 内**快速**分离并消散，
+   整段约 **1.6s** 收尾（原来是 0.32s 就切、之后慢慢飘 1.6s）。
+
+   结构（每张被弃的牌一个 .discard-card-wrap，多张时并排）：
+     .discard-reveal                       全屏悬浮层（pointer-events:none，不挡操作）
+       ├ .discard-reveal-tag               「🗑️ 弃牌 · 谁的手牌 · 来源」
+       ├ .discard-reveal-inner
+       │   └ .discard-card-wrap ×N         每张一个块（弹入 + 错开用 --discard-stagger）
+       │       ├ .discard-face             基准整卡（切开那一瞬隐去，与两半像素级重合）
+       │       ├ .discard-half-a           clip-path 上半三角（0 0, 100% 0, 0 100%）
+       │       │   └ .discard-face         同一张卡面的拷贝（绝对定位，与基准对齐）
+       │       ├ .discard-half-b           clip-path 下半三角（100% 0, 100% 100%, 0 100%）
+       │       │   └ .discard-face         同上
+       │       └ .discard-slash-layer      裁到卡面范围内的斩击层
+       │           └ .discard-slash        斜向光刃（角度由 JS 按卡面长宽比写入 --discard-slash-angle）
+       └ .discard-reveal-note              「「X」→ 移入谁的弃牌池（现 N 张）」
+   时间轴（1.6s）：0~17% 卡面放大弹入落定 → 17%~42% 停留展示（看清是哪张牌）→ 42.5%（≈0.68s）
+   斩击线闪一刀、同时裂成两半 → 42.5%~81% 两半**快速**分离渐隐（≈0.62s）→ 88%~100% 整层淡出；
+   JS 在 1.6s + 余量后用 setTimeout 移除整层（不依赖 Web Animations）。 */
+.discard-reveal {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  z-index: 9510;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  /* 只动 opacity（不要动 transform，否则会覆盖上面的居中位移） */
+  animation: discardRevealFade 1.6s ease-out forwards;
+  /* 多张并排时逐张错开会把末张的“切开 + 消散”整体后移，故整层的时长按最大错开量一起延长
+     （--discard-tail 由 JS 按张数写入），保证末张的消散仍在整层淡出之前播完 */
+  animation-duration: calc(1.6s + var(--discard-tail, 0ms));
+}
+@keyframes discardRevealFade {
+  0%   { opacity: 0; }
+  4%   { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.discard-reveal-tag {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(24, 12, 16, .9);
+  border: 1px solid rgba(255, 138, 138, .75);
+  color: #ffc9c9;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .45);
+}
+.discard-reveal-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 16px;
+  max-width: 94vw;
+}
+.discard-reveal-note {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #ffe2e2;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+  white-space: nowrap;
+}
+/* 卡面：复用 .zoom-card（250px 大卡），但**关掉自带的 rise 动画**——基准卡与两半的拷贝必须
+   严格重合，任何额外位移都会让“切开”露出错位。 */
+.discard-reveal .zoom-card { animation: none; }
+.discard-card-wrap {
+  position: relative;
+  animation: discardPop 1.6s cubic-bezier(.2, .8, .3, 1) forwards;
+  animation-delay: var(--discard-stagger, 0ms);
+}
+/* 0~17%（≈0~0.27s）：放大弹入落定，随后**停在原地展示**到 42.5%（≈0.68s）才被切开 */
+@keyframes discardPop {
+  0%   { opacity: 0; transform: scale(.55) rotate(-4deg); }
+  8%   { opacity: 1; transform: scale(1.07) rotate(2deg); }
+  11%  { transform: scale(.97) rotate(-1.5deg); }
+  14%  { transform: scale(1.02) rotate(.6deg); }
+  17%  { transform: scale(1) rotate(0deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+/* 基准整卡：切开那一瞬（42.5%＝≈0.68s）隐去，把画面让给两半 */
+.discard-card-wrap > .discard-face {
+  animation: discardBaseFade 1.6s linear forwards;
+  animation-delay: var(--discard-stagger, 0ms);
+}
+@keyframes discardBaseFade {
+  0%, 42.4% { opacity: 1; }
+  42.5%, 100% { opacity: 0; }
+}
+/* 斜切的两半：切线＝右上角 → 左下角（clip-path 三角），各自内含一份同样的卡面拷贝。
+   消散**快**：延迟到 0.68s（切点）才开始，且只有 0.62s（v190 由 1.6s 缩短）。 */
+.discard-half {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation-duration: 620ms;
+  animation-timing-function: cubic-bezier(.22, .72, .3, 1);
+  animation-fill-mode: forwards;
+  animation-delay: calc(var(--discard-stagger, 0ms) + 680ms); /* 与 discardPop 的 42.5% 对齐 */
+}
+.discard-half > .discard-face {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+}
+.discard-half-a {
+  clip-path: polygon(0 0, 100% 0, 0 100%); /* 上半三角（含左上角）→ 往左上飞 */
+  animation-name: discardHalfA;
+}
+.discard-half-b {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%); /* 下半三角（含右下角）→ 往右下飞 */
+  animation-name: discardHalfB;
+}
+@keyframes discardHalfA {
+  0%   { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  14%  { opacity: 1; transform: translate(-7px, -9px) rotate(-1.6deg); }
+  55%  { opacity: 1; transform: translate(-26px, -34px) rotate(-6deg); }
+  100% { opacity: 0; transform: translate(-44px, -56px) rotate(-9deg); }
+}
+@keyframes discardHalfB {
+  0%   { opacity: 1; transform: translate(0, 0) rotate(0deg); }
+  14%  { opacity: 1; transform: translate(7px, 9px) rotate(1.6deg); }
+  55%  { opacity: 1; transform: translate(28px, 36px) rotate(6deg); }
+  100% { opacity: 0; transform: translate(46px, 58px) rotate(9deg); }
+}
+/* 斩击层：裁到卡面圆角范围内，光刃沿对角线「右上 → 左下」扫过并只闪一下 */
+.discard-slash-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  pointer-events: none;
+}
+.discard-slash {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 200%;
+  height: 3px;
+  margin: -1.5px 0 0 -100%;
+  /* 角度由 JS 按卡面实测长宽比写入（atan2(h, w)），故严格贴着右上→左下那条对角线 */
+  transform: rotate(var(--discard-slash-angle, 45deg));
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, #ffffff 45%, #fff3cf 55%, rgba(255,255,255,0) 100%);
+  background-size: 220% 100%;
+  background-position: 130% 0;
+  box-shadow: 0 0 12px rgba(255, 255, 255, .9), 0 0 26px rgba(255, 206, 140, .7);
+  opacity: 0;
+  animation: discardSlash 1.6s ease-out forwards;
+  animation-delay: var(--discard-stagger, 0ms);
+}
+/* 光带从斜线右端（右上）扫向左端（左下）——只在 42.5%（≈0.68s）切开那一刻亮一下（约 0.25s） */
+@keyframes discardSlash {
+  0%, 39%   { opacity: 0; background-position: 130% 0; }
+  42.5%     { opacity: 1; background-position: 112% 0; }
+  47%       { opacity: 1; background-position: 10% 0; }
+  53%       { opacity: .9; background-position: -30% 0; }
+  62%       { opacity: 0; background-position: -45% 0; }
+  100%      { opacity: 0; background-position: -45% 0; }
+}
+@media (max-width: 700px) {
+  .discard-reveal { top: 40%; gap: 7px; }
+  .discard-reveal-inner { gap: 10px; }
+  .discard-reveal .zoom-card { width: min(150px, 40vw); padding: 8px 9px 12px; border-radius: 14px; }
+  .discard-reveal .zoom-card .hc-art { width: min(136px, 36vw); margin: 6px auto 4px; border-radius: 10px; }
+  .discard-reveal .zoom-card .hc-icon,
+  .discard-reveal .zoom-card .hc-art .hc-icon { font-size: 40px; }
+  .discard-reveal .zoom-card .hc-name { font-size: 15px; }
+  .discard-reveal .zoom-card .hc-text { font-size: 11.5px; line-height: 1.45; margin-top: 8px; }
+  .discard-reveal .zoom-card .cost-orb,
+  .discard-reveal .zoom-card .p,
+  .discard-reveal .zoom-card .hc-spell { width: 30px; height: 30px; font-size: 14px; border-width: 2px; }
+  .discard-reveal-tag { font-size: 11px; padding: 2px 9px; }
+  .discard-reveal-note { font-size: 10.5px; }
+  .discard-slash-layer { border-radius: 14px; }
+}
