@@ -27,7 +27,7 @@
 
   /* ⚠️ 部署完 worker/ 之后，把这里换成你自己的 Worker 地址（`wrangler deploy` 的输出，末尾不要带 / ）。
      用 http(s):// 写即可，代码会自动换成 ws(s)://。 */
-  var SERVER = 'https://touhou2-pvp.touhou2-pvp.workers.dev';
+  var SERVER = 'https://pvp.2houvv.xyz';
 
   var TURN_TIMEOUT = 90; // 等对手提交包的秒数；到点直接判他认输
   var HURRY_AT = 30;     // 倒计时剩这么多秒时状态条转告警色（只是提示，判负仍按 TURN_TIMEOUT）
