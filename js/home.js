@@ -433,6 +433,7 @@
     var settings = $('homeBtnSettings');
     var codex = $('homeBtnCodex');
     var challenge = $('homeBtnChallenge');
+    var net = $('homeBtnNet');
     if (battle) battle.addEventListener('click', startBattle);
     if (dev) dev.addEventListener('click', function () { openPage('dev'); });
     if (deck) deck.addEventListener('click', function () { openPage('deck'); });
@@ -441,6 +442,8 @@
     if (codex) codex.addEventListener('click', openCodex);
     // 挑战码入口：同一个弹窗的导入形态（生成方向在对局结算弹窗上）
     if (challenge) challenge.addEventListener('click', function () { window.Game.ui.onChallengeOpen(); });
+    // 联机对战（房间弹窗在 js/net.js；这里只负责开门，通道逻辑不落在主页面脚本里）
+    if (net) net.addEventListener('click', function () { if (window.Net) window.Net.ui.open(); });
     syncSettingsSub();
 
     var sClose = $('settingsCloseBtn');

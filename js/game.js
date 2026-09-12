@@ -1051,9 +1051,13 @@ const state = {
   turn: 1,
   roundTotal: 6,       // 本局总回合数（实时读 roundsTotal()；此字段只用于“变化的那一刻”留痕）
   phase: 'idle',       // idle | play | busy | over
-  stakes: 1,
-  pSnapped: false,
-  aSnapped: false,   // AI 不再加倍（既不主动也不跟进），该标记恒为 false（侧栏「已加倍」标签不再出现）
+  // 赌注（立方）：结算值 = 2 × 2^(本局加倍人数)，双方各有一次加倍权、整局限用。口径与时间线见下方「赌注」段。
+  stakes: 2,           // 结算将用的值（已含本回合刚宣布、下回合才生效的加倍）
+  snapEff: 0,          // 已生效的加倍次数（0/1/2）
+  snapUsed: { p: false, a: false },    // 各方是否已用掉本局那一次加倍权（AI 永不使用）
+  snapPending: { p: false, a: false }, // 本回合已宣布、下回合开始才生效的加倍
+  snapPrev: 0,         // 撤退价 ＝ 最近一次加倍生效前的结算值（0 ＝ 无宽限，撤退按 stakes 结算）
+  snapPrevUntil: 0,    // 上面这个价保留到第几回合结束（含）
   locs: [],
   locPlan: [],        // 本局三块“真实地形”按揭晓顺序预存（列 0/1/2 分别在第 1/2/3 回合开始揭晓）
   players: {
@@ -1072,6 +1076,12 @@ const state = {
   playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc, side?, hi}]：side 缺省为 'p'（切换立场时记为 'a'）、hi ＝暗出时的手牌下标（重置暗牌时按它插回原位）
   aiMoves: [],
   playAsSide: 'p',     // 开发调试「切换立场」：'a' 时玩家落牌进敌方区且归属对手
+  // **房间座位序**：引擎里所有"按座位遍历、消耗随机数或决定先后"的地方都按它走（洗牌/取牌/掷骰/翻牌先后/状态指纹）。
+  // 单机恒为 ['p', 'a']（＝字面座位，行为与从前完全一致）；联机时是**房间里固定下来的顺序**：房主在先。
+  // 为什么必须有它：两端各自把本地玩家当 'p'（对手当 'a'），字面座位在两端指向不同的人，
+  // 同一颗随机数会派给不同的人 ⇒ 两端算出不同的一局。按房间座位序走，两端才逐颗对齐。
+  seatOrder: ['p', 'a'],
+  netRole: null,       // 联机对局：'host' / 'guest'（单机为 null）——「本机恒坐 'p'、对手恒坐 'a'」，它只用来定座位序与开关联机分支
   fieldQueue: [],      // 场上放置顺序队列：双方卡牌按“放入场上”先后记录，供回合开始/结束/终局按序结算
   moveCardId: null,    // “每回合可移动一次”的牌：当前正在选目标区域的卡 id
   flyMoved: new Set(), // 本回合已自移过的卡 id（如射命丸文）；Set 保持加入顺序，供重置时逆序回位
@@ -1084,6 +1094,34 @@ let pendingSwitchFly = null; // 换边演出待播 {card, srcRect}（由 switch/
 // 自身移动待播的飞行演出队列 {card, srcRect}（roam 等）——由调用方（roundStartStage / revealRound）在渲染后 flush，观感同 fly/shift 的“滑行+缩放”。
 let pendingDriftFly = [];
 // pickDef（开发者“指定卡牌”选中）已随页面实现拆到 card-browser.js
+
+/* ---------------- 赌注（双倍下注） ----------------
+   结算值 = **2 × 2^(本局加倍人数)**：无人加倍 2 立方、一人 4、两人 8。双方**各有一次**加倍权、整局限用（AI 永不使用）。
+   加倍**在宣布的下一回合开始才生效**，但宣布当回合侧栏就抬到新值（＝预告）；
+   从宣布到生效回合结束之前，撤退一律按**加倍前的值**结算 —— 留给对手一个完整回合考虑要不要撤退。
+   末回合宣布没有"下一回合"可等：直接按新值结算（4 / 8）。 */
+function snapPendingCount() { return (state.snapPending.p ? 1 : 0) + (state.snapPending.a ? 1 : 0); }
+function stakesNow() { return 2 << (state.snapEff + snapPendingCount()); }
+// 撤退的结算价：处在「已宣布未生效」或「生效回合」里时仍是加倍前的值（0 ＝ 当前无宽限）
+function retreatStakes() { return state.snapPrev > 0 ? state.snapPrev : state.stakes; }
+// 宣布加倍：记 used / pending 并把结算值抬到新值（重放走同一条路径，两端算出的数才一致）
+function announceSnap(side) {
+  const st = state;
+  st.snapUsed[side] = true;
+  st.snapPrev = 2 << st.snapEff; // 撤退价先记下：本回合宣布的这次加倍还没生效
+  st.snapPrevUntil = Math.max(st.snapPrevUntil, st.turn + 1);
+  st.snapPending[side] = true;
+  st.stakes = stakesNow();
+}
+// 回合开始：先判宽限过期，再让上一回合宣布的加倍正式生效；返回本次生效的加倍次数（0 ＝ 没有）
+function beginRoundStakes() {
+  const st = state;
+  if (st.snapPrev > 0 && st.turn > st.snapPrevUntil) st.snapPrev = 0;
+  const n = snapPendingCount();
+  if (n > 0) { st.snapEff += n; st.snapPending = { p: false, a: false }; }
+  st.stakes = stakesNow();
+  return n;
+}
 
 /* ---------------- 本局录制（挑战码 / 影子对战的原料） ----------------
    一局的完整输入 = **种子 + 双方卡组 + 数据版本 + 双方每回合的动作**。前三项在开局确定，
@@ -1103,6 +1141,15 @@ function cardCodeOf(def) {
     for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].n === def.n) return c + '.' + i;
   }
   return '-'; // 池里找不到（理论上不会）：留个占位，重放时会被判成码损坏
+}
+// 卡名 → 码（`费用.档内下标`）：卡组在 `DeckStorage` 里按**卡名**保存，联机握手交换的是码（取不到返回 null）
+function cardCodeByName(name) {
+  if (!name) return null;
+  for (const c of POOL_COST_KEYS) {
+    const arr = POOL[c] || [];
+    for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].n === name) return c + '.' + i;
+  }
+  return null;
 }
 function cardDefOfCode(code) {
   const p = String(code).split('.');
@@ -1170,15 +1217,17 @@ function recordTurnInputs(side, extra) {
   currentTurnRec[side] = {
     moves: movesForSide(side).map((m) => [m.cardId, m.loc, m.side || side]),
     fly: fly,
-    stakes: state.stakes, // 赌注是玩家在回合中的互动，落牌之外的唯一可变项
+    snap: !!state.snapPending[side], // 本回合是否宣布了加倍：每方整局一次，值由引擎状态派生（重放时反向灌回同一状态）
     retreat: !!(extra && extra.retreat),
   };
 }
 
-/* 一行文本码 `TH2P1:<种子>:<数据哈希>:<建牌路径>:<我方卡组>:<对方卡组>:<逐回合动作>`
+/* 一行文本码 `TH2P2:<种子>:<数据哈希>:<建牌路径>:<我方卡组>:<对方卡组>:<逐回合动作>`
    —— 建牌路径 1 个字符：`d` 自建 12 张 / `c` 费用曲线随机组 / `e` 开发调试空牌库（两条路径消耗的随机数个数不同，必须原样重放）；
-   逐回合按 `|` 分隔，每回合 7 个字段以 `:` 分隔：回合号、我方落牌、我方移动、我方赌注、我方是否认输、对方落牌、对方移动
-   （落牌项 `卡id.区域`，开发调试的敌方立场落牌追加 `A`；移动项 `卡id.来源区域.目标区域`；各项内以 `,` 分隔） */
+   逐回合按 `|` 分隔，每回合 9 个字段以 `:` 分隔：回合号、我方落牌、我方移动、我方本回合是否宣布加倍、我方是否撤退、
+   对方落牌、对方移动、对方本回合是否宣布加倍、对方是否撤退
+   （落牌项 `卡id.区域`，开发调试的敌方立场落牌追加 `A`；移动项 `卡id.来源区域.目标区域`；各项内以 `,` 分隔）。
+   赌注值本身**不入码**：结算值与撤退价都由「谁在第几回合宣布加倍」按同一套规则派生（见上方「赌注」段），两端不会各存一份数。 */
 function encodeRecord() {
   if (!gameRecord) return '';
   const r = gameRecord;
@@ -1188,10 +1237,16 @@ function encodeRecord() {
     // `amv` 字段按定义就是对手的动作，不再重复标注 A
     const mv = (side) => (tr[side] ? tr[side].moves.map((m) => m[0] + '.' + m[1] + (side === 'p' && m[2] === 'a' ? 'A' : '')).join(',') : '');
     const fl = (side) => (tr[side] ? tr[side].fly.map((f) => f.join('.')).join(',') : '');
-    const p = tr.p;
-    return [tr.t, mv('p'), fl('p'), p ? p.stakes : 0, (p && p.retreat) ? 1 : 0, mv('a'), fl('a')].join(':');
+    const p = tr.p, a = tr.a;
+    return [tr.t, mv('p'), fl('p'), (p && p.snap) ? 1 : 0, (p && p.retreat) ? 1 : 0,
+      mv('a'), fl('a'), (a && a.snap) ? 1 : 0, (a && a.retreat) ? 1 : 0].join(':');
   }).join('|');
-  return 'TH2P1:' + r.seed + ':' + r.dataHash + ':' + mode + ':' + r.pDeck.join('-') + ':' + r.aDeck.join('-') + ':' + turns;
+  return 'TH2P2:' + r.seed + ':' + r.dataHash + ':' + mode + ':' + r.pDeck.join('-') + ':' + r.aDeck.join('-') + ':' + turns;
+}
+
+// 旧版（TH2P1）码：7 字段、每回合只带一个赌注值，与新赌注口径对不上 ⇒ 一律拒绝并给一句人话提示
+function isLegacyCode(code) {
+  return String(code == null ? '' : code).replace(/\s+/g, '').indexOf('TH2P1:') === 0;
 }
 
 /* 把一行码解回**与 `Game._record()` 完全同构**的结构（连字段顺序也一致，所以可以直接用
@@ -1199,7 +1254,7 @@ function encodeRecord() {
    前缀不对 / 结构损坏 → null；**数据版本不同不在这里判**，由调用方比对 `dataHash`。 */
 function decodeRecord(code) {
   const raw = String(code == null ? '' : code).replace(/\s+/g, ''); // 聊天工具常把长码按行折断
-  if (raw.indexOf('TH2P1:') !== 0) return null;
+  if (raw.indexOf('TH2P2:') !== 0) return null;
   const f = raw.slice(6).split(':');
   if (f.length < 6) return null;
   const seed = Number(f[0]);
@@ -1210,15 +1265,14 @@ function decodeRecord(code) {
   for (const seg of f.slice(5).join(':').split('|')) { // 逐回合用 `|` 分隔、回合内用 `:`，故先把后段拼回来再切
     if (!seg) continue;
     const t = seg.split(':');
-    if (t.length < 7) return null;
+    if (t.length < 9) return null;
     const pm = parseMoves(t[1], 'p'), pf = parseFly(t[2]);
     const am = parseMoves(t[5], 'a'), af = parseFly(t[6]);
     if (!pm || !pf || !am || !af) return null;
-    const stakes = Number(t[3]) || 1;
     turns.push({
       t: Number(t[0]),
-      p: { moves: pm, fly: pf, stakes: stakes, retreat: t[4] === '1' },
-      a: { moves: am, fly: af, stakes: stakes, retreat: false },
+      p: { moves: pm, fly: pf, snap: t[3] === '1', retreat: t[4] === '1' },
+      a: { moves: am, fly: af, snap: t[7] === '1', retreat: t[8] === '1' },
     });
   }
   return { seed: seed, dataHash: f[1], pDeckMode: mode, pDeck: f[3] ? f[3].split('-') : [], aDeck: f[4] ? f[4].split('-') : [], turns: turns };
@@ -1258,14 +1312,15 @@ function replayTurn() {
 /* 把记录里的落牌 / 移动灌回引擎。**不做合法性校验**：录制时已经合法过一次，两端盘面也一致，重放的是同一串事实。
    状态改动与玩家点牌落子 / `aiThink` 等价：进区、进放置队列、出手牌、扣能量、记进 playerMoves / aiMoves。
    对不上（码损坏或版本不同）⇒ 返回 false 并记一条红字，由调用方把重放标为中断。 */
-function applyRecordedMoves(side, moves, fly) {
+function applyRecordedMoves(side, moves, fly, tag) {
   const pl = state.players[side];
   const who = side === 'p' ? '我方' : '对手';
+  const pre = tag || '⟲ 重放';
   for (const m of moves || []) {
     const cardId = m[0], locIdx = m[1], owner = m[2] || side; // owner：开发调试的敌方立场落牌，归属对手
     const hi = pl.hand.findIndex((c) => c.id === cardId);
     if (hi < 0) {
-      log('danger', `⟲ 重放中断：${who}手牌里找不到卡 #${cardId}（码与盘面不符）。`);
+      log('danger', `${pre}中断：${who}手牌里找不到卡 #${cardId}（动作与本机盘面不符）。`);
       return false;
     }
     const card = pl.hand[hi];
@@ -1276,29 +1331,32 @@ function applyRecordedMoves(side, moves, fly) {
     pl.hand.splice(hi, 1);
     pl.energyLeft -= paid;
     (side === 'p' ? state.playerMoves : state.aiMoves).push({ cardId: card.id, loc: locIdx, side: owner });
-    log(owner, `⟲ 重放暗出「${card.def.n}」(${paid}费) → ${state.locs[locIdx].def.n}`);
+    log(owner, `${pre}暗出「${card.def.n}」(${paid}费) → ${state.locs[locIdx].def.n}`);
   }
   for (const f of fly || []) {
     const cardId = f[0], from = f[1], to = f[2];
     const src = state.players[side].zones[from];
     const ci = src.findIndex((c) => c.id === cardId);
     if (ci < 0) {
-      log('danger', `⟲ 重放中断：${who}区域 ${from + 1} 里找不到卡 #${cardId}。`);
+      log('danger', `${pre}中断：${who}区域 ${from + 1} 里找不到卡 #${cardId}。`);
       return false;
     }
     const [card] = src.splice(ci, 1);
     state.players[side].zones[to].push(card);
     state.flyMoved.add(card.id);
     state.flyMovedFrom[card.id] = { j: from, zi: ci };
-    log(side, `⟲ 重放移动「${card.def.n}」：区域 ${from + 1} → ${to + 1}`);
+    log(side, `${pre}移动「${card.def.n}」：区域 ${from + 1} → ${to + 1}`);
   }
   return true;
 }
 
-// 重放某一方的回合：先还原赌注（赌注是回合中的互动，只在玩家侧变化），再灌动作；动作对不上就标记中断
+// 重放某一方的回合：先把这一回合的加倍宣布灌回引擎（结算值与撤退价都由它派生），再灌动作；动作对不上就标记中断
 function replayApply(side, rec) {
   if (!rec) return true;
-  if (rec.stakes) { state.stakes = rec.stakes; state.pSnapped = state.stakes > 1; }
+  if (rec.snap && !state.snapUsed[side]) {
+    announceSnap(side);
+    log('snap', `⟲ 重放：${side === 'p' ? '我方' : '对手'}本回合宣布双倍下注（本局结算 ${state.stakes} 立方）。`);
+  }
   const ok = applyRecordedMoves(side, rec.moves, rec.fly);
   if (!ok && replayMode) replayMode.aborted = true;
   return ok;
@@ -1309,7 +1367,12 @@ function replayApply(side, rec) {
    码不合法 / 数据版本不同 / 对手牌组对不上 ⇒ 立刻中止返回 null（绝不带着不一致的输入往下跑）。 */
 async function replayGame(code, opts) {
   const rec = decodeRecord(code);
-  if (!rec) { setStatus('挑战码格式不对（应以 TH2P1: 开头）。'); return null; }
+  if (!rec) {
+    setStatus(isLegacyCode(code)
+      ? '这是旧版挑战码（TH2P1）—— 赌注口径已变（双方各有一次加倍、加倍下回合生效），旧码打不开，请对方用新版重打一局生成新码。'
+      : '挑战码格式不对（应以 TH2P2: 开头）。');
+    return null;
+  }
   if (rec.dataHash !== DATA_HASH) {
     setStatus(`这个挑战码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}），没法重放 —— 请双方刷新后再试。`);
     return null;
@@ -1354,6 +1417,73 @@ async function replayGame(code, opts) {
   return stateFingerprint();
 }
 
+/* ---------------- 联机对局（PvP）· 引擎侧挂钩 ----------------
+   口径：本机恒坐 `p`、对手恒坐 `a`（两端状态互为镜像，房间座位序见 `state.seatOrder`）；双方各带一套 12 张卡组，
+   建牌一律"房主在先"（`restart` 的 `netPvp` 分支）。
+   通道（WebSocket / 房间 / 握手 / 对账 / 超时判负）全在 `js/net.js` 的 `window.Net` 里，这里只做三件事：
+   ① 把某一方本回合的动作打成提交包；② 把收到的包灌回引擎；③ 加倍 / 认输 / 超时判负的即时应用。 */
+function netOn() { return !!state.netRole && !!(window.Net && window.Net.active && window.Net.active()); }
+// 某方场上某张卡（按卡 id 找，返回它所在区域）
+function cardInZones(side, id) {
+  const zones = state.players[side].zones;
+  for (let j = 0; j < 3; j++) {
+    const c = zones[j].find((x) => x.id === id);
+    if (c) return { card: c, loc: j };
+  }
+  return null;
+}
+/* 提交包：`{ t:'turn', round, side, moves:[[卡牌编码, 区域]], fly:[[编码, 来源, 目标]], snap, retreat }`。
+   落牌 / 移动用**卡牌编码**（`费用.档内下标`）而不是卡 id：编码由数据哈希兜住、与建牌顺序无关，
+   两端都能在"该方手牌 / 场上"里找到同一张牌（卡 id 虽然两端也一致，但那个一致性依赖建牌顺序，编码这个约定更耐用）。
+   **对账码不在包里**：包是"提交那一刻"打的，两端那时各自只应用了自己那一手，本就该不一样；
+   对账在"双方动作都灌完、翻牌之前"这个同步点另发一条（见 playRound 里的 reconcileRound）。 */
+function netLocalPackage(side, round, retreat) {
+  const moves = [];
+  for (const m of movesForSide(side)) {
+    const hit = cardInZones(side, m.cardId);
+    if (hit) moves.push([cardCodeOf(hit.card.def), m.loc]);
+  }
+  const fly = [];
+  for (const idStr of Object.keys(state.flyMovedFrom)) {
+    const id = Number(idStr);
+    const hit = cardInZones(side, id);
+    if (!hit) continue;
+    const rec = state.flyMovedFrom[id];
+    const from = (rec && typeof rec === 'object') ? rec.j : rec;
+    if (from !== hit.loc && from >= 0) fly.push([cardCodeOf(hit.card.def), from, hit.loc]);
+  }
+  return {
+    t: 'turn', round: round, side: side,
+    moves: moves, fly: fly,
+    snap: state.snapPending[side] ? 1 : 0,
+    retreat: retreat ? 1 : 0,
+  };
+}
+// 把一方（对手发来的 / 重连时从房间日志灌回来的）提交包灌回引擎：编码 → 本机卡 id，再走与重放同一个收口
+function netApplyPackage(side, pkg, tag) {
+  const who = side === 'p' ? '我方' : '对手';
+  if (pkg.snap && !state.snapUsed[side]) announceSnap(side);
+  const moves = [], fly = [];
+  for (const m of (pkg.moves || [])) {
+    const card = state.players[side].hand.find((c) => cardCodeOf(c.def) === m[0]);
+    if (!card) {
+      log('danger', `⇄ 联机：${who}的提交包里有一张本机手牌里找不到的牌（${m[0]}）—— 本局中止。`);
+      return false;
+    }
+    moves.push([card.id, m[1], side]);
+  }
+  for (const f of (pkg.fly || [])) {
+    const src = state.players[side].zones[f[1]] || [];
+    const card = src.find((c) => cardCodeOf(c.def) === f[0]);
+    if (!card) {
+      log('danger', `⇄ 联机：${who}的提交包里有一次本机找不到的移动（${f[0]}）—— 本局中止。`);
+      return false;
+    }
+    fly.push([card.id, f[1], f[2]]);
+  }
+  return applyRecordedMoves(side, moves, fly, tag || '⇄ 联机');
+}
+
 /* ---------------- 挑战码弹窗（导出 / 导入两形态，同一套 DOM） ---------------- */
 function challengeMaskEl() { return $('challengeMask'); }
 function closeChallenge() {
@@ -1385,6 +1515,10 @@ function setChallengeMode(exporting) {
 }
 // 结算弹窗「📤 生成挑战码」
 function uiChallengeExport() {
+  if (state.netRole) {
+    setStatus('联机对局不生成挑战码 —— 联机的码还要带"谁执哪一边"的座位信息，现有码格式装不下（单机对局照常）。');
+    return;
+  }
   if (!gameRecord || gameRecord.pDeckMode === 'empty') {
     setStatus('开发调试对局（空牌库）没有可分享的挑战码 —— 用正常对局打完一局再生成。');
     return;
@@ -1426,7 +1560,9 @@ function uiChallengeStart(mode) {
   const code = ta ? ta.value : '';
   const rec = decodeRecord(code);
   if (!rec) {
-    setChallengeTip('这不是一个有效的挑战码（应以 TH2P1: 开头，可能被截断或改动过）。如果对方刚改过游戏，也请先按 Ctrl+F5 硬刷新本页再试。', true);
+    setChallengeTip(isLegacyCode(code)
+      ? '这是旧版挑战码（TH2P1）：赌注口径已改成「双方各有一次加倍、加倍下回合生效」，旧码不再支持 —— 请对方用新版重打一局生成新码（并先 Ctrl+F5 硬刷新本页）。'
+      : '这不是一个有效的挑战码（应以 TH2P2: 开头，可能被截断或改动过）。如果对方刚改过游戏，也请先按 Ctrl+F5 硬刷新本页再试。', true);
     return;
   }
   if (rec.pDeckMode === 'empty') { setChallengeTip('这是开发调试对局（空牌库）的码，打不开。', true); return; }
@@ -1455,13 +1591,18 @@ async function restart(opts) {
   state.turn = 1;
   state.roundTotal = 6; // 新一局的总回合数记录回到 6（本局真实值由 roundsTotal() 实时判定）
   state.phase = 'idle';
-  state.stakes = 1;
-  state.pSnapped = false;
-  state.aSnapped = false;
+  state.stakes = 2; // 开局尚无人加倍 ⇒ 结算值就是 2 立方（结算值 = 2 × 2^加倍人数，见「赌注」段）
+  state.snapEff = 0;
+  state.snapUsed = { p: false, a: false };
+  state.snapPending = { p: false, a: false };
+  state.snapPrev = 0;
+  state.snapPrevUntil = 0;
   state.selected = -1;
   state.playerMoves = [];
   state.aiMoves = [];
   state.playAsSide = 'p'; // 新一局默认己方立场
+  state.netRole = null;   // 联机对局由下面的 netPvp 分支设定（每局显式清空，不靠"记得手动清"）
+  state.seatOrder = ['p', 'a'];
   state.fieldQueue = []; // 场上放置顺序队列（时机效果按放置先后结算）
   buffFlashQueue = [];
   pendingDriftFly = [];
@@ -1487,7 +1628,21 @@ async function restart(opts) {
   //    所以重放时必须走**同一条** —— 走错一条，后面整条随机流就错位，对手牌组与三块地形全都会变。
   //    `pDeckMode` 就是为这件事记的（写进挑战码），取值：'defs' / 'curve' / 'empty'。
   let pDeckMode = 'curve';
-  if (opts.emptyPlayerDeck === true) {
+  if (opts.netPvp) {
+    // 联机对局：双方各带一套 12 张卡组，**一律按"房主在先"的顺序建牌**（两端消耗随机数、分配卡牌 id 的顺序必须一致），
+    // 各自按实际座位落座：本机玩家恒坐 'p'、对手恒坐 'a'，房间座位序见 state.seatOrder。
+    const np = opts.netPvp;
+    const guest = np.role === 'guest';
+    state.netRole = guest ? 'guest' : 'host';
+    state.seatOrder = guest ? ['a', 'p'] : ['p', 'a'];
+    const hostSeat = guest ? 'a' : 'p';
+    const guestSeat = guest ? 'p' : 'a';
+    lastEmptyPlayerDeck = false;
+    pDeckMode = 'defs';
+    lastPlayerDeckDefs = (guest ? np.guestDefs : np.hostDefs).slice();
+    state.players[hostSeat].deck = buildDeckFromDefs(np.hostDefs, hostSeat);
+    state.players[guestSeat].deck = buildDeckFromDefs(np.guestDefs, guestSeat);
+  } else if (opts.emptyPlayerDeck === true) {
     pDeckMode = 'empty';
     lastEmptyPlayerDeck = true;
     lastPlayerDeckDefs = null;
@@ -1521,8 +1676,8 @@ async function restart(opts) {
       state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
     }
   }
-  // 对手每局按 AI 费用结构从卡池随机组一套 12 张（同费用不重复）
-  state.players.a.deck = buildDeckCards(AI_DECK_CURVE, 'a');
+  // 对手每局按 AI 费用结构从卡池随机组一套 12 张（同费用不重复）；联机对局改由 `netPvp` 指定双方卡组（见上）
+  if (!opts.netPvp) state.players.a.deck = buildDeckCards(AI_DECK_CURVE, 'a');
   // 两副牌此刻都是完整 12 张 —— 记下本局输入（必须在下面抽牌之前）
   startRecord(pDeckMode);
 
@@ -1635,7 +1790,7 @@ function energyOf(side) {
 }
 /** 回合开始给双方写入本回合能量基数（各侧变量独立）：并入一次性 `pendingEnergyGain`（加完即清空、写进 `energyGain` 供 HUD 提示）与本局永久的 `state.energyAddPerTurn`（`gs.energyAdd`）⇒ 第 t 回合 = min(t, 6) + N。 */
 function grantTurnEnergy(total) {
-  for (const side of ['p', 'a']) {
+  for (const side of state.seatOrder) {
     const pl = state.players[side];
     const gain = state.pendingEnergyGain[side] || 0;
     // 开局登记的「每回合最大能量 +N」（本局永久）与一次性 pendingEnergyGain 叠加，但结算后不清零
@@ -1762,6 +1917,26 @@ function dequeueField(card) {
   const i = state.fieldQueue.indexOf(card);
   if (i >= 0) state.fieldQueue.splice(i, 1);
 }
+// 本区**双方**的卡（先房主一侧、再另一侧）：跨座位取牌时用 —— 引擎里写死的 `p`/`a` 顺序在联机镜像下会反，
+// 而"先摧谁的牌"会影响入摧毁池的顺序与日志，两端必须一致。
+function zoneCardsBothSides(locIdx) {
+  const out = [];
+  for (const s of state.seatOrder) for (const c of state.players[s].zones[locIdx] || []) out.push(c);
+  return out;
+}
+
+/* 联机对局专用：把「放置队列」按（入队回合 → 房间座位序 → 原先后）稳定排序（见 §回合管线前的队列注释）。
+   为什么必须排：两端各自把本地玩家当 'p'，本回合的牌天然"先本机、后对手"入队，而本机在两端是不同的人
+   ⇒ 同一回合里两端的入队先后正好相反，而回合开始 / 回合结束 / 终局的 fx 都是**按队列序**结算的。
+   排完两端得到同一个顺序（同座位内部的先后照旧）。单机不调用：单机本来就是 'p' 在先，排了也是同一个顺序。 */
+function canonicalizeFieldQueue() {
+  if (!state.netRole) return;
+  const first = state.seatOrder[0];
+  const rank = (c) => (c.side === first ? 0 : 1);
+  const rows = state.fieldQueue.map((c, i) => [c, i]);
+  rows.sort((x, y) => (x[0].fieldTurn || 0) - (y[0].fieldTurn || 0) || rank(x[0]) - rank(y[0]) || x[1] - y[1]);
+  state.fieldQueue = rows.map((r) => r[0]);
+}
 // 场上某张卡当前所在区域下标（按其属方查）；不在场上返回 -1（防御）
 function fieldLocOf(card) {
   const pl = state.players[card.side];
@@ -1835,7 +2010,7 @@ function applyGameStartEffect(side, card, gs) {
 /** 阶段挂点 ⓪：游戏开始效果 —— 建库/发牌/选区后、第 1 回合前执行（现注册者：7 费「哆来咪」）；返回本次真正触发的卡 [{ side, card, gs }…]，供 restart 播「登场」演出，空数组则跳过。 */
 function runGameStartEffects() {
   const hits = [];
-  for (const side of ['p', 'a']) {
+  for (const side of state.seatOrder) {
     const pl = state.players[side];
     // 开局“拥有”的判定：牌库 ∪ 起手（对手的 3 张起手在 ⓪ 之前已发）∪ 场上（防御：现无落场来源）
     const owned = pl.deck.concat(pl.hand);
@@ -1980,7 +2155,7 @@ function runTurnEndEffects() {
    ⚠️ 两个子句都要成立（打到场上 / 已被弃 / 被换走都不再触发）、双方一视同仁、含第 6 回合末；逐张按手牌顺序入「弃牌池」并播完整弃牌演出
    （走 `discardFromHand` 的 `onlyCard` 参数收窄到触发的那一张实例，同名双卡不误伤）；非摧毁类：不触发 surv/phx/prot/ind、不改战力与格位。 */
 function runHandEndEffects() {
-  for (const side of ['p', 'a']) {
+  for (const side of state.seatOrder) {
     const pl = state.players[side];
     if (!pl) continue;
     const who = side === 'p' ? '你' : '对手';
@@ -2079,7 +2254,7 @@ function runLocAppearSpawn(idx, def) {
     let placed = 0;
     const made = [];
     const names = { p: [], a: [] };
-    for (const side of ['p', 'a']) {
+    for (const side of state.seatOrder) {
       for (let i = 0; i < cnt; i++) {
         if (sideRoom(side, idx) < 1) break;
         const pick = cands[Math.floor(rng() * cands.length)];
@@ -2145,7 +2320,7 @@ async function shatterZoneCards(locIdx, gen, srcName) {
   const def = locDef(locIdx);
   const where = def ? def.n : `区域 ${locIdx + 1}`;
   const targets = state.fieldQueue.filter((c) => c && fieldLocOf(c) === locIdx);
-  for (const side of ['p', 'a']) {
+  for (const side of state.seatOrder) {
     for (const c of state.players[side].zones[locIdx]) {
       if (targets.indexOf(c) < 0) targets.push(c); // 兜底：不在放置队列里的也一并摧毁
     }
@@ -2379,6 +2554,11 @@ function randomLocCandidates(locIdx) {
 // 阶段 ①：回合开始 —— 地形揭晓 → 地形定时变形 → 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置；本阶段为 async（「天界」摧毁链要等播完）
 async function roundStartStage(gen) {
   const st = state;
+  // ①-0 之前：上一回合宣布的加倍在这里正式生效（结算值当场抬到新值；本回合结束前撤退仍按加倍前的值）
+  if (beginRoundStakes() > 0) {
+    log('snap', `⚡ 双倍下注生效：本局结算 ${st.stakes} 立方 —— 本回合结束前撤退仍按 ${retreatStakes()} 立方结算。`);
+    renderHud();
+  }
   await locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
   if (gen !== state.gen) return;
   await locXformTurnEffects(); // ①-0b 地形定时变形（秘封俱乐部第 5 回合开始时变随机地形 + 结算其「出现时」）
@@ -2430,20 +2610,42 @@ async function playRound(gen) {
     await sleep(300);
   } else {
     // 影子（同一局面挑战）走这条：玩家照常操作，只有对手的动作来自记录
+    if (netOn()) window.Net.localTurnStarted(st.turn); // 联机状态条：轮到你了
     const act = await waitPlayer();
     if (gen !== state.gen) return;
+    if (state.phase === 'over') return; // 等待期间对手认输 ⇒ 本局已结束，别再往下打
     retreat = act.type === 'retreat';
+    // 联机：本机的动作**当场打包发出**（含本回合是否宣布加倍与是否认输），不等回合末
+    if (netOn()) window.Net.submitLocalTurn(netLocalPackage('p', st.turn, retreat));
   }
   recordTurnInputs('p', { retreat: retreat }); // 玩家已提交：采集本回合我方动作
-  if (retreat) { doRetreat(); return; }
+  if (retreat) { doRetreat('p'); return; }
 
   // 阶段 ③：对手放置（重放时来自记录；开发调试跳过，AI 不出牌）
   state.phase = 'busy';
   renderControls();
+  let aRetreat = false;
   if (replayMode) {
-    replayApply('a', (replayTurn() || {}).a);
+    const tr = replayTurn() || {};
+    aRetreat = !!(tr.a && tr.a.retreat);
+    replayApply('a', tr.a);
     renderAll();
     await sleep(300);
+  } else if (netOn()) {
+    // 对手的提交包：等到就灌回来；**等不到就判他认输**（不做"本机替它出牌"的托管 —— 谁没交包谁输）
+    const pkg = await window.Net.awaitRemoteTurn(st.turn);
+    if (gen !== state.gen) return;
+    if (state.phase === 'over') return; // 等待期间对手认输 ⇒ 本局已结束
+    if (!pkg) {
+      // 超时判负：先告诉对手"你被判超时了"（他若真掉线，这条发不出去，与本机判断一致），再自己收摊
+      window.Net.sendTimeout();
+      window.Game.net.forfeitPeer();
+      return;
+    }
+    if (!netApplyPackage('a', pkg, '⇄ 联机')) { window.Net.abort('对手的提交包与本机盘面对不上。'); return; }
+    aRetreat = !!pkg.retreat;
+    renderAll();
+    await sleep(150);
   } else if (isDevMode()) {
     setStatus('开发调试：对手本回合不出牌。');
     state.aiMoves = [];
@@ -2453,8 +2655,8 @@ async function playRound(gen) {
     await sleep(600);
     if (gen !== state.gen) return;
     // AI 决策期间的随机改走**独立种子流**（`aiRng`）：只在这一次同步调用期间临时换掉全局 `Math.random`。
-    // 为什么不能放着不管：`js/ai.js` 在"并列打分"处用全局 Math.random，同一颗种子跑两遍会挑到不同的并列项 ⇒ 整局结果对不上、无法复现/对账。
-    // 为什么不让 AI 直接用主逻辑流 `rng()`：掉线托管只有一端会跑 AI，另一端没跑 ⇒ 主逻辑流错位。两条流独立，各管各的。
+    // 为什么不能让 AI 消耗主逻辑流 `rng()`：**AI 的随机不属于"一局的输入"** —— 同一个种子 + 同一串动作必须算出同一局
+    // （挑战码重放、联机两端对账都靠这一条）。AI 若把主逻辑流吃走，整条随机流的位置就会随 AI 的思考次数漂移。
     // 每次 `restart` 都会重新播种，所以这里正常恒为真；留着是为了"未播种时一个全局都不碰"（那时 aiRng 本来就等于原生随机）。
     const realRandom = Math.random;
     if (aiSeed !== null) Math.random = aiRng;
@@ -2473,9 +2675,15 @@ async function playRound(gen) {
     await sleep(600);
   }
   if (gen !== state.gen) return;
-  recordTurnInputs('a'); // 对手已提交：采集本回合对方动作
+  recordTurnInputs('a', { retreat: aRetreat }); // 对手已提交：采集本回合对方动作
+  if (aRetreat) { doRetreat('a'); return; }
 
   // 阶段 ④：翻牌结算（翻开暗牌，逐张按放置顺序结算「揭示」效果）
+  // ⚠️ 顺序不能反：先按房间座位序规范化「放置队列」，再取对账指纹 ——
+  //    两端的本回合入队先后天然相反，排之前取指纹会**必然对不上**（那是假警报，不是真分叉）。
+  canonicalizeFieldQueue();
+  // 联机对账点：此刻双方的动作都已灌完、翻牌还没开始（且队列已是同一个顺序）—— 两端状态必须完全一致
+  if (netOn()) window.Net.reconcileRound(st.turn, stateFingerprint());
   await revealRound(gen);
   if (gen !== state.gen) return;
 
@@ -2675,12 +2883,13 @@ function uiSnap() {
   const st = state;
   if (replayMode && replayMode.mode === 'review') return; // 复盘不接受玩家操作；影子则由玩家照常出牌、也可加倍
   if (st.phase !== 'play' && st.phase !== 'busy') return;
-  if (st.stakes >= 8) { setStatus('赌注已达上限 8。'); return; }
-  st.stakes = Math.min(8, st.stakes * 2);
-  st.pSnapped = true;
-  log('snap', `⚡ 你双倍下注！赌注升至 ${st.stakes}`);
-  setStatus(`你双倍下注！当前赌注 ${st.stakes}`);
+  if (st.snapUsed.p) { setStatus('本局你已经加倍过了 —— 整局只能加倍一次。'); return; }
+  announceSnap('p');
+  log('snap', `⚡ 你双倍下注！本局结算升至 ${st.stakes} 立方（下回合生效；本回合与下回合内谁撤退都按 ${retreatStakes()} 立方结算）。`);
+  setStatus(`你双倍下注！本局结算 ${st.stakes} 立方（下回合生效）。`);
   renderAll();
+  // 联机：加倍**当场**告诉对手（对手要在本回合内决定要不要撤退，等到回合末的提交包就晚了）
+  if (netOn()) window.Net.sendSnap();
 }
 
 function uiEndTurn() {
@@ -2785,15 +2994,24 @@ function undoFlyMoves() {
 function uiRetreat() {
   const st = state;
   if (st.phase !== 'play') return;
+  // 联机：认输**当场**告诉对手（对手的界面立刻收摊；提交包随后也会带同一个标记，两端幂等）
+  if (netOn()) window.Net.sendRetreat();
   resolvePlayer({ type: 'retreat' });
 }
 
-function doRetreat() {
+// 认输：按「撤退价」结算 —— 处在加倍的预告 / 生效回合里时仍是加倍前的值（先止损再谈加倍）
+function doRetreat(side) {
   const st = state;
+  const amt = retreatStakes();
   st.phase = 'over';
   renderAll();
-  log('danger', `你认输了，输掉 ${st.stakes} 立方。`);
-  showModal('🏳️', '你认输了', '对手获得本局胜利。', -st.stakes);
+  if (side === 'a') {
+    log('sys', `🏳️ 对手认输了，你赢得 ${amt} 立方。`);
+    showModal('🏆', '对手认输', '你获得本局胜利。', amt);
+    return;
+  }
+  log('danger', `你认输了，输掉 ${amt} 立方。`);
+  showModal('🏳️', '你认输了', '对手获得本局胜利。', -amt);
 }
 
 /* ---------------- AI ---------------- */
@@ -2824,15 +3042,17 @@ async function revealRound(gen) {
   if (gen === undefined) gen = st.gen;
   // 决定先后翻牌：首回合随机；其后按当前领先方（结算口径）先翻，持平则随机。
   // 同一方的多张牌严格按“放置顺序”翻。
+  // ⚠️ 随机择方一律在**房间座位序**上抽（`state.seatOrder` 的第 0/1 位），不写死 'p'/'a'：
+  //    联机两端各自把本地玩家当 'p'，若按字面座位抽，同一颗随机数会落到不同的人身上 ⇒ 两端翻牌先后相反、整局分叉。
   let first;
   if (st.turn === 1) {
-    first = rng() < 0.5 ? 'p' : 'a';
+    first = rng() < 0.5 ? state.seatOrder[0] : state.seatOrder[1];
     log('sys', `首回合随机决定翻牌顺序：由${first === 'p' ? '你' : '对手'}先翻开。`);
   } else {
     first = currentLeaderSide();
     if (first) log('sys', `翻牌顺序：当前${first === 'p' ? '你' : '对手'}领先，由${first === 'p' ? '你' : '对手'}先翻开。`);
     else {
-      first = rng() < 0.5 ? 'p' : 'a';
+      first = rng() < 0.5 ? state.seatOrder[0] : state.seatOrder[1];
       log('sys', '翻牌顺序：当前形势持平，随机决定先后。');
     }
   }
@@ -3040,7 +3260,7 @@ function revealEffectWillChange(side, locIdx, card) {
       }
       const tb = def.tkBuff;
       if (!tb || !tb.tk) return false;
-      const sides = tb.own ? [side] : ['p', 'a'];
+      const sides = tb.own ? [side] : state.seatOrder;
       return sides.some((s2) => state.players[s2].zones.some(
         (z) => z.some((c) => c.revealed && !c.def.un && !c.def.spell && c.def.tk === tb.tk)
       ));
@@ -4296,7 +4516,7 @@ function applyEffect(side, locIdx, card, spec) {
       for (let j = 0; j < 3; j++) {
         const zP = st.players.p.zones[j];
         const zA = st.players.a.zones[j];
-        const hitZ = zP.concat(zA).filter((c) => c.revealed && !c.def.un && !c.def.spell && c.def.c === wantCost);
+        const hitZ = zoneCardsBothSides(j).filter((c) => c.revealed && !c.def.un && !c.def.spell && c.def.c === wantCost);
         if (!hitZ.length) continue;
         if (locNoDestroy(j)) { zoneSkipped.push(locDef(j).n); continue; }
         const goneZ = [];
@@ -4407,7 +4627,7 @@ function applyEffect(side, locIdx, card, spec) {
       const add = tb.a || 0;
       // tk 标记没有中文名表：由 TOKENS 里带该标记的卡名反推可读标签（现 'rock' → 石块）；该反推收口在 tokenNameLabel()
       const tkLabel = tokenNameLabel(tb.tk);
-      const sides = tb.own ? [side] : ['p', 'a'];
+      const sides = tb.own ? [side] : state.seatOrder;
       const hit = [];
       for (const s2 of sides) {
         for (let j = 0; j < 3; j++) {
@@ -5170,7 +5390,7 @@ function locGapEffects() {
     if (!per) continue;
     const n = Math.max(1, Math.floor(per));
     const hit = [];
-    for (const side of ['p', 'a']) {
+    for (const side of state.seatOrder) {
       const used = sideUsed(side, j);
       const before = locSideMax(side, j);
       if (used >= before) continue;
@@ -5290,7 +5510,7 @@ function locDiceEffects() {
     if (!dice || st.turn !== dice.turn) continue;
     const n = dice.n || 1;
     const hit = [];
-    for (const side of ['p', 'a']) {
+    for (const side of state.seatOrder) {
 
       for (const c of st.players[side].zones[j].slice()) {
         if (c.def.un || c.def.spell) continue;
@@ -5321,7 +5541,7 @@ function locRallyEffects() {
     const add = rally.add || 0;
     if (!add) continue;
     const hit = [];
-    for (const side of ['p', 'a']) {
+    for (const side of state.seatOrder) {
 
       for (const c of st.players[side].zones[j].slice()) {
         if (!c.revealed || c.def.un || c.def.spell) continue;
@@ -5350,7 +5570,7 @@ function locTurnEndPowerEffects() {
     if (!delta) continue;
     const hit = [];
     let blocked = 0;
-    for (const side of ['p', 'a']) {
+    for (const side of state.seatOrder) {
 
       for (const c of st.players[side].zones[j].slice()) {
         if (!c.revealed || c.def.un || c.def.spell) continue;
@@ -5498,7 +5718,9 @@ function renderAll() {
 
 function renderControls() {
   const inPlay = state.phase === 'play';
-  $('btnSnap').disabled = !inPlay || state.stakes >= 8;
+  const snapBtn = $('btnSnap');
+  snapBtn.disabled = !inPlay || state.snapUsed.p;
+  snapBtn.textContent = state.snapUsed.p ? (state.snapPending.p ? '已加倍（下回合生效）' : '已加倍') : '双倍下注';
   $('btnRetreat').disabled = !inPlay;
   $('btnPass').disabled = !inPlay;
 
@@ -5548,7 +5770,12 @@ function renderHud() {
       gainEl.title = `本回合额外能量 +${g}（由「额外能量」机制提供，一次性）`;
     }
   }
-  $('cubeVal').textContent = state.stakes;
+  // 赌注框显示的是**本局结算将用的值**（含本回合刚宣布、下回合才生效的加倍）；悬浮说明当前是否处在宽限期
+  const cubeEl = $('cubeVal');
+  cubeEl.textContent = state.stakes;
+  cubeEl.title = state.snapPrev > 0
+    ? `本局结算 ${state.stakes} 立方（有加倍已宣布/刚生效 —— 本回合结束前谁撤退都按 ${state.snapPrev} 立方结算）`
+    : `本局结算 ${state.stakes} 立方（双方各可加倍一次：一人 4、两人 8）`;
   const pips = $('cubePips');
   pips.innerHTML = '';
   for (let i = 1; i <= 3; i++) {
@@ -6561,7 +6788,12 @@ function renderSide() {
   $('aiCount').textContent = st.players.a.hand.length;
   $('aiDeck').textContent = st.players.a.deck.length;
   updateDeckCount();
-  $('aiSnapTag').classList.toggle('hidden', !st.aSnapped);
+  // 对手的加倍状态：宣布当回合标「下回合生效」，之后就是「已加倍」（单机下 AI 永不使用，该标签不出现）
+  const aiTag = $('aiSnapTag');
+  if (aiTag) {
+    aiTag.classList.toggle('hidden', !st.snapUsed.a);
+    aiTag.textContent = st.snapPending.a ? '⚡ 已加倍（下回合生效）' : '⚡ 已加倍';
+  }
   const enRow = $('aiEnergyRow');
   const enA = st.players.a;
   if (enRow) {
@@ -6646,7 +6878,7 @@ function isPilesOpen() {
   return !!m && !m.classList.contains('hidden');
 }
 function renderPiles() {
-  for (const side of ['p', 'a']) {
+  for (const side of state.seatOrder) {
     const el = $(side === 'p' ? 'pileCountP' : 'pileCountA');
     if (!el) continue;
     el.textContent = String(pileTotalOf(side));
@@ -6799,17 +7031,23 @@ function stateFingerprint() {
   const st = state;
   const snap = {
     turn: st.turn, phase: st.phase, stakes: st.stakes, rounds: roundsTotal(),
+    // 加倍状态也要进指纹：结算值相同但「还剩几次加倍权 / 有没有尚未生效的加倍 / 撤退价还是不是旧的」不同时，
+    // 后续回合的结算与撤退都会分叉 —— 这正是联机对账要当场看出来的东西。按座位序取，两端才是同一个数。
+    dbl: [st.snapEff, st.snapUsed[st.seatOrder[0]] ? 1 : 0, st.snapUsed[st.seatOrder[1]] ? 1 : 0,
+      st.snapPending[st.seatOrder[0]] ? 1 : 0, st.snapPending[st.seatOrder[1]] ? 1 : 0, st.snapPrev, st.snapPrevUntil],
     locs: st.locs.map((l) => (l && l.def ? l.def.id : '-')),
     queue: st.fieldQueue.map((c) => c.id),
   };
-  for (const side of ['p', 'a']) {
-    const pl = st.players[side];
-    snap[side] = {
+  // 双方各一段，**按房间座位序取、键名用序位**（`s0`/`s1`）：联机两端各自把本地玩家当 'p'，
+  // 若键名写 'p'/'a'，同一个键在两端指向不同的人 ⇒ 指纹永远对不上、对账就失去意义了。
+  for (let i = 0; i < 2; i++) {
+    const pl = st.players[st.seatOrder[i]];
+    snap['s' + i] = {
       energy: [pl.energyTotal, pl.energyLeft, pl.energyGain || 0],
       hand: pl.hand.map((c) => [c.id, cardCost(c), cardPower(c)]),
       deck: pl.deck.map((c) => c.id),
       zones: pl.zones.map((z, j) => z.map((c) => [c.id, cardPowerIn(j, c), c.revealed ? 1 : 0])),
-      piles: PILE_KINDS.map((k) => pileOf(side, k.key).map((c) => c.id)),
+      piles: PILE_KINDS.map((k) => pileOf(st.seatOrder[i], k.key).map((c) => c.id)),
     };
   }
   return shortHash(stableStringify(snap));
@@ -6863,10 +7101,51 @@ window.Game = {
   _fingerprint: stateFingerprint, // 状态指纹探针：同种子 + 同动作 ⇒ 两端必须一致
   _newGame: newSeededGame,  // 测试用：设种子重开一局并等到「停在等你操作」，返回该时刻指纹（autoPass ⇒ 返回终局指纹）
   _inputs: decidingInputs,  // 测试用：这一局由哪些输入决定（卡组 / 地形 / 起手 / 能量）—— 指纹不一致时先比它
-  _record: () => gameRecord, // 本局录制内容（种子 / 卡组 / 逐回合动作），可读结构便于核对
-  _code: encodeRecord,      // 本局的一行挑战码（TH2P1:…）
+  _record: () => gameRecord, // 本局录制内容（种子 / 卡组 / 逐回合动作含加倍与撤退），可读结构便于核对
+  _code: encodeRecord,      // 本局的一行挑战码（TH2P2:…；旧版 TH2P1 码不再支持）
   _replayInfo: decodeRecord, // 把一行码解回可读结构（与 `_record()` 同构）：往返验证 / 排查码用
   _replay: replayGame,      // 重放一行挑战码（整局自动重算），返回终局指纹
+  // 联机对局（PvP）引擎侧挂钩：通道与房间逻辑在 js/net.js（`window.Net`），这里只暴露它需要的那几件
+  net: {
+    active: netOn,
+    // 卡名 → 码（`费用.档内下标`）：卡组在 DeckStorage 里按**卡名**保存，握手交换的是码（取不到返回 null，由调用方拦）
+    codesOfNames: (names) => (names || []).map(cardCodeByName),
+    // 按握手结果开局：`o = { role, seed, hostCodes, guestCodes }`。码解析不出卡（版本/数据不一致）就直接拒绝开局
+    restart: (o) => {
+      const hostDefs = (o.hostCodes || []).map(cardDefOfCode);
+      const guestDefs = (o.guestCodes || []).map(cardDefOfCode);
+      if (hostDefs.length !== 12 || guestDefs.length !== 12 || hostDefs.some((d) => !d) || guestDefs.some((d) => !d)) {
+        log('danger', '⇄ 联机：双方卡组里有解析不出的卡（对方可能没刷新页面），本局未开局 —— 请双方先 Ctrl+F5 再试。');
+        return null;
+      }
+      return restart({ seed: o.seed, netPvp: { role: o.role, hostDefs: hostDefs, guestDefs: guestDefs } });
+    },
+    localPackage: netLocalPackage,
+    applyPackage: netApplyPackage,
+    // 对手即时宣布加倍 / 认输：与它随后的提交包幂等（同一个标记只生效一次）
+    applyPeerSnap: (side) => { if (!state.snapUsed[side]) { announceSnap(side); log('snap', `⚡ 对手双倍下注！本局结算 ${state.stakes} 立方（下回合生效）。`); renderAll(); } },
+    applyPeerRetreat: (side) => {
+      if (state.phase === 'over') return;
+      doRetreat(side);
+      resolvePlayer({ type: 'peerRetreat' }); // 本机若正停在"等你操作"，把它解开，交给主循环收摊
+    },
+    // 超时判负的两端：等不到包的一方判**对手**认输（`forfeitPeer`），被对方判超时的一方判**自己**认输（`forfeitSelf`）
+    forfeitPeer: () => {
+      if (state.phase !== 'over') {
+        log('danger', '⏱️ 对手超时没有提交 —— 本局判他认输。');
+        doRetreat('a');
+      }
+      resolvePlayer({ type: 'peerRetreat' });
+    },
+    forfeitSelf: () => {
+      if (state.phase !== 'over') {
+        log('danger', '⏱️ 你超时没有提交 —— 本局判你认输。');
+        doRetreat('p');
+      }
+      resolvePlayer({ type: 'peerRetreat' });
+    },
+    fingerprint: stateFingerprint,
+  },
   ui: {
     onSnap: uiSnap,
     onPass: uiEndTurn,

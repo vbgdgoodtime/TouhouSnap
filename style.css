@@ -4288,3 +4288,48 @@ body.in-home #zoomMask:not(.hidden) {
   .discard-reveal-note { font-size: 10.5px; }
   .discard-slash-layer { border-radius: 14px; }
 }
+
+/* ============================================================
+   联机对战（js/net.js）
+   ============================================================ */
+body.in-home #netMask:not(.hidden) {
+  display: flex;
+  z-index: 212;
+}
+.net-modal { width: min(520px, 94vw); max-width: min(520px, 94vw); }
+.net-server,
+.net-room-info {
+  font-size: 11.5px;
+  color: #78906f;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.net-room-row { margin-bottom: 8px; }
+.net-room-input {
+  width: 100%;
+  height: 42px;
+  margin-bottom: 0;
+  text-align: center;
+  letter-spacing: 4px;
+  font-size: 17px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+/* 房间弹窗的提示行（net.js 的 ui.tip 写入，warn ＝ 需要玩家处理的错误） */
+.net-tip { min-height: 34px; margin-bottom: 14px; font-size: 11.5px; line-height: 1.5; color: #78906f; }
+.net-tip.warn { font-weight: 700; color: #d04848; }
+.net-actions { flex-wrap: wrap; }
+/* 对局中的联机状态条：房间码 / 角色 / 对手在线 / 本回合提交与对账 */
+.net-bar {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #cfe6c4;
+  background: rgba(38, 58, 40, .92);
+  border-bottom: 1px solid rgba(224, 163, 22, .35);
+  text-align: center;
+}
+@media (max-width: 900px) {
+  .net-bar { font-size: 11px; padding: 5px 8px; }
+  .net-actions .btn { flex: 1; min-width: 0; }
+}

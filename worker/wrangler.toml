@@ -1,0 +1,13 @@
+name = "touhou2-pvp"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# 房间 Durable Object 的绑定：代码里通过 env.ROOMS 拿到它
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# 免费计划只在 SQLite 后端的 Durable Object 上可用
+[[migrations]]
+tag = "init"
+new_sqlite_classes = ["Room"]

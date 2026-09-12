@@ -21,6 +21,8 @@ python -m http.server 8000        # 然后打开 http://localhost:8000/
 - 📚 图鉴：不进对局；与对局顶栏「📖 图鉴」同一弹窗，含「普通卡牌池 / 衍生卡牌池」两层筛选。
 - 开发调试：空牌库 + 固定地形 + 指定卡牌 / 石块等调试工具。
 - ⚙️ 设置：切换对手 AI 强度，四档 简单（默认）/ 普通 / 困难 / 月狂，点选即生效并记在本地。
+- 🔗 挑战码：粘贴朋友的挑战码 → 看复盘 / 挑战同一局面；把自己的这一局生成一行码在结算弹窗。
+- 🌐 联机对战：6 位房间码开房，双方各带一套 12 张卡组实时对打（房间服务在 `worker/`，需先部署）。
 - 📖 新手引导：五个主入口下方，只读的机制速览弹窗，不进入对局。
 
 ## 目录结构
@@ -37,7 +39,11 @@ Touhou2/
 │  ├─ deck-page.js    卡组设置页面（window.DeckBuilder；12 卡槽同排序，复用 CardBrowser.orderDefs）
 │  ├─ deck-storage.js 卡组本地持久化（localStorage: touhou2.decks.v1）
 │  ├─ home.js         主页面（window.Home）
+│  ├─ net.js          联机对战（window.Net）：房间、握手、提交包、每回合对账、超时判负
 │  └─ dev-page.js     开发调试模式（window.DevTools）
+├─ worker/            联机房间服务（Cloudflare Workers + Durable Objects；只转发消息，不参与规则）
+│  ├─ src/index.js    Worker 与房间 DO（wrangler 入口）
+│  └─ wrangler.toml   部署配置（绑定 ROOMS；免费计划用 SQLite 后端的 DO）
 ├─ data/              游戏数据（改卡 / 改地形只动这里）
 │  ├─ cards.js        人物卡 POOL + 特殊卡 SPECIAL
 │  └─ locations.js    地形池 POOL
@@ -75,6 +81,7 @@ npm test             # 等价于 node tests/smoke-test.js
 | `docs/历史版本.md` | 历史变更记录（**暂时停用**：不再追加记录、不再取版本号） |
 | `docs/开发规则.md` | 开发规则（★ 规则 1 最重要）：1 只写当前内容、一切改动先精简；2 新卡取图流程；3 改动只写专项文档；4 术语口径；5 数值记法「A-B = A 费 / B 战力」；6 验证由用户负责 / AI 不自行测试；7 不确定先问用户；8 需求里的括号不进游戏内文本 |
 | `docs/card-image-map.md` | 卡图文件名对照表、素材状态、新增卡配图流程 |
+| `docs/联机对战.md` | 联机：实时房间（通道 / 握手 / 提交包 / 对账 / 托管 / 重连）、挑战码格式、重放的两种模式与探针 |
 
 改动约定（`docs/开发规则.md` 规则 3）：加卡 / 改机制 / 改地形 / 改特殊卡只更新对应专项文档；`docs/GAME_REFERENCE.md` 只维护总纲与索引；**变更记录暂停**——不再往 `docs/历史版本.md` 追加记录；所有改动都按规则 1 **先精简再落笔**。
 
