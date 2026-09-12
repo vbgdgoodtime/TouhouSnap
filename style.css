@@ -194,6 +194,7 @@ body {
 .location.houraipharmacy { border-color: rgba(64, 176, 140, .55); }
 .location.calmsea      { border-color: rgba(79, 168, 200, .6); }
 .location.falsemoon    { border-color: rgba(201, 196, 232, .65); }
+.location.moriyashrine { border-color: rgba(120, 200, 130, .6); }
 /* 聚变反应炉：暗红色为主的主题底 */
 .location.reactor {
   background: linear-gradient(180deg, #47100b 0%, #5c1509 100%);
@@ -663,6 +664,69 @@ body {
 .location.falsemoon .cell-guide { border-color: rgba(208, 202, 250, .38); }
 .location.falsemoon .zone .slot-row.quad::before { background: rgba(208, 202, 250, .24); }
 .location.falsemoon .slot-count { color: #f4f1ff; background: rgba(14, 16, 32, .84); }
+
+/* ==================== v208：守矢神社（🌾）+ 区域「揭示重复触发」（地形字段 repeatReveal） ====================
+   地形主题：翠绿神社 —— 深林绿底 + 常青树与注連縄的亮绿（与「迷途竹林」的竹青、「幽明结界」的灰绿
+   刻意区分：本块更饱和、更亮，偏“神社境内的常青树”意象）；
+   效果＝在此区域翻开的揭示牌，其揭示效果再重复触发一次（口径见 data/locations.js 的 `repeatReveal=`）。 */
+.location.moriyashrine {
+  background: linear-gradient(180deg, #0d2b1c 0%, #14492e 55%, #0a2116 100%);
+  border-color: #78c882;
+}
+.location.moriyashrine .loc-head {
+  background: linear-gradient(180deg, #2f7a47, #1b5230);
+  border-bottom-color: rgba(190, 240, 190, .38);
+}
+.location.moriyashrine .loc-name { color: #eefbf0; }
+.location.moriyashrine .loc-mid {
+  background: linear-gradient(180deg, rgba(20, 73, 46, .8), rgba(10, 33, 22, .74));
+  border-bottom-color: rgba(150, 225, 160, .32);
+}
+.location.moriyashrine .loc-effect { color: #b7e8bf; }
+.location.moriyashrine .zone.opp {
+  background: rgba(120, 200, 130, .10);
+  border-bottom-color: rgba(150, 225, 160, .26);
+}
+.location.moriyashrine .zone.player-zone {
+  background: linear-gradient(180deg, rgba(120, 200, 130, .09), transparent 70%);
+}
+.location.moriyashrine .cell-guide { border-color: rgba(160, 230, 170, .38); }
+.location.moriyashrine .zone .slot-row.quad::before { background: rgba(160, 230, 170, .24); }
+.location.moriyashrine .slot-count { color: #eefbf0; background: rgba(8, 30, 18, .82); }
+
+/* ==================== v211：东风谷早苗「揭示再触发」的可见演出 ====================
+   早苗每次结算 `retrigger`（她在守矢神社里翻开时结算两次）时：
+     ① `.retrigger-ring` —— 早苗卡位上的**淡绿光环扩散**（两圈，外层宽/内层窄）；
+     ② `.retrigger-hit-ring` —— 每张被再触发的目标卡上**金白闪光**。
+   两个元素都由 js/game.js 的 playRetriggerAura / playRetriggerHit **动态创建到 body 悬浮层**
+   （`position:fixed` + 按卡面 getBoundingClientRect 定位，z-index 9450 / 9440、`pointer-events:none`）。
+   ⚠️ 为什么不用卡面本体的 `box-shadow`/`transform`：`.mini-card` 自带 `overflow: hidden`（会裁掉外阴影），
+   且翻面时挂的 `.played-now`（`flipIn` 关键帧）**同样动 `transform`/`box-shadow`**，会与卡面上的动画打架；
+   放 body 悬浮层与 v80 的「+N」绿环（`.gain-ring`）同一路数，**不受重建与裁切影响**，也不会留孤儿节点
+   （动画播完由 JS 的 setTimeout 移除）。时长常量在 js/game.js：`RETRIGGER_AURA_MS` / `RETRIGGER_HIT_MS`。 */
+.retrigger-ring {
+  border: 2px solid rgba(150, 245, 175, .95);
+  box-shadow: 0 0 14px rgba(126, 230, 158, .85), inset 0 0 12px rgba(126, 230, 158, .5);
+  animation: retriggerRingOut 760ms ease-out forwards;
+}
+@keyframes retriggerRingOut {
+  0%   { transform: scale(.82); opacity: 0; }
+  16%  { transform: scale(1.0); opacity: 1; }
+  100% { transform: scale(1.0) translateY(0); opacity: 0;
+         box-shadow: 0 0 0 var(--rr-grow, 22px) rgba(126, 230, 158, 0), inset 0 0 4px rgba(126, 230, 158, 0);
+         border-color: rgba(150, 245, 175, 0); }
+}
+.retrigger-hit-ring {
+  border: 2px solid rgba(255, 224, 140, .95);
+  box-shadow: 0 0 16px rgba(255, 214, 106, .9), inset 0 0 10px rgba(255, 214, 106, .45);
+  animation: retriggerHitRing 420ms ease-out forwards;
+}
+@keyframes retriggerHitRing {
+  0%   { transform: scale(1.14); opacity: 0; }
+  22%  { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0;
+         box-shadow: 0 0 26px 8px rgba(255, 214, 106, 0); border-color: rgba(255, 224, 140, 0); }
+}
 
 /* 辉针城：反转区意象——上下各半（上黑下白） */
 .location.needle {

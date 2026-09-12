@@ -1482,6 +1482,13 @@ function placeToken(side, locIdx, tkDef, cnt, out) {
      ④ revealRound：翻开暗牌，逐张按放置顺序结算 —— 先区域「翻开时」效果
                     （gamble，如驹草赌场随机 ±1，v156）→ 再该卡自身「揭示」效果
                     → 最后区域「揭示后吹飞」（gust，如魔力风暴吹到另一区，v162）
+                    （v207：`retrigger`（东风谷早苗）在“该卡自身揭示”这一步把**本区己方已翻开卡**
+                      的揭示逐张再触发一次、每张间隔 0.5s；与 shift/gather/reviveDiscard 同为
+                      走分步演出的键，见 revealRound 内的分支；只重触发揭示，不跑 fx 时机效果
+                      与 og/surv/phx/prot/ind 等非揭示机制，也不重跑地形类 gamble/gust）
+                    （v208/v210：地形「守矢神社」（字段 `repeatReveal`）让**在该区发生的每一次揭示结算
+                      都执行两次**（1 次 + 停 400ms 后重复 1 次；仅揭示，持续与回合开始/结束不算）——
+                      暗牌翻面走快照资格；**早苗再触发出来的那些揭示也在守矢神社里结算 ⇒ 同样执行两次**）
      ⑤-0 runLocTurnEndEffects：**区域（地形）回合结束效果**——每回合翻牌结算后最先执行：
                     先结算地形（grow 成长 / decay 衰减 → dice 定时掷骰（指定回合）→
                     rally 定时加成（指定回合）→ purge 回合末摧毁 → collapse 崩塌（幽明结界）→
@@ -2252,7 +2259,7 @@ async function locXformTurnEffects() {
     const def = locDef(j);
     const xt = def.xformTurn;
     if (!xt || st.turn !== xt.turn) continue; // 只在指定回合的回合开始结算
-    const cands = LOCATION_POOL.filter((d) => d && d.id !== def.id); // v199：只排除自身
+    const cands = randomLocCandidates(j); // v213：候选收口（与卡牌键 `xformR` 共用）；口径＝v199 的“只排除自身”
     if (!cands.length) {
       log('danger', `${def.icon} ${def.n}：地形池里没有可变成的其它地形，本次不变形。`);
       continue;
@@ -2274,6 +2281,61 @@ async function locXformTurnEffects() {
   if (changed) renderZones(); // 隙间 / 锁定遮罩 / 点数横幅随新地形即时刷新
   return changed;
 }
+
+/* ---- v213：区域「随机变形」的**候选收口**（卡牌键 `xformR` 与地形字段 `xformTurn` 共用）----
+   候选 = `LOCATION_POOL` 里**除本列当前地形以外**的全部地形：
+     · **允许与另外两列当前地形重复**（口径同 v199：不为了“三区互不相同”而缩池）；
+     · `EXTRA` 的非随机地形（「未揭示」/「已破碎」）**不入候选** ⇒ 随机变形绝不会变出它们；
+     · 池里只剩一块地形（或找不到当前地形，防御）时返回空数组，调用方按“不变形”处理。 */
+function randomLocCandidates(locIdx) {
+  const cur = locDef(locIdx);
+  return LOCATION_POOL.filter((d) => d && (!cur || d.id !== cur.id));
+}
+
+/* ==================== v213：区域「随机变形」（卡牌键 `xformR`，现仅 1 费「梅莉」）====================
+   一句话口径：**揭示：把本区域地形整体换成地形池里随机另一个地形**，并**立刻结算目标地形的
+   「出现时」效果** —— 即把 v199 地形「秘封俱乐部」的 `xformTurn`（第 5 回合随机变形）**搬到卡牌揭示上**
+   （梅莉正是秘封俱乐部的成员，与「秘封俱乐部」地形同一机制血缘）。
+   写法：`k: 'xformR'`（**无需附加字段**——候选口径写死在共用收口 `randomLocCandidates`）。
+   口径（用户确认，v213；**全部沿用 v199 `xformTurn` 的随机变形口径**）：
+     ① **候选** = `LOCATION_POOL` 里**除本列当前地形以外的全部地形**（**允许与另外两列当前地形重复**；
+        `EXTRA` 的非随机地形不入候选）；
+     ② **不做上限防御**：抽中「上限放不下本区已放卡」的地形（如迷途竹林 max 2 而某侧已放 3 张）
+        **照常变形** —— 已放卡**不移动、不增删、不摧毁**，隙间只铺在“空置的不可用格”（口径同
+        「地形揭晓」/`xformTurn`）；这与卡牌键 `xform` 的“超限则**变形失败**”**刻意相反**；
+     ③ **立刻结算目标地形的「出现时」效果**（`runLocAppearEffect`，v151 口径；目标无 `spawn` 则空操作）
+        + `resetLocGaps`（清空本列已封隙间）+ `refreshLocHeader`（列名/图标/效果文案/配色即时更新）；
+     ④ **落地即全量生效**（口径同 v199 ④）：新地形**从变形那一刻起**按其字段参与，含**同一回合末**的
+        `grow`/`decay`/`dice`/`rally`/`purge`/`collapse`/`gap`；
+     ⑤ **可能变出特殊地形**：抽到「虚假之月」→ `syncRoundTotal('卡牌区域随机变形')` 让本局总回合数
+        当场变 7（已进入第 7 回合则按 v203 锁定为 7）；抽到「天界」→ 照常启动 `shatter` 摧毁链
+        （`revealRound` 在本张牌结算后会 `await awaitShatterChain()`，与卡牌 `xform` 同一条兜底 ⇒
+        不会与后续翻牌 / 回合末效果抢时序）；
+     ⑥ **已破碎的列一律跳过**（`locShattered`）—— 与 `xform`/`xformTurn`/`collapse`/开发者「指定地形」
+        四路一致：绝不复活一块被「天界」摧毁的区域；
+     ⑦ **非“摧毁”/非增减/非放置**：本键自身不改任何卡牌战力与格位、不触发 `surv`/`phx`/`prot`/`ind`、
+        不进 `powerLog`/`fieldQueue`（目标地形若带 `spawn`，其生成物走 `placeToken` 的既有口径）；
+     ⑧ **静海**：`applyEffect` 入口守卫照常拦下（文本被抹除 ⇒ 不变形，只记一条日志）。
+     ⑨ ⚠️ **可以换掉“尚未揭晓”的列**（现按本键的字面语义放行，用户可另行拍板是否禁止）：候选只看
+        “除**当前地形**以外”，而「未揭示」是 `EXTRA` 占位地形、**不在 `POOL` 里** ⇒ 候选仍是全部
+        真实地形。因此把梅莉打到**尚未揭晓**的列（第 1/2/3 回合的揭晓尚未发生）并翻开时，她会**当场
+        把那一列变成随机真实地形**；由于 `locationRevealStage` 以 `loc.def.id === 'unreveal'` 判断
+        “还没揭晓”，该列**原定的揭晓此后会被整段跳过** —— 即 `locPlan` 里预存的那块地形**不会再出现**，
+        也不播「未揭示淡出」演出（`state.locPlan` 里的值本身保留、只是不再被消费）。
+        若日后要禁止，只需在 `case 'xformR'` 开头加一句“当前地形是 `unreveal` 就不变形”的守卫。
+   登记点（三处）：`applyEffect` 的 `case 'xformR'`、`revealEffectWillChange` 的 `xformR` 分支
+   （地形池里还有候选才为 true，否则跳过结算前那 400ms 停顿）、`data/cards.js` 的 `KIND_LABEL.xformR`
+   （图鉴/详情里的效果标签）。
+   ⚠️ **为什么不复用 `xform` + `xf: 'random'`**：`def.xf` 是**地形 id 字段**，`js/ai.js` 的 `case 'xform'`
+   会把它当地形 id 查表投影（AI 侧未收录本键 ⇒ 退化成“认不出的效果”，与 v204/v207 新键的既有表现一致）；
+   把 `'random'` 塞进 `xf` 会让那条投影拿到一个**不存在的地形 id**。**新键不碰 `xf` 的语义** ——
+   `xf` 永远只放真实地形 id。
+   与另外几个“变形”机制的分工：`xform`＝卡牌揭示时**指定**目标、**超限则失败**；本键＝卡牌揭示时
+   **随机**目标、**超限照常变形**；`xformTurn`（秘封俱乐部）＝**回合开始时**随机，唯一差别是触发时机
+   （地形规则 vs 卡牌揭示）；`collapse`＝回合末按**卡牌张数**达标触发、目标**指定**、超限不崩塌。
+   ⚠️ **与 v208「守矢神社」的叠加**：本键在守矢神社里翻开会被**执行两次**（资格＝翻开那一刻的快照）
+   ⇒ **一次揭示连换两次地形**（第 2 次在 400ms 后，按“换完后的当前地形”重新抽候选）；
+   「东风谷早苗」`retrigger` 再触发本键时同理（再抽一次，资格实时读区域）。 */
 
 // 阶段 ①：回合开始 —— 地形揭晓 → 地形定时变形（v199）→ 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置
 // v205：本阶段改为 async —— ①-0 / ①-0b 里若出现「天界」，要等它的摧毁演出链播完再继续。
@@ -2742,6 +2804,10 @@ async function revealRound(gen) {
     // 在翻面瞬间、该卡自身揭示效果结算**之前**结算，因此卡面战力/翻牌日志/后续
     // bl 落后判定等都按博彩后的威力计算。
     runLocRevealEffects(mv.side, mv.loc, card); // v170：法术不吃博彩（见该函数）
+    // v208：地形「守矢神社」（字段 repeatReveal）——**资格按“翻开那一刻”快照认定**（用户口径）：
+    // 在翻牌途中本列被卡牌 xform 换成别的地形（如灵乌路空 → 聚变反应炉）也**照常**重复一次，
+    // 故这里先把本列此刻是否带 repeatReveal 记下来，等该卡自身揭示结算完（法术则是消散之前）再用。
+    const repeatRevealHere = !!locDef(mv.loc).repeatReveal;
     renderZones(); // 翻面：新元素带 .played-now → CSS flipIn（0.5s 从小到大缩放）入场
     log(mv.side, isSpell(card)
       ? `「${card.def.n}」翻牌 — 法术（无战力；揭示效果结算后消散）`
@@ -2749,7 +2815,7 @@ async function revealRound(gen) {
     let willChange = false;
     if (card.def.k) {
       // v202：静海「抹除文本」——在带 mute 的区域里翻开的牌，其文本视为不存在 ⇒ 揭示不发动。
-      // 三个走分步演出的键（shift / gather / reviveDiscard）也一并在这里拦下，
+      // 四个走分步演出的键（shift / gather / reviveDiscard / v207 的 retrigger）也一并在这里拦下，
       // 不必进各自的演出函数（否则它们会绕过 applyEffect 入口的守卫）。
       if (cardMuted(card)) {
         muteSkipLog(card, '揭示效果');
@@ -2757,23 +2823,20 @@ async function revealRound(gen) {
         // 只有效果“真的会造成变化”时才停顿展示（缩放动画同时播放，避免同帧重建吞掉入场）
         willChange = revealEffectWillChange(mv.side, mv.loc, card);
         if (willChange) await sleep(400);
-        if (card.def.k === 'shift') {
-          // 八云紫整体右移：分步演出，每移动一张间隔 0.3s（v78）
-          await applyShiftReveal(mv.side, card.def.t);
-        } else if (card.def.k === 'gather') {
-          // v171：三妖精集结——按区域顺序逐区生成并揭示（第 1→2→3 区），每区之间 0.5s；
-          // 三区都揭示完并做完“己方三妖精 +N 战力”之后才返回，随后才轮到本法术消散。
-          await applyGatherReveal(mv.side, card);
-        } else if (card.def.k === 'reviveDiscard') {
-          // v193：四季映姬的复活弃牌池——**逐张**推进（复活 → 渲染「凝聚显形」→ 结算该张的揭示
-          // → 停 500ms → 下一张），避免一次性复活一大把牌（连锁揭示叠加 / 演出互相盖住）。
-          await applyReviveDiscardReveal(mv.side, card);
-        } else {
-          applyEffect(mv.side, mv.loc, card);
-        }
+        // v209/v210：翻牌流程内的**揭示分派统一收口**到 resolveRevealInZone()——
+        // 它先按 resolveCardReveal 走该键的结算（四个「分步演出」键走各自的异步分步版：
+        // 八云紫每张 0.3s / 三妖精集结每区 0.5s / 四季映姬每张 500ms / 早苗每张 0.5s），
+        // 再按本列是否带 `repeatReveal` 决定**是否再来一次**（守矢神社：本区发生的揭示执行两次；
+        // 资格用上面翻面瞬间的快照 `repeatRevealHere`）。**早苗再触发的每一条揭示也走同一条收口**
+        // （见 retriggerOneStaged），故“她再触发出来的揭示”同样会被本区加倍——用户口径的 6 次链。
+        await resolveRevealInZone(mv.side, mv.loc, card, repeatRevealHere);
         if (willChange) renderZones(); // 效果确有变化才重建（白板/未触发时保留入场元素直到动画播完）
       }
     }
+    // v208/v210：地形「守矢神社」（字段 repeatReveal）——**在本区域发生的揭示结算执行两次**。
+    // 这里**不再单独调用**重复：上面那句 `resolveRevealInZone(...)` 已经把「第 1 次 + 重复一次」
+    // 一起做完了（所以才排在法术消散 `vanishSpell` 之前：自身揭示 → 停 400ms → 重复 → 才消散），
+    // 也排在「揭示后吹飞」gust 之前，而资格用的是翻面瞬间的快照 `repeatRevealHere`。
     // v170：法术——**在且仅在**自身揭示效果结算完之后消散（此刻它仍占着 1 个格位，
     // 因此它自己的生成/换边类效果判定都把它算作占位）；消散后再结算区域「揭示后吹飞」
     // （gust 会因该卡已不在本区而自然跳过）。
@@ -2999,6 +3062,13 @@ function revealEffectWillChange(side, locIdx, card) {
       if (!t) return false;
       return !(['p', 'a'].some((s) => sideUsed(s, locIdx) > t.max));
     }
+    case 'xformR': {
+      // v213（1 费「梅莉」）：区域随机变形 —— 只要本列**未破碎**、且地形池里还有“除本列当前地形
+      // 以外”的候选，这次揭示就一定会改盘面（换地形 + 结算目标地形的「出现时」效果），
+      // 因此照常走结算前那 400ms 的停顿与翻牌演出。
+      if (locShattered(locIdx)) return false;
+      return randomLocCandidates(locIdx).length > 0;
+    }
     case 'oc': {
       const present = movesForSide(other).some((m) => m.loc === locIdx);
       return present;
@@ -3033,6 +3103,11 @@ function revealEffectWillChange(side, locIdx, card) {
       // spellPool 兜底判断（fx 条目里的 pool 不在此处读取）。
       const keys = Array.isArray(def.spellPool) ? def.spellPool : [];
       return keys.length > 0 && st.players[side].hand.length < 7;
+    }
+    case 'retrigger': {
+      // v207（东风谷早苗）：本区存在**可再触发的己方已翻开卡牌**（带 k、排除自己 / 法术 / un /
+      // 同为 retrigger 的卡）才真的会产生变化——否则跳过结算前的 400ms 停顿（口径同 gather/reviveDiscard）。
+      return retriggerTargets(side, locIdx, card).length > 0;
     }
     default: return false;
   }
@@ -3350,7 +3425,7 @@ function cardNoDown(card) {
    因此**静海被换掉（xform / collapse / xformTurn / 开发者「🗻 指定地形」）或卡被移出本区
    （mv / fly / shift / roam / gust）即自动恢复**文本，不需要任何收尾代码。
    被抹除的范围（用户确认，v202）：
-     · **揭示 `k`**（含 shift / gather / reviveDiscard 三个走分步演出的键）：翻开时不发动；
+     · **揭示 `k`**（含 shift / gather / reviveDiscard / retrigger 四个走分步演出的键）：翻开时不发动；
      · **持续 `og`**：**源卡**在静海 → 它的光环整条失效；被加成的卡在静海**不影响**
        （光环是被动接收的，只要源卡在静海外就照常给）；
      · **时机效果 `fx`**（turnStart / turnEnd / gameEnd）：在静海期间不结算，**错过的时机不补结算**；
@@ -3371,7 +3446,7 @@ function cardNoDown(card) {
    在静海期间因被抹除而错过的揭示 / 时机效果**不补结算**（口径同 `dice`/`rally` 的“时机已过不补”）。
    **日志**：每张牌**首次**被拦截时记一条（`card.muteNoted` 标记，避免每回合刷屏）。
    守卫点一览（全部读上面两个判定，无一处写状态）：`applyEffect` 入口（覆盖揭示 / 时机 / morph /
-   集结 / 复活等所有连锁路径）、`revealRound`（含三个分步演出键）、`resolveTimedEffects`、
+   集结 / 复活等所有连锁路径（v207 的 `retrigger` 再触发也逐张经过本入口））、`revealRound`（含四个分步演出键）、`resolveTimedEffects`、
    `revealEffectWillChange`、`cardAuraBonus` + `powerHistoryRows`（og 源卡）、`locNoDestroy`（蕾蒂）、
    `isDestroyable` / `indestructibleBlock` / `surviveDestroy` / `phoenixRevive`、
    `uiMoveFly` / `tryMoveFlyTo` / `renderZones` 的 canFly、`showFieldCard`（显示）。 */
@@ -3726,6 +3801,281 @@ async function applyReviveDiscardReveal(side, card) {
   }
   reviveStuckLog(side, card, revived, stuck, spellN, pile.length); // 收尾（汇总 / 法术跳过 / 放不下）
   renderZones();
+}
+
+/* ==================== v207：揭示再触发（`retrigger` 效果键，现仅 5 费「东风谷早苗」）====================
+   一句话口径：**把此牌所在区域里、自己一侧「已翻开」的卡牌的「揭示」效果各再结算一次**
+   （用户口径：**无法触发回合开始/结束、持续等非揭示效果**）。
+   口径（用户确认，v207）：
+     ① **候选**（收口 `retriggerTargets`）＝ 结算那一刻**此牌所在区域**（`locIdx`）里**自己一侧**、
+        `revealed`、带 `k` 的卡牌；**四项排除**：早苗**自己**、**法术**（自身揭示结算完已消散、
+        不在场上）、**`un` 占位卡**、**同为 `retrigger` 的卡**（另一张早苗 / `morph` 复制体）——
+        最后一项是**防死循环**（口径同 `morph` 的“变身目标是同样会变形的卡则不再二次变形”），
+        因此即便场上有多张早苗（自建卡组同名限 1 张，但哆来咪 `gs.shuffleN` 或 `morph` 复制体
+        可能带进第二张）也**不会互相触发**，链条必然收敛；
+     ② **只重触发「揭示」**：逐张调用 `applyEffect`，所有揭示键（`bf`/`de`/`ba`/`bl`/`dw`/`dwb`/
+        `dwh`/`dwc`/`spawn*`/`clone`/`gather`/`give`/`shuffleIn`/`discard`/`reviveDiscard`/`switch`/
+        `gift`/`morph`/`xform`/`xformR`/`mv`/`roam`/`shift`/`costUp`/`energyNext`/`tkBuff`/`deAll`）照常重跑，
+        含落场 token 的揭示；**不触发** `fx` 时机效果（turnStart / turnEnd / gameEnd / handEnd）、
+        持续 `og`、`surv`/`phx`/`prot`/`ind`/`fly` 等非揭示机制；地形类 `gamble`（翻开时博彩）
+        与 `gust`（揭示后吹飞）也**不重跑**——那两者是**地形**写的效果、不是卡面文字；
+     ③ **只作用于“结算那一刻已翻开”的卡**（同 `bf`/`de`/`ba` 的全局口径）：本区同侧**还没翻开的
+        暗牌不吃**——翻牌顺序在其后的牌**错过**本次、之后也不补触发；
+     ④ **顺序＝本区 zone 数组顺序**（＝卡牌放入本区的先后；全场序 `fieldQueue` 不用于此）；
+        每张结算**前**用 `fieldLocOf` 重读它**当前所在区域**再结算（口径同 `reviveDiscard` 的 ⑤）：
+        若前一张的揭示（如八云紫 `shift` 搬卡 / `mv` / `roam`）已把它挪出本区，它**仍会被触发一次**、
+        只是按挪走后的**新区域**结算；已不在场上（被摧毁 / 回手）则跳过并记一条日志；
+     ⑤ **非“摧毁”/非增减/非放置**：本键自身不改战力、不动区域字段与格位、不触发 `surv`/`phx`/
+        `prot`/`ind`、不进 `powerLog`/`fieldQueue`（被重触发的那些效果当然各按自己的口径改盘面）；
+     ⑥ **静海（v202）**：早苗自己在本区被抹除文本时本键不发动（`revealRound` 与 `applyEffect`
+        入口两道守卫）；被重触发的**每张卡各自**再过一次 `applyEffect` 入口守卫 ⇒ 静海里的卡同样不发动；
+     ⑦ **节奏（用户口径）**：正常翻牌流程走**逐张分步演出** `applyRetriggerReveal`——每张结算后
+        `renderZones()` 让 ±N / 生成 / 摧毁等演出显示出来，**相邻两张之间停 500ms**
+        （`RETRIGGER_STEP_MS`，口径同 v171「集结」每区 0.5s / v193「复活」每张 500ms）；
+        `morph` 变身 / `fx` 时机效果 / 落场生成等**非翻牌路径**走**同步版**
+        （`applyEffect` 的 `case 'retrigger'`：一次性结算、无 500ms 节奏与逐步渲染）——
+        两条路径共用候选收口 `retriggerTargets` 与单张收口 `retriggerOne`，口径完全一致；
+     ⑧ **中断保护**：重新开局（`state.gen` 变化）时立即停止后续步骤（同 `applyShiftReveal` 口径）。
+   新键的登记点（三处）：`applyEffect` 的 `case 'retrigger'`、`revealEffectWillChange` 的
+   `retrigger` 分支（本区存在可再触发的卡才为 true，否则跳过结算前的 400ms 停顿）、
+   `revealRound` 的分步演出分支（与 shift / gather / reviveDiscard 并列，同为**绕过 applyEffect
+   入口**的键 ⇒ 静海守卫在该分支之前已拦下）。 */
+
+/** v207：本区**可被再触发揭示**的己方卡牌（候选收口，同步版与分步版共用）——
+    口径见上：本区自己一侧 + 已翻开 + 带 `k`；排除自己 / 法术 / `un` 占位卡 / 同为 `retrigger` 的卡。
+    返回**快照数组**（结算过程中盘面会变，故遍历用快照；每张结算前再由 retriggerOne 重读其当前区域）。 */
+function retriggerTargets(side, locIdx, card) {
+  const zone = state.players[side].zones[locIdx];
+  if (!zone) return [];
+  return zone.filter((c) => c && c !== card && c.revealed && c.def
+    && !c.def.un && !c.def.spell && !!c.def.k && c.def.k !== 'retrigger');
+}
+
+/** v207：重触发**单张**卡的揭示（**同步版**）——按它**当前所在区域**结算（`fieldLocOf` 实时读）；
+    已不在场上（被摧毁 / 回手 / 换边离场）则只记一条日志并跳过，返回 false。
+    ⚠️ 静海（v202）由 `applyEffect` 入口守卫处理，本函数不重复判定（避免多记日志）。
+    ⚠️ **v209 起本函数只供同步路径使用**（`applyEffect` 的 `case 'retrigger'`：morph 变身 / fx 时机效果 /
+    落场生成等**非翻牌路径**——那些路径无法 `await`，故按既有口径一次性同步结算）；
+    **翻牌流程内的再触发**（`applyRetriggerReveal`）改用 `retriggerOneStaged`，以便保留各键的分步间隔。 */
+function retriggerOne(card) {
+  const j = fieldLocOf(card);
+  if (j < 0) {
+    log('sys', `✦ 「${card.def.n}」此刻已不在场上（被摧毁或回到了手牌），本次不再触发它的揭示。`);
+    return false;
+  }
+  applyEffect(card.side, j, card);
+  return true;
+}
+
+/** v209：重触发**单张**卡的揭示（**分步版**，供翻牌流程的 `applyRetriggerReveal` 使用）——
+    与 `retriggerOne` 的唯一差别：改走共用收口 `resolveRevealInZone`，因此
+      ① **被再触发的那张牌**若属于四个「分步演出」键，会照常使用它自己的异步分步版与间隔
+         （八云紫 shift 逐张 0.3s / 三妖精集结逐区 0.5s / 四季映姬逐张 500ms / 另一张早苗逐张 0.5s）；
+      ② **v210**：这次再触发**也发生在“早苗所在的区域”里** —— 若该区域带 `repeatReveal`（守矢神社），
+         这一条揭示**也执行两次**（用户口径的 6 次链：早苗两次揭示 × 每次再触发 2 次 + A 自身翻面 2 次）。
+    资格**实时读**该牌当前所在区域（再触发发生在揭示链内部，没有“翻开那一刻”可言）。 */
+async function retriggerOneStaged(card) {
+  const j = fieldLocOf(card);
+  if (j < 0) {
+    log('sys', `✦ 「${card.def.n}」此刻已不在场上（被摧毁或回到了手牌），本次不再触发它的揭示。`);
+    return false;
+  }
+  await resolveRevealInZone(card.side, j, card); // forceRepeat 省略 ⇒ 实时读该区 repeatReveal
+  return true;
+}
+
+/* ==================== v211：东风谷早苗「揭示再触发」的可见演出 ====================
+   用户口径：早苗揭示时要有一个**简单快速的小动画**，让玩家看得出“她放了一次光环”；
+   守矢神社里打出早苗时，她的揭示会执行两次（自身 1 次 + 地形重复 1 次），
+   两次演出**同款、不加任何文字标记**（用户确认），靠“光环又亮了一次 + 目标卡又闪了一轮”
+   分辨出两次揭示分别发生在什么时候。
+   两类演出（每次“早苗的揭示开始结算”都各来一遍）：
+     ① **早苗本体光环** `playRetriggerAura`——以卡为中心的两圈「光环扩散」：
+        外层泛光向外扩 + 淡出、内层光环略微外扩（`RETRIGGER_AURA_MS` ≈ 760ms，快且不拖节奏）；
+     ② **每张被再触发的目标卡**各闪一下 `playRetriggerHit`——金白提亮 + 轻微放大
+        （`RETRIGGER_HIT_MS` = 420ms，比相邻两张那 500ms 的间隔短 ⇒ 不会两张糊在一起）。
+   实现要点：**光环/闪光都放在 body 悬浮层**（与 v80 战力绿环 `.gain-ring`、v169 费用动效同一路数）——
+   `position:fixed` + 按卡面 getBoundingClientRect 定位、z-index 9450/9440、`pointer-events:none`；
+   因为卡面本体有 overflow:hidden、且翻面时的 `.played-now`（flipIn）同样动 transform/box-shadow，
+   挂在卡面本体上会被裁掉/打架；卡面本体只做只动 filter 的提亮，元素与动画调用都有防御分支。
+   **排队-播出**：`case 'retrigger'` 只调 `queueRetriggerFx` 入队（结算**之前**），真正播放在
+   `renderZones()` 末尾的 `flushRetriggerFx()`（口径同 v80 `flushBuffFlash`）——因此**不依赖
+   DOM 是否已渲染**。
+   不做的事（口径同 v207/v209/v210）：不改战力/费用/格位/`fieldQueue`/`powerLog`、
+   不触发 `surv`/`phx`/`prot`/`ind`、不进任何日志、不参与任何判定——**纯观感**。
+   ⚠️ 卡位取元素时用 id **全局**匹配（同一张实例可能因 `morph`/`shift` 等出现在别处；按 id 找最稳）；
+      自建卡组同名限 1 张，但哆来咪洗入 / `morph` 复制体可能带进第二张早苗，
+      此时第二张（同 `id` 不会重复，故各自独立）只作用于它自己的结算，互不干扰。 */
+// 节奏常量（时长以 JS 为准；style.css 的 .retrigger-ring / .retrigger-hit-ring 关键帧时长按同值写死，改快慢两处一起改）
+const RETRIGGER_AURA_MS = 760; // 早苗本体光环时长（快、不拖翻牌节奏）
+const RETRIGGER_HIT_MS = 420;  // 目标卡闪光时长（短于相邻两张那 500ms 的间隔 ⇒ 不会糊在一起）
+let retriggerFxQueue = [];
+
+/** v211：早苗**本体光环**——快、醒目、**不依赖卡面本体**的演出：
+    ① 卡面本体做一次提亮脉冲（WAAPI，`filter`，短促）；
+    ② **光环放在 body 悬浮层**（`position:fixed`，按卡面 rect 定位，z-index 9450）——与 v80 的
+       「+N」绿环（`.gain-ring`）同一路数：**不会被卡面的 `overflow: hidden` 裁掉**，也不会被
+       `.played-now` 的 `flipIn` 关键帧（同样动 `transform`/`box-shadow`）盖掉。
+    两层都只是观感；取不到卡面元素（已离场 / DOM 未渲染）时返回 false。 */
+function playRetriggerAura(card) {
+  const els = miniCardElsById(card && card.id);
+  if (!els.length) return false;
+  const el = els[0];
+  // ① 卡面本体：短促提亮（只动 filter，避开 transform/box-shadow 的关键帧冲突）
+  if (typeof el.animate === 'function') {
+    try {
+      el.animate([
+        { filter: 'brightness(1) saturate(1)' },
+        { filter: 'brightness(1.55) saturate(1.4)', offset: .2 },
+        { filter: 'brightness(1)', offset: 1 },
+      ], { duration: RETRIGGER_AURA_MS, easing: 'ease-out' });
+    } catch (e) { /* 动画不可用：忽略（光环仍在悬浮层播） */ }
+  }
+  // ② body 悬浮层：两圈光环「扩散 + 淡出」（外层宽、内层窄，视觉上像自她身上绽开）
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return true; // 不可见（如已离场）则只做卡面提亮
+  for (const layer of [{ grow: 14, alpha: .95 }, { grow: 26, alpha: .5 }]) {
+    const ring = document.createElement('div');
+    ring.className = 'retrigger-ring';
+    ring.style.cssText =
+      `position:fixed;left:${r.left}px;top:${r.top}px;` +
+      `width:${r.width}px;height:${r.height}px;border-radius:10px;` +
+      `z-index:9450;pointer-events:none;` +
+      `--rr-grow:${layer.grow}px;--rr-alpha:${layer.alpha};`;
+    document.body.appendChild(ring);
+    setTimeout(() => { if (ring.parentNode) ring.parentNode.removeChild(ring); }, RETRIGGER_AURA_MS + 60);
+  }
+  return true;
+}
+
+/** v211：**被再触发的每一张目标卡**各闪一下（金白闪光），`RETRIGGER_HIT_MS` = 420ms。
+    与光环同款：**金环放 body 悬浮层**（不设 `.gain-ring`，避免与 v80 的绿环样式冲突），
+    卡面本体再叠一次极短提亮。取不到元素（已被自己的揭示挪走 / 摧毁）即跳过，返回 false。 */
+function playRetriggerHit(card) {
+  const els = miniCardElsById(card && card.id);
+  if (!els.length) return false;
+  const el = els[0];
+  if (typeof el.animate === 'function') {
+    try {
+      el.animate([
+        { filter: 'brightness(1) saturate(1)' },
+        { filter: 'brightness(1.75) saturate(1.45)', offset: .3 },
+        { filter: 'brightness(1) saturate(1)' },
+      ], { duration: RETRIGGER_HIT_MS, easing: 'ease-out' });
+    } catch (e) { /* 忽略 */ }
+  }
+  const r = el.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return true;
+  const ring = document.createElement('div');
+  ring.className = 'retrigger-hit-ring';
+  ring.style.cssText =
+    `position:fixed;left:${r.left}px;top:${r.top}px;` +
+    `width:${r.width}px;height:${r.height}px;border-radius:10px;` +
+    `z-index:9440;pointer-events:none;`;
+  document.body.appendChild(ring);
+  setTimeout(() => { if (ring.parentNode) ring.parentNode.removeChild(ring); }, RETRIGGER_HIT_MS + 60);
+  return true;
+}
+
+/** v211：早苗揭示的**整段演出**——把“本体光环 + 候选名单里每张卡各闪一下”**排进渲染队列**。
+    由 `applyEffect` 的 `case 'retrigger'`（翻牌分步版与非翻牌同步版**共用**该分支）在**结算之前**调用，
+    真正的播放在下一次 `renderZones()` 末尾（`flushRetriggerFx`）——翻牌流程里每张结算后都会渲染，
+    故光环与闪光立刻可见；同步版（morph / fx / 落场生成）在本批结束后那次渲染统一播出。
+    ⚠️ **候选卡是“同一刻一起闪一下”**（不是在它自己被再触发的那 0.5s 时点各闪一次，用户确认的口径）——
+    这样每次揭示只有“光环 + 一轮闪光”这一组视觉事件，**两轮之间更好数**（守矢神社里就是两组）。
+    口径：只有**本区自己一侧**的候选会亮（＝结算范围一致，对方的卡不亮）。 */
+function queueRetriggerFx(side, locIdx, card) {
+  const targets = retriggerTargets(side, locIdx, card);
+  retriggerFxQueue.push({ kind: 'aura', card });
+  for (const c of targets) retriggerFxQueue.push({ kind: 'hit', card: c });
+}
+
+/** v211：按卡牌 id 找**所有**当前渲染出的场上缩略卡元素（同一实例只会在场上出现一次；
+    返回数组以容忍“理论上多张同 id”与 DOM 尚未渲染的情形，取不到即空数组）。 */
+function miniCardElsById(id) {
+  if (id == null) return [];
+  return Array.prototype.slice.call(
+    document.querySelectorAll('.zone [data-cardid="' + id + '"]')
+  );
+}
+
+/** v211：`renderZones` 末尾统一播出（口径同 v80 `flushBuffFlash`）——纯演出，取不到元素
+    （卡同刻被摧毁 / 被挪走 / 在对方手牌）即静默跳过，绝不因此改动盘面。
+    ⚠️ **已知未修复问题（v211，待日后排查）**：实测中本演出在用户环境里没有可见效果。
+    已确认：入队与播出函数都存在且被执行路径可达（`revealRound` → `resolveRevealInZone` →
+    `resolveCardReveal` → `applyRetriggerReveal` → `applyEffect` 的 `case 'retrigger'`）；
+    光环/闪光元素已改为放 **body 悬浮层**（避开 `.mini-card` 的 `overflow: hidden` 与翻面 `flipIn`
+    关键帧），`el.animate` 与 `getBoundingClientRect` 都有防御分支。用户环境为 `file://` 直接打开页面，
+    排查期间还出现过“页面执行的是旧内容、而磁盘已是新内容”的现象（`js/game.js` 与重命名的
+    `js/game-v211.js` 副本都试过）。⇒ 结论：**演出本身未生效，原因未定位**，待日后（建议先在 HTTP 服务下
+    复现，排除 `file://` 的脚本缓存/截断因素）再继续。 */
+function flushRetriggerFx() {
+  if (!retriggerFxQueue.length) return;
+  const items = retriggerFxQueue;
+  retriggerFxQueue = [];
+  for (const q of items) {
+    if (q.kind === 'aura') playRetriggerAura(q.card);
+    else playRetriggerHit(q.card);
+  }
+}
+
+/* v207：揭示再触发的**分步揭示演出**（只在正常翻牌流程 revealRound 里使用）——
+   逐张推进：**第 1 张的揭示再触发 → 渲染 → 停 500ms → 第 2 张 ……**，
+   口径与同步版完全一致（共用 retriggerTargets），只多出节奏与逐步渲染。
+   与 shift（每张 0.3s）/ gather（每区 0.5s）/ reviveDiscard（每张 500ms）同款：**纯 JS 计时、
+   没有对应的 CSS 关键帧**，改节奏只改 RETRIGGER_STEP_MS 这一个数；
+   重新开局（state.gen 变化）会立即中断（同 applyShiftReveal / applyGatherReveal / applyReviveDiscardReveal）。
+   ⚠️ v209：每张改走 `retriggerOneStaged`（→ `resolveCardReveal`），故**被再触发的牌若是
+   shift / gather / reviveDiscard，也会保留它自己的分步间隔**（此前走同步版、间隔会被吞掉）。 */
+const RETRIGGER_STEP_MS = 500;
+/** v207/v209/v211：早苗的「揭示再触发」**分步演出**——
+    逐张推进：**第 1 张的揭示再触发 → 渲染 → 停 500ms → 第 2 张 ……**，
+    口径与同步版完全一致（共用 retriggerTargets），只多出节奏与逐步渲染。
+    v211：**本条演出开始前**会先把早苗本体光环 + 候选名单里每张卡的闪光排进渲染队列
+    （见 `applyEffect` 的 `case 'retrigger'` → `queueRetriggerFx`，由每次 `renderZones()` 末尾播出；
+    早苗被守矢神社重复时本函数会被调用两次 ⇒ 光环与闪光各来一轮，玩家据此分辨两次揭示的时点）。 */
+async function applyRetriggerReveal(side, card) {
+  const gen = state.gen;
+  const locIdx = fieldLocOf(card);
+  if (locIdx < 0) return; // 防御：理论不会发生（此刻它刚翻开、正在本区）
+  const targets = retriggerTargets(side, locIdx, card);
+  if (!targets.length) {
+    log(side, `✦ ${card.def.n}：本区没有可再触发揭示的其他己方已翻开卡牌（不含自己、法术与同为该效果的卡），本次无事发生。`);
+    return;
+  }
+  log(side, `✦ ${card.def.n}：${side === 'p' ? '你' : '对手'}在本区「${locDef(locIdx).n}」的 ${targets.length} 张己方卡牌，其「揭示」将各再触发一次（逐张结算，每张间隔 0.5s）—— ${targets.map((c) => `「${c.def.n}」`).join('')}`);
+  for (const c of targets) {
+    if (gen !== state.gen) return; // 重新开局等中断
+    await retriggerOneStaged(c); // v209：分步版 → 被再触发的牌若是 shift/gather/reviveDiscard 也保留其间隔
+    renderZones(); // 让本次重触发的 ±N / 生成 / 摧毁等演出显示出来（口径同 v171 集结 / v193 复活）
+    await sleep(RETRIGGER_STEP_MS); // 相邻两张之间停 0.5s（纯 JS 计时，无对应 CSS 关键帧）
+    if (gen !== state.gen) return;
+  }
+}
+
+/* ==================== v209：翻牌流程内的「揭示分派」收口（`resolveCardReveal`）====================
+   **为什么需要它**：四个效果键（`shift` / `gather` / `reviveDiscard` / `retrigger`）在**翻牌流程**里
+   走的是**异步分步演出**（各自带回自己的间隔：八云紫 每张 0.3s、三妖精集结 每区 0.5s、
+   四季映姬 每张 500ms、东风谷早苗 每张 0.5s），而 `applyEffect` 里的同名分支是**同步版**
+   （供 morph 变身 / fx 时机效果 / 落场生成等**无法 await 的非翻牌路径**复用）。
+   于是**任何“在翻牌流程里再次执行某张牌揭示”的新机制**（v207 早苗的再触发、v208 地形「守矢神社」的
+   重复触发）都必须走**同一套分派**，否则会静默退化成同步版、把这些间隔全部吞掉
+   （v209 修的正是这个：三妖精集结被守矢神社重复时曾一次性生成三只、并发结算其揭示）。
+   调用方（全部在可 await 的翻牌流程内）：
+     · `revealRound` —— 每张暗牌翻面后的**首次**揭示；
+     · `resolveRevealInZone`（v208/v210）—— **在本区执行一次揭示结算**（含守矢神社的“执行两次”逻辑），
+       `revealRound` 与 `retriggerOneStaged` 都通过它间接调用本函数；
+     · `retriggerOneStaged`（v207/v209）—— 早苗**再触发**的每一张。
+   ⚠️ 静海（v202）守卫由**调用方**负责（这三个调用方都已在进入前拦下被抹除文本的牌），
+      本函数不再重复判定；`applyEffect` 内仍有入口守卫作兜底。
+   ⚠️ 非翻牌路径**不要**调用本函数（它们无法 await）：请继续直接用 `applyEffect` 的同步分支。 */
+async function resolveCardReveal(side, locIdx, card) {
+  const k = card.def.k;
+  if (k === 'shift') { await applyShiftReveal(side, card.def.t); return; } // 八云紫：逐张 0.3s
+  if (k === 'gather') { await applyGatherReveal(side, card); return; } // 三妖精集结：逐区 0.5s
+  if (k === 'reviveDiscard') { await applyReviveDiscardReveal(side, card); return; } // 四季映姬：逐张 500ms
+  if (k === 'retrigger') { await applyRetriggerReveal(side, card); return; } // 东风谷早苗：逐张 0.5s
+  applyEffect(side, locIdx, card); // 其余键：同步结算（与既有口径一致）
 }
 
 /* v172/v179：`spawnS`（本区**自己一侧**生成特殊卡）的共用实现——
@@ -4255,6 +4605,34 @@ function applyEffect(side, locIdx, card, spec) {
       syncRoundTotal('卡牌区域变形');
       break;
     }
+    case 'xformR': {
+      // v213：区域「随机变形」（1 费「梅莉」）——把本区域地形换成地形池里**随机另一个**地形，
+      // 并**立刻结算目标地形的「出现时」效果**。**完整沿用 v199 `xformTurn` 的随机变形口径**
+      // （见本文件 v213 段注释）：候选＝`randomLocCandidates`（POOL 除自身、允许与另两列重复、
+      // EXTRA 不入候选）；**不做上限防御**（超限照常变形 —— 与上面 `case 'xform'` 的“超限则失败”
+      // 刻意相反）；换地形 → `resetLocGaps` → `refreshLocHeader` → `runLocAppearEffect` → `syncRoundTotal`。
+      // 目标若抽到「虚假之月」→ 本局总回合数当场变 7；抽到「天界」→ 启动摧毁链（`revealRound`
+      // 在每张牌结算后会 `await awaitShatterChain()` 补等）；已破碎的列一律跳过。
+      if (locShattered(locIdx)) {
+        log('danger', `✦ ${def.n} 想把本区变成随机另一个地形，但本区域已被摧毁（已破碎）、不能再改变地形，变形失败。`);
+        break;
+      }
+      const candsR = randomLocCandidates(locIdx);
+      if (!candsR.length) {
+        log('danger', `✦ ${def.n}：地形池里没有可变成的其它地形，本次不变形。`);
+        break;
+      }
+      const targetR = candsR[Math.floor(Math.random() * candsR.length)];
+      const prevR = state.locs[locIdx].def;
+      state.locs[locIdx].def = targetR;
+      resetLocGaps(locIdx);     // v200：换地形 → 清空本列已封的隙间
+      refreshLocHeader(locIdx); // 列名/图标/效果文案/配色即时更新
+      log('danger', `✦ ${def.n} 掷出了随机地形 —— 「${prevR ? prevR.n : '原地形'}」变成了「${targetR.icon} ${targetR.n}」！`);
+      // v151 口径：变形 = 该地形在本区“出现”——立刻结算其「出现时」效果（v205：天界在此启动摧毁链）
+      runLocAppearEffect(locIdx, targetR);
+      syncRoundTotal('卡牌区域随机变形'); // v203：可能变出「虚假之月」→ 本局总回合数当场变 7
+      break;
+    }
     case 'roam': {
       // 揭示 / 时机效果（v158）：把**自身**移到“另外两个区域”中**随机一处**。
       // 现役用法：幽灵 def.fx.turnStart → k='roam'（每回合开始若可能就飘走）；
@@ -4664,6 +5042,26 @@ function applyEffect(side, locIdx, card, spec) {
         : `📖 ${def.n}（回合开始）：想从法术池抽法术，但手牌已满（7/7），本次未能加入。`);
       break;
     }
+    case 'retrigger': {
+      // v207（东风谷早苗）：**再触发本区己方卡牌的揭示** —— 同步版（供 morph 变身 / fx 时机效果 /
+      // 落场生成等**非翻牌路径**复用；正常翻牌流程走**分步演出** applyRetriggerReveal）。
+      // 完整口径见本文件上方 v207 段与 `docs/现有机制.md` §1「揭示再触发（`retrigger`）」段。
+      // 要点：候选排除 自己 / 法术 / un 占位卡 / 同为 retrigger 的卡（防死循环）；只重跑「揭示」，
+      // 不跑 fx 时机效果与 og/surv/phx/prot/ind 等非揭示机制，也不重跑地形类 gamble/gust。
+      // v211：结算**之前**先把演出排进渲染队列（早苗本体光环 + 候选名单里每张卡各闪一下）——
+      // 翻牌流程里逐张结算都会 renderZones()，故光环与闪光立刻可见；非翻牌同步版
+      // （morph/fx/落场生成）一次性结算、本批结束后才渲染 ⇒ 演出在那次渲染时统一播出。
+      // ⚠️ 该演出目前**未生效**（原因未定位，见 flushRetriggerFx 上方的说明），代码保留待日后排查。
+      queueRetriggerFx(side, locIdx, card);
+      const targets = retriggerTargets(side, locIdx, card);
+      if (!targets.length) {
+        log(side, `✦ ${txt}：本区没有可再触发揭示的其他己方已翻开卡牌（不含自己、法术与同为该效果的卡），本次无事发生。`);
+        break;
+      }
+      log(side, `✦ ${txt}：${side === 'p' ? '你' : '对手'}在本区「${locDef(locIdx).n}」的 ${targets.length} 张己方卡牌，其「揭示」各再触发一次 —— ${targets.map((c) => `「${c.def.n}」`).join('')}`);
+      for (const c of targets) retriggerOne(c); // 同步版：逐张按“当前所在区域”重跑其揭示（无节奏）
+      break;
+    }
     default: break;
   }
 }
@@ -4803,6 +5201,100 @@ function locGapEffects() {
       log('sys', `${def.icon} ${def.n}：回合结束 —— 双方各从后往前添加隙间 → ${hit.join('、')}`);
     }
   }
+}
+
+/* ==================== v208：区域「揭示重复触发」（地形字段 `repeatReveal`，现仅「守矢神社」）====================
+   一句话口径（**v210 修订后的用户口径**）：**凡是在带本字段的区域里发生的「揭示结算」，都执行两次**
+   （第 1 次照常 → 停 400ms → 第 2 次「重复」）。**只针对「揭示」**——持续 `og`、时机 `fx`
+   （turnStart / turnEnd / gameEnd / handEnd）等**非揭示机制一律不算、一次都不跑**。
+   ⚠️ **v210 的关键修订（用户实测反馈）**：v208 首版把本字段实现成“**那张牌翻面时**多结算一次”，于是
+   **早苗（`retrigger`）再触发出来的那些揭示不算“翻面”、不会被执行两次** —— 这不对。正确模型是
+   **“揭示在哪个区域结算，就按那个区域是否带本字段决定执行几次”**，因此：
+     · 暗牌在本区**翻面** → 它的揭示执行 2 次（1 次 + 重复 1 次）；
+     · **早苗在本区翻开** → 她自己的揭示执行 2 次（第 1 次 + 本地形的重复）；
+     · **早苗每一次揭示所“再触发”的其它揭示牌** → 那些揭示**也发生在守矢神社里** ⇒ **各自执行 2 次**。
+   ⇒ 用户口径的**总计 6 次**（以同区另一张已翻开的揭示牌 A 为例，早苗翻开后）：
+       A 自身翻面 2 次（1 + 地形重复）
+       + 早苗第 1 次揭示再触发 A → 2 次
+       + 早苗第 2 次揭示（本地形重复出来的那一次）再触发 A → 2 次
+       = **6 次**（早苗自己的揭示是 2 次：自身翻面 1 + 地形重复 1）。
+   口径（用户确认，v208）：
+     ① **候选＝“在本区域被翻开”的牌**（暗牌翻面那一刻，口径同 `gamble`/`gust`）：落地即翻开的
+        落场 token（石块/厄运/分身/龙玉…）、「复活弃牌池」落地即翻开的牌、以及**已翻开后被移入本区**
+        的卡都**不参与**；地形出现前就在本区的旧卡也不追溯。白板（`k: ''`）无揭示可重复，直接跳过。
+     ② **只重复一次**（不是循环），且**只重复「揭示」**：重复 = 对同一张牌**再走一次翻牌流程的
+        揭示分派** `resolveCardReveal`（v209 起；此前是直接调 `applyEffect`）⇒ 所有揭示键
+        （`bf`/`de`/`ba`/`bl`/`dw`/`dwb`/`dwh`/`dwc`/`spawn*`/`clone`/`gather`/`give`/
+        `shuffleIn`/`discard`/`reviveDiscard`/`switch`/`gift`/`morph`/`xform`/`xformR`/`mv`/`roam`/`shift`/
+        `costUp`/`energyNext`/`tkBuff`/`deAll`/`retrigger`）照常重跑；**不触发** `og`/`surv`/`phx`/
+        `prot`/`ind`/`fly` 与 `fx` 时机效果（本字段天生与它们无关——只执行一次揭示分派）。
+        ⚠️ **v209 修（用户实测反馈）**：四个「分步演出」键**重复时照常保留各自的间隔**——
+        重复「三妖精集结」会**逐区生成、逐区结算其揭示、每区之间 0.5s**（而不是一次性生成三只并
+        并发结算）；同理重复八云紫 `shift` 逐张 0.3s、重复四季映姬 `reviveDiscard` 逐张 500ms、
+        重复「东风谷早苗」逐张 0.5s。此前走同步 `applyEffect`、这些间隔会被静默吞掉。
+     ③ **含法术**（用户口径）：调用点在 `revealRound` 里被刻意排在 `vanishSpell` **之前** ⇒
+        「自身揭示 → 停 400ms → 重复一次 → 才自行消散」；法术在重复时仍占着它那 1 个格位（v170 口径）。
+     ④ **触发面＝“在本区域结算的揭示”两种来源**（v210）：㈠ **在本区翻面的暗牌**——资格按
+        「翻开那一刻」的**快照**认定（翻牌途中本列被卡牌 `xform` 换成别的地形也照常重复；
+        `revealRound` 在翻面瞬间把 `locDef(mv.loc).repeatReveal` 记进 `repeatRevealHere` 传进来）；
+        ㈡ **早苗 `retrigger` 再触发的每一条揭示**（v210 新增）——那一张牌**当前所在区域**若带本字段，
+        这次被再触发的揭示**也执行 2 次**（资格**实时读**，因为再触发发生在揭示链内部、没有“翻开那一刻”）。
+        ⚠️ 注意区分：**同一张牌两次不同来源的加倍会相乘**（A 自身翻面 2 次 + 早苗两次揭示各再触发 2 次
+        = 6 次），这正是用户口径要的账。
+     ⑤ **资格按「翻开那一刻」快照认定**（用户口径）：翻牌途中本列被卡牌 `xform` 换成别的地形
+        （如灵乌路空 → 聚变反应炉）也**照常**重复一次；调用方（`revealRound`）因此在翻面瞬间就把
+        `locDef(mv.loc).repeatReveal` 记进 `repeatRevealHere` 再传进来（本函数不重读地形）。
+     ⑥ **重复时按该牌“当前所在区域”结算**（用户口径，口径同 v207 早苗）：若它自己的揭示已把它挪出
+        本区（八云紫 `shift` / 幽灵 `roam` / 依神紫苑 `switch`），**仍重复一次**、只是按挪走后的
+        **新区域**读盘面（`fieldLocOf` 实时读）；已不在场上（被摧毁 / 回手）则只记一条日志并跳过。
+     ⑦ **与「揭示后吹飞」`gust` 的先后**：重复点在 `gust` **之前**。⚠️ 实战中同一列只可能有**一块**
+        地形，故「守矢神社 + 魔力风暴」不会同列共存；这个顺序只在“翻牌途中本列被 `xform` 换掉”
+        这类情形下才有可见差别。
+     ⑧ **节奏**（用户口径）：**重复之前停 400ms**（与翻牌结算前那个停顿同款），重复结算完再
+        `renderZones()`，让 ±N / 生成 / 摧毁等演出看得出“又触发了一次”；停顿后校验 `state.gen`
+        （重新开局即放弃本次重复，同 applyShiftReveal 的中断保护口径）。
+     ⑨ **非“摧毁”/非增减/非放置**：本字段自身不改战力、不动区域字段与格位、不触发 `surv`/`phx`/
+        `prot`/`ind`、不进 `powerLog`/`fieldQueue`（被重复的那些效果当然各按自己的口径改盘面）；
+        **不是**揭示键，`revealEffectWillChange` 与 `applyEffect` 都不需要新分支。
+     ⑩ **静海（v202）**：本字段不发动任何非揭示机制；被重复的牌若此刻在带 `mute` 的区域里
+        （如它自己的揭示把它挪进了静海），`applyEffect` 入口守卫照常拦下并记日志。
+   与 v207 的**卡牌键 `retrigger`（东风谷早苗）**的分工：地形是**区域规则**（“在本区发生的揭示都执行两次”，
+   不需要有卡、不需要额外卡位、逐处判定）；早苗是**卡牌效果**（“她自己翻开时把
+   本区己方已翻开卡各再触发一次”）。两者**叠加后是乘积关系** —— 正是上面那套“总计 6 次”的账（v208 首版曾把“早苗再触发出来的揭示”排除在外，v210 修正）。 */
+
+/** v208（**v210 修订**）：**在本区域执行一次揭示结算** —— 本字段的唯一语义收口：
+    若该区域带 `repeatReveal`，就把这次揭示**执行两次**（第 1 次 → 停 400ms → 第 2 次「重复」）；否则只执行一次。
+    调用方（都在可 `await` 的翻牌流程内）：
+      · `revealRound` —— 暗牌翻面那一次，资格用**翻开那一刻的快照**（`forceRepeat`＝`repeatRevealHere`）；
+      · `retriggerOneStaged` —— 早苗再触发的**每一条**揭示，资格**实时读**该牌当前所在区域。
+    v209：两次执行都走**共用分派** `resolveCardReveal`（而非直接 `applyEffect`），故四个「分步演出」键
+          照常使用各自的异步分步版与间隔（重复「三妖精集结」仍逐区 0.5s，而不是一次性生成三只）。
+    v210：语义由“翻面那一下多结算一次”改为“**凡在本区发生的揭示结算都执行两次**”，因此早苗再触发出来的
+          揭示**也会被加倍**（用户口径的“总计 6 次”链）。
+    ⚠️ 重复那一次**不再递归加倍**（末尾直接调 `resolveCardReveal`），保证有限、不会无限递归。 */
+async function resolveRevealInZone(side, locIdx, card, forceRepeat) {
+  const gen = state.gen;
+  const locName = locDef(locIdx).n; // 日志里的区域名（此刻本列地形可能已被该牌自己的揭示换掉）
+  const doRepeat = (forceRepeat === undefined) ? !!locDef(locIdx).repeatReveal : !!forceRepeat;
+  await resolveCardReveal(side, locIdx, card); // ① 第 1 次（正常揭示）
+  if (!doRepeat) return;
+  renderZones(); // 先让第 1 次的 ±N / 生成 / 摧毁等演出显示出来
+  await sleep(400); // 用户口径：重复前停 400ms，让玩家看清“又触发了一次”
+  if (gen !== state.gen) return; // 重新开局等中断
+  if (cardMuted(card)) {
+    // 该牌此刻在带 mute 的区域里（如它自己的揭示把它挪进了静海）→ 文本被抹除，重复不发动
+    muteSkipLog(card, '揭示效果（地形「揭示重复触发」）');
+    return;
+  }
+  const nowLoc = fieldLocOf(card);
+  if (nowLoc < 0) {
+    log('sys', `🔁 ${locName}：想重复结算「${card.def.n}」的揭示，但它已不在场上（被摧毁或回到了手牌），本次不重复。`);
+    return;
+  }
+  log(side, `🔁 ${locName}：重复结算「${card.def.n}」的揭示效果 —— 第 2 次（仅重复揭示；持续与回合开始/结束等非揭示效果不重复）。`);
+  // ② 第 2 次：走共用分派（分步键保留各自间隔）；**这里不再递归加倍**（本字段每处只多一次）
+  await resolveCardReveal(card.side, nowLoc, card);
+  renderZones();
 }
 
 // 区域「揭示后吹飞」效果（v162，字段 gust: true，现仅魔力风暴）：
@@ -5400,6 +5892,7 @@ function renderZones() {
   }
   flushBuffFlash(); // v80：本次渲染后触发“永久 +N”绿色动画（bf/ba/bl/oc/phx 等收口排队）
   flushCostFlash(); // v169：本次渲染后触发“费用 ±N”动画（costUp 等收口排队）
+  flushRetriggerFx(); // v211：本次渲染后触发“早苗揭示光环 / 目标卡闪光”（retrigger 收口排队）
   renderPiles();    // v187：侧栏「特殊牌池」两个计数徽标（弹窗开着时同步重渲染当前页签）
 }
 
@@ -5728,7 +6221,7 @@ function renderPickLocGrid() {
       '<span class="lpc-icon">' + def.icon + '</span>' +
       '<span class="lpc-name"></span>' +
       '<span class="lpc-eff"></span>' +
-      '<span class="lpc-meta">上限 ' + def.max + (def.inv ? ' · 反转' : '') + (def.purge ? ' · 回合末摧毁' : '') + (def.grow ? ' · 回合末成长' : '') + (def.decay ? ' · 回合末衰减' : '') + (def.gamble ? ' · 翻开随机±' : '') + (def.dice ? ' · 第' + def.dice.turn + '回合掷骰' : '') + (def.rally ? ' · 第' + def.rally.turn + '回合+' + def.rally.add : '') + (def.gust ? ' · 揭示后吹飞' : '') + (def.collapse ? ' · ' + def.collapse.cards + '张牌后崩塌' : '') + (def.prot ? ' · 区域免摧毁' : '') + (def.xformTurn ? ' · 第' + def.xformTurn.turn + '回合变形' : '') + (def.gap ? ' · 回合末各封 ' + def.gap + ' 格隙间' : '') + (def.noDown ? ' · 区域免减攻' : '') + (def.mute ? ' · 抹除卡牌文字' : '') + (def.extraRound ? ' · 本局+' + def.extraRound + ' 回合' : '') + (def.shatter ? ' · 出现时摧毁另外两块地形' : '') + (def.spawn ? (def.spawn.cost != null ? ' · 出现生成随机' + def.spawn.cost + '费卡' : ' · 出现生成特殊卡') : '') + '</span>';
+      '<span class="lpc-meta">上限 ' + def.max + (def.inv ? ' · 反转' : '') + (def.purge ? ' · 回合末摧毁' : '') + (def.grow ? ' · 回合末成长' : '') + (def.decay ? ' · 回合末衰减' : '') + (def.gamble ? ' · 翻开随机±' : '') + (def.dice ? ' · 第' + def.dice.turn + '回合掷骰' : '') + (def.rally ? ' · 第' + def.rally.turn + '回合+' + def.rally.add : '') + (def.gust ? ' · 揭示后吹飞' : '') + (def.collapse ? ' · ' + def.collapse.cards + '张牌后崩塌' : '') + (def.prot ? ' · 区域免摧毁' : '') + (def.xformTurn ? ' · 第' + def.xformTurn.turn + '回合变形' : '') + (def.gap ? ' · 回合末各封 ' + def.gap + ' 格隙间' : '') + (def.noDown ? ' · 区域免减攻' : '') + (def.mute ? ' · 抹除卡牌文字' : '') + (def.extraRound ? ' · 本局+' + def.extraRound + ' 回合' : '') + (def.shatter ? ' · 出现时摧毁另外两块地形' : '') + (def.repeatReveal ? ' · 揭示重复触发' : '') + (def.spawn ? (def.spawn.cost != null ? ' · 出现生成随机' + def.spawn.cost + '费卡' : ' · 出现生成特殊卡') : '') + '</span>';
     btn.querySelector('.lpc-name').textContent = def.n;
     btn.querySelector('.lpc-eff').textContent = def.eff || '无特殊效果';
     btn.addEventListener('click', () => {

@@ -647,6 +647,9 @@
   </div>
 
   <!-- 加载顺序即依赖顺序：数据 → 引擎 → 拆分子模块 → 页面入口（纯前端无模块化，勿调整次序） -->
+  <!-- ⚠️ v211 排查遗留提醒（未修复项）：用 `file://` 直接打开本页时，Chrome 出现过“页面执行的是
+       js/game.js 的旧内容、而磁盘已是新内容”的现象（换 `?v=`、甚至把文件换名重载都复现过）。
+       日后若再遇到“改了代码却没反应”，先用本地 HTTP 服务访问一次排除该因素。 -->
   <script src="data/cards.js"></script>
   <script src="data/locations.js"></script>
   <script src="js/game.js"></script>
