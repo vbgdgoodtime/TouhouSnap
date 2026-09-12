@@ -1,16 +1,9 @@
 /* =========================================================
-   东方逆转 · deck-storage.js（v135）
-   卡组信息本地持久化（与 deck-page.js 解耦）。
-
-   存储介质：浏览器 localStorage（纯前端、无服务端文件可写）。
-   键名：touhou2.decks.v1
-   序列化口径：卡组里的牌用卡名字符串保存（POOL 内同名唯一），
-               读回时由 deck-page 按名解析为 def 引用。
-
-   对外 API（window.DeckStorage）：
-     load()  → { version, deckSeq, activeDeckId, decks } | null
-     save(data) → boolean（写入成功）
-     clear() → 清除本地存档（调试用）
+   东方逆转 · deck-storage.js
+   卡组信息的本地持久化（与 deck-page.js 解耦）。
+   介质＝localStorage，键名 touhou2.decks.v1；卡组里的牌按**卡名**保存（POOL 内同名唯一），
+   读回时由 deck-page 按名解析成 def 引用。
+   对外 API（window.DeckStorage）：load() / save(data) / clear()
    ========================================================= */
 (function () {
   'use strict';

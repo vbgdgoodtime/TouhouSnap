@@ -1,52 +1,21 @@
 /* =========================================================
-   东方逆转 · deck-page.js（v121~v135）
-   卡组设置页面（主页面「卡组设置」入口）。
-
-   页面构成（版面比例 ≈ 上 1/3 : 下 2/3，均在 index.html 的 #deckScreen 内）：
-     - 上方 卡组栏：#deckSlots —— 两种形态：
-         · 浏览态（默认）：**动态列表** =「＋ 新建卡组」位 + 已创建的卡组位
-           （无固定空位，**每新建一个卡组就动态扩展出一格**，横向滚动）；
-           显示顺序为**创建时间倒序**（v123：越晚创建越靠左、越早创建越靠右）；
-           卡组位缩略图上悬浮**一个** 🗑️ 删除按钮（v124 加入、v129 去掉 ✏️）；
-           **点卡组位任意位置（含图片）直接进入修改模式**（v129，不再需要 ✏️）。
-         · 编辑态（v125，点卡组位进入）：把该卡组的 **12 个卡槽**排成网格
-           （已放 = 卡面，点它移出；未放 = 与卡面同构的虚线「幽灵卡」空位带序号）。
-       容量上限 DeckBuilder.MAX_DECKS = 20 套，每套 DeckBuilder.DECK_SIZE = 12 张。
-     - 下方 卡牌区：#deckFilter + #deckGrid ——
-       **v131：费用筛选条与游戏图鉴同款**（全部 / 0-1 费 / 2 费 / 3 费 / 4 费 / 5 费 /
-       **6 费+**（v185：原「6 费」档改为 6 费及以上，容纳 7 费「哆来咪」）/ 衍生卡牌）；
-       「全部」与费用档展示 POOL 人物卡；「衍生卡牌」展示 SPECIAL token（不含隙间），
-       **仅可查看、不可加入卡组**（与指定卡牌页口径一致）。
-       浏览态：左键 / 右键 = 放大查看（复用游戏 showZoom()）；
-       编辑态：**左键 = 加入卡组**（v126：已在卡组中的卡牌加**灰色遮罩且不可点击**，
-       移出改走「点上方卡槽」），右键 = 放大查看。
-
-   已实装：卡组栏动态扩展、新建 / 删除 / 修改（加入·移出·清空）/ **改名**（v129）/
-          **费用筛选**（v131）/ **本地持久化**（v135，`deck-storage.js`）/
-          **编辑中即时按费用→战力排序**（v136；**v181 起补上「卡名」第三关键字**）；
-   **v181：本页排序口径与图鉴 / 指定卡牌统一** —— 卡池网格（`#deckGrid`，含「衍生卡牌」档）
-          与编辑态的 12 个卡槽一律按「**费用↑ → 战力↑ → 卡名字典序**」，比较器**直接复用**
-          `window.CardBrowser.orderDefs`（`js/card-browser.js` 在本文件之前加载，
-          见 index.html 的脚本次序），因此卡组页与图鉴不会出现两套顺序；
-          从本地存档恢复卡组时（`hydrateFromStorage`）也先排一次，旧存档 / 手改存档同样有序。
-   待实装：对局使用自建卡组。
-
-   入口 / 返回：
-     window.DeckBuilder.open()  ← home.js 的 PAGES.deck（ready:true）
-     window.DeckBuilder.close() → 回到主页面（Home.show()）
-   依赖（game.js 暴露的全局）：gradOf / cardFaceHTML / showZoom；
-   依赖（deck-storage.js）：window.DeckStorage.load/save。
+   东方逆转 · deck-page.js —— 卡组设置页面（入口：主页面「卡组设置」，DOM 在 index.html 的 #deckScreen）。
+   上方 #deckSlots：浏览态 = 创建时间倒序的动态卡组列表（点卡组位任意位置进入修改）；编辑态 = 该卡组的
+     12 个卡槽（已放 = 卡面、点击移出；未放 = 与卡面同构的虚线空位）。MAX_DECKS = 20 套、DECK_SIZE = 12 张。
+   下方 #deckFilter + #deckGrid：费用筛选（全部 / 0-1 / 2 / 3 / 4 / 5 / 6 费+ / 衍生卡牌）；「衍生卡牌」=
+     SPECIAL token（不含 un），仅可查看不可加入卡组；左键 = 放大查看（编辑态 = 加入卡组）、右键 = 放大查看。
+   卡池与卡槽排序统一走 CardBrowser.orderDefs（见 sortDefsList）；待实装：对局使用自建卡组。
+   入口 / 返回：DeckBuilder.open()（home.js 的 PAGES.deck）/ close() → Home.show()。
+   依赖：game.js 的 gradOf / cardFaceHTML / showZoom；deck-storage.js 的 DeckStorage.load/save。
    ========================================================= */
 (function () {
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
 
-  var MAX_DECKS = 20;  // 卡组栏容量（可存储的卡组套数）
-  var DECK_SIZE = 12;  // 每套卡组张数（与牌库费用曲线 12 张一致）
-
-  /* 默认占位卡组（仅在本地无存档时使用）；
-     cards 存的是 POOL 里的 def 对象引用（同一张卡在全卡池里是同一对象，可直接比对）。 */
+  var MAX_DECKS = 20;
+  var DECK_SIZE = 12;  // 每套卡组张数
+  /* 仅在本地无存档时使用；cards 存 POOL 里的 def 对象引用（同一张卡全池同一对象，可直接 indexOf 比对）。 */
   var DEFAULT_DECKS = [
     { id: 'deck-1', name: '占位卡组 A', cards: [] },
     { id: 'deck-2', name: '占位卡组 B', cards: [] },
@@ -55,15 +24,13 @@
   var DECKS = [];
   var deckSeq = 0;
   var activeDeckId = null;
-  var editingDeckId = null;                   // v125：正在修改的卡组（null = 浏览态）
+  var editingDeckId = null;                   // 正在修改的卡组（null = 浏览态）
   var justAddedId = null;                     // 本次渲染需要播“新增入场”动画的卡组位
-  var poolFilterKey = 'all';                  // v131：卡池筛选档（打开/关闭保留）
+  var poolFilterKey = 'all';                  // 卡池筛选档（关闭页面后保留）
 
   var rendered = false; // 卡牌网格是否已渲染过（卡池是静态数据）
-
   /* ---------- 卡池筛选（与 card-browser.js 图鉴同款） ---------- */
-  // costs=null 表示全部人物卡；min=N 表示“N 费及以上”（v185：原「6 费」档→「6 费+」）；
-  // token=true 表示衍生卡牌（SPECIAL，不含 un 占位）
+  // costs=null 全部人物卡；min=N 表示 N 费及以上；token=true 衍生卡牌（SPECIAL，不含 un 占位）
   var COST_FILTERS = [
     { key: 'all', label: '全部', costs: null },
     { key: '01', label: '0-1 费', costs: [0, 1] },
@@ -78,7 +45,7 @@
   function allPoolDefs() {
     var POOL = (window.DS_CARDS && window.DS_CARDS.POOL) || {};
     var out = [];
-    // v185：遍历实际存在的费用档（含 7 费档「哆来咪」、v194 的 8 费档「纯狐」）——不再写死 0~6
+    // 遍历卡池实际存在的费用档（含 7 / 8 费档），不写死 0~6
     Object.keys(POOL)
       .map(Number)
       .filter(function (c) { return isFinite(c); })
@@ -90,7 +57,6 @@
       });
     return out;
   }
-  // 对外兼容：poolDefs = 全部人物卡（不含筛选；v181 起按统一口径排序）
   function poolDefs() { return sortDefsList(allPoolDefs()); }
   function tokenDefs() {
     var SPECIAL = (window.DS_CARDS && window.DS_CARDS.SPECIAL) || {};
@@ -109,12 +75,11 @@
   }
   function filteredDefs() {
     var f = currentFilter();
-    // v181：两个分支都按「费用↑ → 战力↑ → 卡名字典序」排序（与图鉴 / 指定卡牌同口径）
     if (f && f.token) return sortDefsList(tokenDefs());
     var costs = f ? f.costs : null;
     var min = f ? f.min : null;
     return sortDefsList(allPoolDefs()).filter(function (d) {
-      if (min != null) return d.c >= min; // v185：「6 费+」= 6 费及以上（含 7 费「哆来咪」、v194 的 8 费「纯狐」）
+      if (min != null) return d.c >= min;
       return !costs || costs.indexOf(d.c) >= 0;
     });
   }
@@ -125,7 +90,7 @@
     }
     return false;
   }
-  // v170：法术卡（def.spell）没有战力——标题等文案里不要写成“威力 0”
+  // 法术卡（def.spell）没有战力——标题等文案里不要写成“威力 0”
   function powerText(def) {
     return (def && def.spell) ? '法术 · 无战力' : ('威力 ' + def.p);
   }
@@ -136,15 +101,10 @@
     for (var i = 0; i < all.length; i++) if (all[i].n === name) return all[i];
     return null;
   }
-
-  /* ---------- 排序（v136 起「加入/移出时重排」；v181 统一口径）----------
-     排序口径 = **费用升序 → 同费用战力升序 → 同战力按卡名字典序**（按字符编码逐位比较）。
-     v181：比较器**复用图鉴 / 指定卡牌那一份**——`js/card-browser.js` 暴露的
-     `window.CardBrowser.orderDefs`（本文件在它之后加载，index.html 的脚本次序保证可用），
-     这样卡组页 / 卡池 / 图鉴永远是同一套顺序，日后只改一处；
-     取不到时（脚本未加载 / 有人单独引入本文件）退回下面这份**等价实现**，行为不变。
-     本文件的两个使用点：① 卡池网格 `filteredDefs()` / `poolDefs()`（sortDefsList）；
-     ② 卡组内 12 张的卡槽顺序 `sortDeckCards()`（加入 / 移出 / 读取存档后各排一次）。 */
+  /* ---------- 排序 ----------
+     口径 = 费用升序 → 同费用战力升序 → 同战力按卡名字典序（逐位比较字符编码）。
+     比较器优先复用 `window.CardBrowser.orderDefs`（js/card-browser.js 在本文件之前加载）；
+     取不到时（有人单独引入本文件）退回下面这份 localOrderDefs 等价实现，行为不变。 */
   function localOrderDefs(a, b) {
     var ca = a && a.c != null ? a.c : 0;
     var cb = b && b.c != null ? b.c : 0;
@@ -156,7 +116,6 @@
     var nb = (b && b.n) || '';
     return na < nb ? -1 : na > nb ? 1 : 0;
   }
-  // 当前生效的比较器：优先用 CardBrowser 的共享实现
   function orderDefs() {
     var api = window.CardBrowser;
     if (api && typeof api.orderDefs === 'function') return api.orderDefs;
@@ -180,7 +139,6 @@
       return base(a, b);
     });
   }
-
   /* ---------- 本地持久化（经 deck-storage.js） ---------- */
   function serializeDecks() {
     return DECKS.map(function (d) {
@@ -229,9 +187,8 @@
         if (cards.indexOf(def) >= 0) continue; // 同名限 1
         cards.push(def);
       }
-      // v181：读回来的卡组也整理成统一顺序（费用↑ → 战力↑ → 卡名）——
-      // 现行 UI 存的就是有序的，这里主要照顾旧存档 / 手工改过的存档，
-      // 保证一进「卡组编辑」看到的 12 个卡槽就是有序的，与加入 / 移出后的呈现一致。
+      // 读回来的卡组也整理成统一顺序 —— 主要照顾旧存档 / 手工改过的存档，
+      // 保证一进编辑态看到的 12 个卡槽就是有序的，与加入 / 移出后的呈现一致。
       cards = sortDefsList(cards);
       next.push({
         id: String(row.id),
@@ -286,7 +243,6 @@
   }
   function editingDeck() { return editingDeckId ? findDeck(editingDeckId) : null; }
   function toggleEl(el, show) { if (el) el.classList.toggle('hidden', !show); }
-
   /* ---------- 提示条 ---------- */
   var toastTimer = null;
   function toast(text, ms) {
@@ -307,24 +263,21 @@
     if (el) el.classList.add('hidden');
     if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
   }
-
   /* ---------- 浏览态：卡组位 ---------- */
-  // 一个卡组位：卡堆缩略（卡背叠放）+ 名称 + 张数；
-  // v124：卡组位本身是容器 div，主体（缩略图 + 名称 + 张数）放在内部 button 里；
-  // v129：**点卡组位（含图片）直接进入修改模式**（不再需要单独的 ✏️ 按钮），
-  //       缩略图上只保留**一个**悬浮按钮 —— 🗑️ 删除卡组（合法嵌套、互不串点击）。
+  // 卡组位：卡堆缩略（卡背叠放）+ 名称 + 张数，点任意位置 = 进入修改。
+  // ⚠️ 🗑️ 与主体 button 是**兄弟节点**（button 不能嵌套 button），故不放在 .ds-main 内部。
   function deckSlotEl(deck) {
     var box = document.createElement('div');
     box.className = 'deck-slot'
       + (deck.id === activeDeckId ? ' active' : '')
-      + (deck.id === justAddedId ? ' just-added' : ''); // 新建的卡组位播入场动画
+      + (deck.id === justAddedId ? ' just-added' : '');
     box.dataset.deckId = deck.id;
 
     var main = document.createElement('button');
     main.type = 'button';
     main.className = 'ds-main';
     main.title = deck.name + '（' + deck.cards.length + '/' + DECK_SIZE + '）· 点击修改该卡组';
-    main.addEventListener('click', function () { editDeck(deck.id); }); // v129：直接进入修改
+    main.addEventListener('click', function () { editDeck(deck.id); });
 
     var thumb = document.createElement('span');
     thumb.className = 'ds-thumb';
@@ -337,7 +290,7 @@
     }
     var emblem = document.createElement('span');
     emblem.className = 'ds-emblem';
-    emblem.textContent = deck.cards.length ? '🃏' : '＋'; // 空卡组：占位「＋」
+    emblem.textContent = deck.cards.length ? '🃏' : '＋';
     stack.appendChild(emblem);
     thumb.appendChild(stack);
     main.appendChild(thumb);
@@ -353,12 +306,10 @@
     main.appendChild(count);
 
     box.appendChild(main);
-    box.appendChild(deckActionsEl(deck)); // 缩略图上的悬浮按钮（仅删除）
+    box.appendChild(deckActionsEl(deck));
     return box;
   }
-
-  // 卡组位缩略图右上角悬浮按钮：v129 起**只保留 🗑️ 删除卡组**
-  //（修改卡组改为「点卡组位任意位置」直接进入）
+  // 卡组位缩略图右上角悬浮按钮：只保留 🗑️ 删除（修改走「点卡组位任意位置」）
   function deckActionsEl(deck) {
     var wrap = document.createElement('div');
     wrap.className = 'ds-actions';
@@ -374,10 +325,7 @@
     wrap.appendChild(del);
     return wrap;
   }
-
-  // 最左的「＋ 新建卡组」位（参考图左上角的新建格）：点击即新建一套卡组，
-  // 卡组栏随之动态扩展出一格；到达容量上限后置灰并提示。
-  // 结构与卡组位一致（容器 .deck-slot + 内部 .ds-main 承载内容），只是没有悬浮按钮。
+  // 最左的「＋ 新建卡组」位：点击即新建一套；到达上限后置灰并提示（结构与卡组位一致，无悬浮按钮）。
   function newSlotEl() {
     var full = DECKS.length >= MAX_DECKS;
     var box = document.createElement('div');
@@ -406,56 +354,50 @@
 
     var hint = document.createElement('span');
     hint.className = 'ds-count';
-    hint.textContent = DECKS.length + ' / ' + MAX_DECKS; // 已用 / 容量
+    hint.textContent = DECKS.length + ' / ' + MAX_DECKS;
     main.appendChild(hint);
 
     box.appendChild(main);
     return box;
   }
-
-  // 动态列表：只渲染已创建的卡组位——每新建一个卡组，卡组栏就多出一格。
-  // v123 显示顺序：**创建时间倒序** —— 越晚创建的卡组越靠左（紧挨「＋ 新建卡组」，
-  // 新建后立刻出现在眼前），越早创建的越靠右。DECKS 本身仍按创建先后追加存储
-  // （仅渲染时反序），因此 id / 默认名「新卡组 N」/ 张数统计都不受影响。
+  // 动态列表：只渲染已创建的卡组位，每新建一个就多出一格。
+  // ⚠️ 渲染成**创建时间倒序**（反序遍历 DECKS）；DECKS 本身仍按创建先后追加，故 id / 默认名不变。
   function renderSlots() {
     var box = $('deckSlots');
     if (!box) return;
     box.innerHTML = '';
     box.appendChild(newSlotEl());
     for (var i = DECKS.length - 1; i >= 0; i--) box.appendChild(deckSlotEl(DECKS[i]));
-    justAddedId = null; // 入场动画只在本次渲染生效
+    justAddedId = null;
   }
-
   /* ---------- 编辑态：该卡组的 12 个卡槽 ---------- */
-  // 已放卡槽：卡面（复用 cardFaceHTML），点击移出卡组
   function deckCardSlotEl(deck, def, index) {
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'hand-card deck-card-slot filled';
     btn.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色
-    btn.innerHTML = cardFaceHTML(def);             // 复用 game.js 的卡面结构
+    btn.innerHTML = cardFaceHTML(def);
     btn.title = '第 ' + (index + 1) + ' 张：' + def.n + '（' + def.c + ' 费 / ' + powerText(def) + '）· 点击移出卡组';
     btn.addEventListener('click', function () { removeFromDeck(deck.id, def); });
     return btn;
   }
-  // 空卡槽：v126 起做成与卡面同构的“幽灵卡”——
-  // 内部结构与 cardFaceHTML 一一对应（角标行 / 正方形立绘区 / 卡名行），
-  // 因此**尺寸与已放卡槽完全一致**（不论卡组是空是满，卡组栏高度都稳定不跳）。
+  // 空卡槽 = 与卡面同构的“幽灵卡”：内部结构（角标行 / 立绘区 / 卡名行）与 cardFaceHTML 一一对应，
+  // 因此尺寸与已放卡槽完全一致 —— 不论空满，卡组栏高度都不跳。
   function deckEmptySlotEl(index) {
     var el = document.createElement('div');
     el.className = 'deck-card-slot empty';
 
-    var top = document.createElement('span'); // 对应「费用 / 战力」角标行
+    var top = document.createElement('span');
     top.className = 'dcs-top';
 
-    var art = document.createElement('span'); // 对应正方形立绘区
+    var art = document.createElement('span');
     art.className = 'dcs-art';
     var n = document.createElement('span');
     n.className = 'dcs-idx';
     n.textContent = String(index + 1);
     art.appendChild(n);
 
-    var hint = document.createElement('span'); // 对应卡名行
+    var hint = document.createElement('span');
     hint.className = 'dcs-hint';
     hint.textContent = '空位';
 
@@ -473,16 +415,14 @@
       box.appendChild(def ? deckCardSlotEl(deck, def, i) : deckEmptySlotEl(i));
     }
   }
-
   /* ---------- 上方卡组栏：按状态渲染（浏览态列表 / 编辑态卡槽）---------- */
   function renderTop() {
     var box = $('deckSlots');
     var deck = editingDeck();
     if (box) box.classList.toggle('edit-mode', !!deck);
-    // 页面级编辑态标记（v126：手机端据此把上方卡组栏放高一点，保证 2×6 卡槽一次看全）
+    // 页面级编辑态标记（CSS 据此把上方卡组栏放高，保证 2×6 卡槽一次看全）
     var screen = $('deckScreen');
     if (screen) screen.classList.toggle('edit-mode', !!deck);
-    // 编辑态才出现的三个按钮 + 浏览态提示
     toggleEl($('deckHint'), !deck);
     toggleEl($('deckRenameBtn'), !!deck);
     toggleEl($('deckClearBtn'), !!deck);
@@ -491,7 +431,7 @@
     var used = $('deckUsed');
     var tip = $('deckBarTip');
     if (deck) {
-      if (title) title.textContent = deck.name; // v130：去掉「正在修改：」前缀，只显示卡组名
+      if (title) title.textContent = deck.name;
       if (used) {
         used.textContent = deck.cards.length + ' / ' + DECK_SIZE;
         used.classList.toggle('full', deck.cards.length >= DECK_SIZE);
@@ -508,11 +448,8 @@
       renderSlots();
     }
   }
-
-  /* ---------- 卡牌网格（下方 2/3）----------
-     v126：编辑态下**已在卡组里的卡牌加灰色遮罩且不可点击**（灰色 + 无效态），
-     移出方式改为「点上方卡槽」；右键放大查看在两种状态下都保留。
-     v131：衍生卡牌仅可查看（虚线描边），不可加入卡组。 */
+  /* ---------- 卡牌网格（下方 2/3）：编辑态下已在卡组中的卡牌加灰色遮罩且不可点击（移出一律走
+     「点上方卡槽」），衍生卡牌仅可查看不可加入；右键放大查看在两种状态下都保留。 */
   function poolCardEl(def, deck) {
     var el = document.createElement('div');
     var token = isTokenDef(def);
@@ -521,12 +458,11 @@
       + (def.img ? '' : ' no-img') // 与手牌一致：无图时 emoji 占正方形立绘区，高度统一
       + (token ? ' token-card' : '')
       + (inDeck ? ' in-deck' : '');
-    el.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色
-    el.innerHTML = cardFaceHTML(def);             // 复用 game.js 的卡面结构
+    el.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色与结构
+    el.innerHTML = cardFaceHTML(def);
     if (token) {
       el.title = def.n + '（衍生卡牌 · 仅可查看，不可加入卡组）';
     } else if (inDeck) {
-      // 已在卡组：灰色遮罩 + 不可点击（仅保留右键放大查看与悬停说明）
       el.setAttribute('aria-disabled', 'true');
       el.title = def.n + '（已在卡组中）· 点上方卡槽可移出 · 右键放大查看';
     } else {
@@ -538,14 +474,14 @@
         return;
       }
       var d = editingDeck();
-      if (d) { // 编辑态：左键 = 加入卡组（已在卡组中的卡牌已被遮罩挡住，不响应）
+      if (d) {
         if (d.cards.indexOf(def) >= 0) return;
         addToDeck(d.id, def);
         return;
       }
-      showZoom(def, true); // 浏览态：放大查看（复用游戏弹窗）
+      showZoom(def, true);
     });
-    el.addEventListener('contextmenu', function (e) { // 任何状态都能右键放大查看
+    el.addEventListener('contextmenu', function (e) {
       e.preventDefault();
       showZoom(def, true);
     });
@@ -578,14 +514,12 @@
     rendered = true;
     renderActiveLabel();
   }
-
-  // 下方卡牌区标题栏右侧的“当前卡组”提示
   function renderActiveLabel() {
     var el = $('deckActiveLabel');
     var tip = $('deckPoolTip');
     var deck = editingDeck();
     if (deck) {
-      if (el) el.textContent = deck.name + '（' + deck.cards.length + ' / ' + DECK_SIZE + '）'; // v130：同样去掉前缀
+      if (el) el.textContent = deck.name + '（' + deck.cards.length + ' / ' + DECK_SIZE + '）';
       if (tip) tip.textContent = '点上方卡槽移出 · 右键放大查看';
       return;
     }
@@ -602,9 +536,7 @@
     renderTop();
     renderPool();
   }
-
   /* ---------- 卡组操作 ---------- */
-  // 新建卡组：往 DECKS 追加一套空卡组 → 卡组栏动态扩展出一格（并自动选中）
   function createDeck() {
     if (DECKS.length >= MAX_DECKS) {
       toast('卡组栏已满（' + DECKS.length + ' / ' + MAX_DECKS + ' 套）——先删除一套卡组再新建。');
@@ -613,16 +545,15 @@
     var name = '新卡组 ' + (DECKS.length + 1);
     var deck = { id: 'deck-' + (++deckSeq), name: name, cards: [] };
     DECKS.push(deck);
-    justAddedId = deck.id;  // 新卡组位播“入场”动画
-    activeDeckId = deck.id; // 新建即选中
+    justAddedId = deck.id;
+    activeDeckId = deck.id;
     persistDecks();
     renderTop();
     renderActiveLabel();
     toast('已新建「' + name + '」，卡组栏扩展到 ' + DECKS.length + ' / ' + MAX_DECKS + ' 套（0 / ' + DECK_SIZE + '）。');
     return deck;
   }
-
-  // 选中/标记某套卡组为“当前卡组”（仅高亮 + 刷新联动显示，不弹提示、不进入编辑）
+  // 仅标记“当前卡组”（高亮 + 联动刷新），不弹提示、不进入编辑态
   function selectDeck(id) {
     var deck = findDeck(id);
     if (!deck) return null;
@@ -631,21 +562,17 @@
     renderActiveLabel();
     return deck;
   }
-
-  // 修改卡组（v125）：进入编辑态 —— 上方卡组栏变成该卡组的 12 个卡槽，
-  // 下方卡池左键即加入、点卡槽移出（v129：点卡组位任意位置即可进入本模式）。
-  // 编辑中改动先写在内存；点「💾 保存」才排序并持久化到本地（v135）。
+  // 进入编辑态：上方卡组栏变成该卡组的 12 个卡槽，下方卡池左键即加入、点卡槽移出。
+  // 编辑中的改动先写在内存，点「保存」才持久化到本地。
   function editDeck(id) {
     var deck = findDeck(id);
     if (!deck) return;
     editingDeckId = deck.id;
-    activeDeckId = deck.id; // 编辑即选中
+    activeDeckId = deck.id;
     render();
     toast('已进入「' + deck.name + '」的编辑：点下方卡牌加入、点上方已放卡牌移出；改完后点「保存」。');
   }
-
-  // v135→v136：保存 = 写入 DeckStorage → 退出编辑态
-  // （卡序在每次加入/移出时已按费用→战力整理，保存不再重排）
+  // 保存 = 写入 DeckStorage + 退出编辑态（卡序在加入 / 移出时已整理，这里不再重排）
   function finishEdit() {
     var deck = editingDeck();
     editingDeckId = null;
@@ -659,10 +586,8 @@
       ? '「' + deck.name + '」已保存（' + deck.cards.length + ' / ' + DECK_SIZE + '）· 已写入本地。'
       : '「' + deck.name + '」已退出编辑（' + deck.cards.length + ' / ' + DECK_SIZE + '），但本地写入失败（可能是浏览器禁用了存储）。');
   }
-
-  // 把一张卡加入卡组（同名卡限 1 张；满 12 张则提示）。
-  // v126：已在卡组中的卡牌在卡池里带灰色遮罩、不可点击，移出一律走「点上方卡槽」。
-  // v136：加入后立即按费用→战力重排卡槽。
+  // 加入一张卡：同名限 1 张、满 12 张则提示；已在卡组中的卡在卡池里带灰色遮罩不可点击，
+  // 移出一律走「点上方卡槽」；加入后立即重排卡槽。
   function addToDeck(deckId, def) {
     var deck = findDeck(deckId);
     if (!deck || !def) return false;
@@ -685,8 +610,6 @@
     toast('已加入「' + def.n + '」（' + deck.cards.length + ' / ' + DECK_SIZE + '）。');
     return true;
   }
-
-  // 从卡组移出一张卡（v136：移出后立即按费用→战力重排）
   function removeFromDeck(deckId, def) {
     var deck = findDeck(deckId);
     if (!deck || !def) return false;
@@ -699,8 +622,6 @@
     toast('已移出「' + def.n + '」（' + deck.cards.length + ' / ' + DECK_SIZE + '）。');
     return true;
   }
-
-  // 清空当前编辑卡组（走通用确认弹窗）
   function askClearDeck() {
     var deck = editingDeck();
     if (!deck) return;
@@ -725,13 +646,11 @@
       },
     });
   }
-
-  /* ---------- 卡组改名（v129）----------
-     入口：编辑态顶部的「✏️ 改名」按钮。用专用小弹窗输入（不用 window.prompt：
-     样式统一、可校验、jsdom 下也不会卡住）。校验：不能为空、超过 NAME_MAX 字、
-     与其他卡组重名（重名会让卡组位难以分辨，故阻止）。 */
-  var NAME_MAX = 12;      // 卡组名最大字数
-  var renameDeckId = null; // 正在改名的卡组 id
+  /* ---------- 卡组改名 ----------
+     入口 = 编辑态顶部的「✏️ 改名」按钮；用专用小弹窗输入而不用 window.prompt（样式统一、可校验、
+     jsdom 下不会卡住）。校验：非空 / 不超过 NAME_MAX 字 / 不与其他卡组重名（重名难分辨故阻止）。 */
+  var NAME_MAX = 12;
+  var renameDeckId = null;
 
   function renameMaskEl() { return $('deckRenameMask'); }
   function isRenameOpen() {
@@ -756,7 +675,7 @@
     if (mask) mask.classList.remove('hidden');
     if (input) {
       input.focus();
-      if (typeof input.select === 'function') input.select(); // 预选原名，直接输入即替换
+      if (typeof input.select === 'function') input.select();
     }
   }
 
@@ -770,7 +689,7 @@
     var deck = findDeck(renameDeckId);
     var input = $('deckRenameInput');
     if (!deck || !input) { cancelRenameDeck(); return null; }
-    var name = String(input.value || '').replace(/\s+/g, ' ').trim(); // 折叠空白
+    var name = String(input.value || '').replace(/\s+/g, ' ').trim();
     if (!name) {
       setRenameTip('卡组名称不能为空，请重新输入。', true);
       input.focus();
@@ -789,7 +708,7 @@
       }
     }
     var oldName = deck.name;
-    if (oldName === name) { // 没改就退出，不打扰
+    if (oldName === name) {
       cancelRenameDeck();
       return deck;
     }
@@ -798,20 +717,18 @@
     var mask = renameMaskEl();
     if (mask) mask.classList.add('hidden');
     persistDecks();
-    render(); // 标题行 / 卡组位名称 / 悬停提示全部刷新
+    render();
     toast('卡组「' + oldName + '」已改名为「' + name + '」。');
     return deck;
   }
-
-  /* ---------- 确认弹窗（v124 删除卡组 → v125 通用化，删除 / 清空共用）---------- */
-  var confirmAction = null; // 待确认操作
+  /* ---------- 确认弹窗（删除 / 清空共用）---------- */
+  var confirmAction = null;
 
   function confirmMaskEl() { return $('deckConfirmMask'); }
   function isConfirmOpen() {
     var m = confirmMaskEl();
     return !!m && !m.classList.contains('hidden');
   }
-  // opts: { emblem, title, lines[], okText, danger, onOk }
   function openConfirm(opts) {
     opts = opts || {};
     confirmAction = opts.onOk || null;
@@ -820,7 +737,7 @@
     var ti = $('deckConfirmTitle');
     if (ti) {
       ti.textContent = opts.title || '确认操作？';
-      ti.classList.toggle('safe', opts.danger === false); // danger:false → 标题用普通配色
+      ti.classList.toggle('safe', opts.danger === false);
     }
     var tx = $('deckConfirmText');
     if (tx) {
@@ -851,7 +768,6 @@
     if (mask) mask.classList.add('hidden');
     if (typeof fn === 'function') fn();
   }
-
   /* ---------- 删除卡组 ---------- */
   function askDeleteDeck(id) {
     var deck = findDeck(id);
@@ -872,17 +788,16 @@
   function doDeleteDeck(id) {
     var i = -1;
     for (var k = 0; k < DECKS.length; k++) if (DECKS[k].id === id) { i = k; break; }
-    if (i < 0) return null; // 防御：已不存在
+    if (i < 0) return null;
     var removed = DECKS.splice(i, 1)[0];
-    if (editingDeckId === id) editingDeckId = null; // 删的正是编辑中的卡组 → 退出编辑态
+    if (editingDeckId === id) editingDeckId = null;
     // 删掉的是当前选中卡组 → 改选「最近创建」的一套（DECKS 按创建先后存储，取末尾）
     if (activeDeckId === id) activeDeckId = DECKS.length ? DECKS[DECKS.length - 1].id : null;
     persistDecks();
-    render(); // 卡组栏收回一格（动态列表）
+    render();
     toast('已删除「' + removed.name + '」，卡组栏剩 ' + DECKS.length + ' / ' + MAX_DECKS + ' 套。');
     return removed;
   }
-
   /* ---------- 页面开关 ---------- */
   function isOpen() { return document.body.classList.contains('in-deck'); }
 
@@ -912,7 +827,7 @@
   }
 
   function bind() {
-    hydrateFromStorage(); // v135：优先从 DeckStorage 恢复卡组
+    hydrateFromStorage(); // 优先从 DeckStorage 恢复卡组
     var cap = $('deckCap');
     if (cap) cap.textContent = MAX_DECKS;
     var size = $('deckSize');
@@ -925,14 +840,12 @@
     if (clear) clear.addEventListener('click', askClearDeck);
     var rename = $('deckRenameBtn');
     if (rename) rename.addEventListener('click', askRenameDeck);
-    // 改名弹窗：确定 / 取消按钮、点遮罩空白、Esc / Enter 均可操作
     var rOk = $('deckRenameOk');
     if (rOk) rOk.addEventListener('click', confirmRenameDeck);
     var rNo = $('deckRenameCancel');
     if (rNo) rNo.addEventListener('click', cancelRenameDeck);
     var rMask = renameMaskEl();
     if (rMask) rMask.addEventListener('click', function (e) { if (e.target === rMask) cancelRenameDeck(); });
-    // 确认弹窗：确认 / 取消按钮、点遮罩空白、Esc 均可关闭
     var ok = $('deckConfirmOk');
     if (ok) ok.addEventListener('click', runConfirm);
     var no = $('deckConfirmCancel');
@@ -943,15 +856,15 @@
       if (e.key === 'Escape') {
         if (isConfirmOpen()) { cancelConfirm(); return; }
         if (isRenameOpen()) { cancelRenameDeck(); return; }
-        // 游戏侧「放大查看」弹窗（#zoomMask）打开时，Esc 交给游戏自己的处理器，不退出编辑态
+        // #zoomMask（游戏侧「放大查看」）打开时 Esc 交给游戏的处理器，不退出编辑态
         var zoom = $('zoomMask');
         if (zoom && !zoom.classList.contains('hidden')) return;
-        if (editingDeck()) finishEdit(); // 编辑态按 Esc 退出修改
+        if (editingDeck()) finishEdit();
         return;
       }
-      if (e.key === 'Enter' && isRenameOpen()) confirmRenameDeck(); // 改名弹窗内回车 = 确定
+      if (e.key === 'Enter' && isRenameOpen()) confirmRenameDeck();
     });
-    if (rendered) render(); // 二次进入只需刷新卡组栏 / 卡池标记
+    if (rendered) render();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
@@ -970,11 +883,11 @@
     render: render,
     createDeck: createDeck,
     selectDeck: selectDeck,      // 仅设为“当前卡组”（高亮/联动显示），不进入编辑
-    editDeck: editDeck,          // 进入修改卡组（编辑态；v129 起点卡组位即进入）
-    finishEdit: finishEdit,      // 保存：排序 + 持久化 + 退出编辑态
+    editDeck: editDeck,
+    finishEdit: finishEdit,      // 保存：持久化 + 退出编辑态
     persistDecks: persistDecks,
     sortDeckCards: sortDeckCards,
-    // v137：出战可选卡组（满 12 张；显示顺序 = 创建时间倒序，与卡组栏一致）
+    // 出战可选卡组（满 12 张；显示顺序 = 创建时间倒序，与卡组栏一致）
     listReadyDecks: function () {
       var out = [];
       for (var i = DECKS.length - 1; i >= 0; i--) {
@@ -988,16 +901,16 @@
       }
       return out;
     },
-    addToDeck: addToDeck,        // 加入一张卡（def）
+    addToDeck: addToDeck,
     removeFromDeck: removeFromDeck,
     askRenameDeck: askRenameDeck,
     confirmRename: confirmRenameDeck,
     cancelRename: cancelRenameDeck,
     isRenameOpen: isRenameOpen,
-    askClearDeck: askClearDeck,  // 清空卡组（带确认）
+    askClearDeck: askClearDeck,
     editingDeck: editingDeck,
     askDeleteDeck: askDeleteDeck,
-    confirmOk: runConfirm,       // 通用确认弹窗：确认 / 取消
+    confirmOk: runConfirm,
     cancelConfirm: cancelConfirm,
     isConfirmOpen: isConfirmOpen,
     toast: toast,

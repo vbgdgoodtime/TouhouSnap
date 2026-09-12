@@ -1,45 +1,17 @@
 /* =========================================================
-   东方逆转 · home.js（v120→v154，v174 增加「⚙️ 设置」）
-   主页面（首页）交互脚本。
+   东方逆转 · home.js —— 主页面（首页）交互脚本。
 
-   页面本体是 index.html 里的静态标记 #homeScreen（<body class="in-home"> 时显示），
+   页面本体是 index.html 的静态标记 #homeScreen（<body class="in-home"> 时显示），
    首帧即为主页面、不依赖 JS 执行顺序；本文件只做：
-     1) 主页面背景的随机漂浮装饰图标；
-     2) 主页面的入口按钮事件接线；
+     1) 主页面背景的随机漂浮装饰图标；2) 入口按钮事件接线；
      3) 暴露 window.Home（show / hide / openPage / isHome）；
-     4) v137：开始对战前弹出「选出战卡组」（仅满 12 张可选）。
-     5) v142：开发调试走 DevTools.open()（空牌库直接开战）。
-     6) v154：出战卡组弹窗的卡组位**只显示卡组名**（去掉费用构成串与 12/12 徽标）。
-     7) v172：主页面最下方新增「📖 新手引导」按钮（#homeBtnGuide）——打开只读的机制速览
-        弹窗 #guideMask（文案全在 index.html 里，本文件只做开关、Esc / 点遮罩空白关闭，
-        以及弹窗里的「⚔️ 开始对战」直接复用既有 startBattle() 流程）。
-     8) v174：「卡组设置」下方新增「⚙️ 设置」按钮（#homeBtnSettings）——打开 #settingsMask，
-        里面切换**对手 AI 强度**（v175 起为四档：简单（默认）/ 普通 / 困难 / 月狂）。三档→四档的
-        选项与中文说明**不写在本文件**，统一从 js/ai.js 的 window.AI 读取
-        （AI.ORDER / AI.LEVELS[key].{name,desc,tip} / AI.DEFAULT_LEVEL / AI.getLevel() / AI.setLevel()），
-        因此日后增删难度档只改 ai.js；按钮副标题同步显示当前档位（#homeSettingsSub），
-        非当前档的默认档会带一个灰色「默认」徽标。
-     9) v181：「卡组设置」与「⚙️ 设置」**之间**新增「📚 图鉴」按钮（#homeBtnCodex）——不进入对局，
-        只调用既有的图鉴弹窗 window.CardBrowser.openCodex()（与对局顶栏「📖 图鉴」是同一个
-        #codexMask，内含「放大查看」层 #zoomMask）；本文件只管开关、Esc 兜底与「与其它主页面
-        弹窗互斥」，弹窗内容仍全部由 js/card-browser.js 渲染（v181 起卡池内按
-        「费用↑ → 战力↑ → 卡名字典序」排序）。
-    10) v187：特殊牌池弹窗（#pileMask，摧毁池 / 弃牌池 / 放逐池）**只在对局内由侧栏打开**，
-        本文件不渲染它的内容，只在 show() / hide()（回主页面、进卡组页 / 开发调试）时调用
-        closePiles() 把它收起来——body.in-deck 不会隐藏 .modal-mask，若不收起，进卡组页时
-        它会在遮罩之上重新露出来（详见下方 closePiles 注释）。
+     4) 开始对战前弹「选出战卡组」（仅满 12 张可选）；5) 新手引导 / 设置 / 图鉴 / 特殊牌池弹窗的开关与互斥。
 
-   按钮：
-     - 开始对战（#homeBtnBattle）：先弹出 #battleDeckMask 选卡组 → 确认后隐藏主页面
-       并调用 Game.restart({ playerDeckDefs })；取消则留在主页面。
-     - 卡组设置（#homeBtnDeck）：隐藏主页面 → window.DeckBuilder.open()
-     - 设置（#homeBtnSettings，v174）：留在主页面 → 弹出 #settingsMask（对手 AI 强度）
-     - 图鉴（#homeBtnCodex，v181）：留在主页面 → 弹出 #codexMask（既有图鉴弹窗，内含
-       放大查看层 #zoomMask；关闭途径＝弹窗内「关闭 ✕」/ 点遮罩空白 / Esc）
-     - 开发调试（#homeBtnDev）：隐藏主页面 → window.DevTools.open()
-       （不校验卡组，直接开战；玩家空牌库、AI 随机）
-     - 新手引导（#homeBtnGuide，v172）：留在主页面 → 弹出 #guideMask 机制速览弹窗
-       （不进入对局；「关闭 ✕ / 知道了 / Esc / 点遮罩空白」均可关闭）
+   ⚠️ 跨文件收口：AI 强度档位的选项与中文文案唯一数据源＝js/ai.js 的 window.AI
+      （ORDER / LEVELS[key].{name,desc,tip} / DEFAULT_LEVEL / getLevel / setLevel），
+      日后增删档位只改 ai.js；图鉴内容全部由 js/card-browser.js 渲染，本文件只管开关。
+   ⚠️ 主页面是 z-index 200 的全屏层，style.css 的 `body.in-home .modal-mask { display: none }`
+      会连弹窗一起隐藏，故 #guideMask / #codexMask / #zoomMask 各需一条 `body.in-home …:not(.hidden)` 放开显示。
 
    注：game.js 底部的启动 restart() 保持原样（后台首局随机牌库初始化）。
    ========================================================= */
@@ -53,7 +25,7 @@
     deck: { label: '卡组设置', ready: true, page: 'DeckBuilder', tip: '「卡组设置」页面正在开发中，后续版本加入。' },
   };
 
-  var pickedDeckId = null; // 出战卡组弹窗当前选中项
+  var pickedDeckId = null;
 
   /* ---------- 提示条 ---------- */
   var toastTimer = null;
@@ -104,11 +76,11 @@
     var el = $('homeScreen');
     if (el) el.classList.remove('hidden');
     hideBattleDeckPicker();
-    closeGuide();     // v172：回到主页面时不残留新手引导弹窗
-    closeSettings();  // v174：也不残留设置弹窗
-    closeCodex();     // v181：也不残留图鉴弹窗（含其中的放大查看层）
-    closePiles();     // v187：也不残留特殊牌池弹窗（该弹窗只在对局内可用）
-    syncSettingsSub(); // v174：副标题始终显示当前 AI 强度（可能被别处改过）
+    closeGuide();
+    closeSettings();
+    closeCodex();
+    closePiles();
+    syncSettingsSub();
   }
 
   function hide() {
@@ -117,16 +89,13 @@
     if (el) el.classList.add('hidden');
     hideToast();
     hideBattleDeckPicker();
-    closeGuide();     // v172：离开主页面时一并关闭新手引导
-    closeSettings();  // v174：一并关闭设置弹窗
-    closeCodex();     // v181：一并关闭图鉴弹窗（进对局 / 进卡组页 / 进开发调试时都不残留）
-    closePiles();     // v187：一并关闭特殊牌池弹窗（否则进卡组页时它会从遮罩里重新露出来）
+    closeGuide();
+    closeSettings();
+    closeCodex();
+    closePiles();     // ⚠️ 不收起的话，进卡组页时它会从遮罩里重新露出来
   }
 
-  /* ---------- v137：出战卡组选择 ---------- */
-  /* v154：出战卡组弹窗里每个卡组位**只显示卡组名**——原先还并排显示一串费用构成
-     （「1费×2 · 2费×3 · …」）与「12 / 12」徽标，手机端一行放不下会把卡组名挤成省略号；
-     列出的卡组本就全是满 12 张，12 张信息改由卡组位的悬停提示（title）承载。 */
+  /* ---------- 出战卡组选择 ---------- */
 
   function readyDecks() {
     if (window.DeckBuilder && typeof window.DeckBuilder.listReadyDecks === 'function') {
@@ -179,7 +148,7 @@
         btn.className = 'battle-deck-item';
         btn.setAttribute('role', 'option');
         btn.setAttribute('aria-selected', 'false');
-        // v154：整行只放卡组名（不再显示费用构成串与 12/12 徽标，手机端不再挤省略号）
+
         var nameEl = document.createElement('span');
         nameEl.className = 'bd-name';
         nameEl.textContent = deck.name;
@@ -206,7 +175,7 @@
       return;
     }
     renderBattleDeckList();
-    closeCodex(); // v181：与「图鉴」互斥（图鉴遮罩盖住主页面时也走这里收尾，避免叠层）
+    closeCodex();
     var m = battleMask();
     if (m) m.classList.remove('hidden');
   }
@@ -246,15 +215,9 @@
     openBattleDeckPicker();
   }
 
-  /* ---------- v172：新手引导弹窗 ----------
-     主页面最下方的「📖 新手引导」按钮（#homeBtnGuide）打开只读的机制速览弹窗 #guideMask。
-     弹窗文案全部写在 index.html（静态标记，本文件不生成任何内容），这里只负责：
-       ① 开关（openGuide / closeGuide）与状态查询（isGuideOpen）；
-       ② 关闭途径：弹窗内「关闭 ✕」/「知道了」、点遮罩空白、Esc；
-       ③ 弹窗内「⚔️ 开始对战」→ 关闭弹窗后走既有 startBattle()（选出战卡组 → 开新对局）。
-     注：主页面是 z-index 200 的全屏层，而游戏弹窗默认在主页面态被隐藏
-     （style.css 的 `body.in-home .modal-mask { display: none }`），因此 #guideMask 与
-     #battleDeckMask 一样需要一条 `body.in-home #guideMask:not(.hidden) { display: flex }` 放开。 */
+  /* ---------- 新手引导弹窗 ----------
+     文案全部写在 index.html（本文件不生成任何内容），这里只管开关 / 与其它主页面弹窗互斥 / Esc 兜底；
+     弹窗内「⚔️ 开始对战」→ 关闭弹窗后走既有 startBattle()。 */
   function guideMask() { return $('guideMask'); }
   function isGuideOpen() {
     var m = guideMask();
@@ -263,9 +226,9 @@
   function openGuide() {
     var m = guideMask();
     if (!m) { toast('新手引导弹窗缺失（请检查 index.html 是否完整）。'); return; }
-    hideBattleDeckPicker(); // 与「选出战卡组」互斥，避免两层遮罩叠加
-    closeSettings();        // v174：与「设置」互斥
-    closeCodex();           // v181：与「图鉴」互斥
+    hideBattleDeckPicker();
+    closeSettings();
+    closeCodex();
     hideToast();
     m.classList.remove('hidden');
   }
@@ -279,14 +242,8 @@
     startBattle();
   }
 
-  /* ---------- v174：设置弹窗（对手 AI 强度） ----------
-     主页面「⚙️ 设置」按钮（#homeBtnSettings，位于「卡组设置」下方）打开 #settingsMask。
-     ⚠️ 三档的**选项与中文文案不写在本文件**——统一从 js/ai.js 的 window.AI 读取：
-        · AI.ORDER            —— 展示顺序 ['easy','normal','hard','lunatic']
-        · AI.LEVELS[key]      —— { name, desc, tip }（玩家可见说明的唯一数据源）
-        · AI.getLevel()       —— 当前档位（初值来自 localStorage: touhou2.ai.level / ?ai=）
-        · AI.setLevel(key)    —— 切换（写 localStorage，并往对局日志记一条）
-     因此日后增删/改档位只改 js/ai.js，index.html 与本文件都不用动。
+  /* ---------- 设置弹窗（对手 AI 强度） ----------
+     ⚠️ 档位选项与中文说明**不写在本文件**——唯一数据源是 js/ai.js 的 window.AI（见文件头）；
      关闭途径：「关闭 ✕」「知道了」、点遮罩空白、Esc（Esc 优先级见 bind）。 */
   function settingsMask() { return $('settingsMask'); }
   function isSettingsOpen() {
@@ -299,7 +256,6 @@
     if (!api || typeof api.getLevel !== 'function') return null;
     try { return api.getLevel(); } catch (e) { return null; }
   }
-  // 主页面按钮副标题：「对手 AI 强度：简单」
   function syncSettingsSub() {
     var el = $('homeSettingsSub');
     if (!el) return;
@@ -378,8 +334,7 @@
       return;
     }
     var info = api.LEVELS[key] || {};
-    // 弹窗开着时不再弹 toast（弹窗内的 ✓ / 「当前」徽标与提示行已经即时反馈，
-    // 且主页面 toast 在遮罩之下看不见）；从控制台等别处调用时才用 toast 提示。
+    // 弹窗开着时不弹 toast：主页面 toast 在遮罩之下看不见，弹窗内的 ✓／「当前」徽标已即时反馈
     if (!isSettingsOpen()) toast('对手 AI 强度已切换为「' + (info.name || key) + '」。');
     syncSettingsSub();
     renderAiLevels();
@@ -387,9 +342,9 @@
   function openSettings() {
     var m = settingsMask();
     if (!m) { toast('设置弹窗缺失（请检查 index.html 是否完整）。'); return; }
-    hideBattleDeckPicker(); // 与其它主页面弹窗互斥，避免多层遮罩叠加
+    hideBattleDeckPicker();
     closeGuide();
-    closeCodex();           // v181：与「图鉴」互斥
+    closeCodex();
     hideToast();
     renderAiLevels();
     syncSettingsSub();
@@ -400,19 +355,11 @@
     if (m) m.classList.add('hidden');
   }
 
-  /* ---------- v181：主页面「📚 图鉴」入口（#homeBtnCodex） ----------
-     位置＝主入口列里「卡组设置」与「⚙️ 设置」**之间**（index.html 的静态标记）。
-     点它**不进入对局**，只打开**既有**的图鉴弹窗（js/card-browser.js 的
-     window.CardBrowser.openCodex()，与对局顶栏「📖 图鉴」同一个 #codexMask）——
-     因此本文件不复制任何卡池 / 费用档 / 卡片渲染逻辑，日后图鉴改版只改 card-browser.js。
-     关闭途径：
-       · 弹窗内「关闭 ✕」（index.html 的 onclick=Game.ui.onCodex() → CardBrowser.closeCodex）；
-       · 点遮罩空白（game.js initOverlays 的委托）；
-       · Esc（game.js 的全局 Esc **逐层**关：先放大层 #zoomMask、再图鉴层 #codexMask）——
-         故这里不再往本文件的 Esc 链里加图鉴，避免一次 Esc 连关两层。
-     主页面态原本 `body.in-home .modal-mask { display: none }` 会连弹窗一起隐藏，故
-     style.css 另有 `body.in-home #codexMask:not(.hidden)`（213）与
-     `body.in-home #zoomMask:not(.hidden)`（214）两条放开显示。 */
+  /* ---------- 主页面「📚 图鉴」入口（#homeBtnCodex） ----------
+     只打开**既有**的图鉴弹窗 window.CardBrowser.openCodex()（与对局顶栏「📖 图鉴」同一个 #codexMask），
+     故本文件不复制任何卡池 / 卡牌渲染逻辑，日后图鉴改版只改 js/card-browser.js。
+     ⚠️ Esc 由 game.js 全局**逐层**关（先 #zoomMask 再 #codexMask），故这里不再往本文件的 Esc 链里加图鉴，
+        避免一次 Esc 连关两层。 */
   function codexApi() { return window.CardBrowser || null; }
   function isCodexOpen() {
     var m = $('codexMask');
@@ -438,9 +385,8 @@
   function closeCodex() {
     var api = codexApi();
     if (api && typeof api.closeCodex === 'function') {
-      try { api.closeCodex(); } catch (e) { /* 忽略：下面仍会兜底收起遮罩 */ }
+      try { api.closeCodex(); } catch (e) {  }
     }
-    // 兜底（card-browser.js 未加载 / 抛错时）：直接收起两层面板，避免残留遮罩挡住主页面
     var m = $('codexMask');
     if (m) m.classList.add('hidden');
     var z = $('zoomMask');
@@ -449,16 +395,14 @@
     if (pp) pp.classList.add('hidden');
   }
 
-  /* ---------- v187：收起特殊牌池弹窗（#pileMask，只在对局内可用） ----------
-     本文件不渲染牌池内容（全部由 js/game.js 的 renderPilePanel 负责），这里只在
-     「回主页面 / 离开主页面（进卡组页、开发调试等）」时把它收起来：
-       · body.in-home 会隐藏 .modal-mask，但 **body.in-deck 不会**——
-         若不在离开对局时收起，之前打开过的牌池弹窗会在卡组设置页上重新露出来；
-       · 与 closeCodex 同款：优先调用 game.js 的关闭入口，取不到时直接兜底加 .hidden。 */
+  /* ---------- 收起特殊牌池弹窗（#pileMask，只在对局内可用） ----------
+     本文件不渲染牌池内容（渲染在 js/game.js 的 renderPilePanel），只在回 / 离开主页面时兜底收起。
+     ⚠️ body.in-home 会隐藏 .modal-mask，但 **body.in-deck 不会**——不在这里收起的话，
+        之前打开过的牌池弹窗会在卡组设置页上重新露出来。 */
   function closePiles() {
     var api = window.Game && window.Game.ui;
     if (api && typeof api.closePiles === 'function') {
-      try { api.closePiles(); } catch (e) { /* 忽略：下面仍会兜底收起遮罩 */ }
+      try { api.closePiles(); } catch (e) {  }
     }
     var m = $('pileMask');
     if (m) m.classList.add('hidden');
@@ -485,18 +429,17 @@
     var battle = $('homeBtnBattle');
     var dev = $('homeBtnDev');
     var deck = $('homeBtnDeck');
-    var guide = $('homeBtnGuide');     // v172：主页面最下方「新手引导」
-    var settings = $('homeBtnSettings'); // v174：卡组设置下方的「设置」（对手 AI 强度）
-    var codex = $('homeBtnCodex');       // v181：「卡组设置」与「设置」之间的「图鉴」
+    var guide = $('homeBtnGuide');
+    var settings = $('homeBtnSettings');
+    var codex = $('homeBtnCodex');
     if (battle) battle.addEventListener('click', startBattle);
     if (dev) dev.addEventListener('click', function () { openPage('dev'); });
     if (deck) deck.addEventListener('click', function () { openPage('deck'); });
     if (guide) guide.addEventListener('click', openGuide);
     if (settings) settings.addEventListener('click', openSettings);
-    if (codex) codex.addEventListener('click', openCodex); // v181：主页面「📚 图鉴」
-    syncSettingsSub(); // v174：按钮副标题显示当前 AI 强度
+    if (codex) codex.addEventListener('click', openCodex);
+    syncSettingsSub();
 
-    // v174：设置弹窗的关闭途径（关闭 ✕ / 知道了 / 遮罩空白 / Esc）
     var sClose = $('settingsCloseBtn');
     var sOk = $('settingsOkBtn');
     if (sClose) sClose.addEventListener('click', closeSettings);
@@ -506,7 +449,6 @@
       if (e.target === sMask) closeSettings(); // 只认点遮罩空白，点弹窗内部不关
     });
 
-    // v172：新手引导弹窗的关闭途径（关闭 ✕ / 知道了 / 遮罩空白 / Esc）与「开始对战」
     var gClose = $('guideCloseBtn');
     var gOk = $('guideOkBtn');
     var gStart = $('guideStartBtn');
@@ -533,7 +475,7 @@
     });
     window.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
-      // v172 / v174：主页面弹窗按层级关（新手引导 212 > 设置 211 > 出战卡组 210）
+      // 主页面弹窗按层级关（与 style.css 的 z-index 一致）：新手引导 212 > 设置 211 > 出战卡组 210
       if (isGuideOpen()) { closeGuide(); return; }
       if (isSettingsOpen()) { closeSettings(); return; }
       if (isBattlePickerOpen()) hideBattleDeckPicker();
@@ -551,17 +493,15 @@
     startBattle: startBattle,
     openPage: openPage,
     toast: toast,
-    // v172：新手引导弹窗（主页面最下方入口）——暴露出来便于调试与自动化验证
     openGuide: openGuide,
     closeGuide: closeGuide,
     isGuideOpen: isGuideOpen,
-    // v174：设置弹窗（对手 AI 强度）——切换本身走 window.AI.setLevel()
+    // 设置弹窗（对手 AI 强度）：切换收口＝window.AI.setLevel()
     openSettings: openSettings,
     closeSettings: closeSettings,
     isSettingsOpen: isSettingsOpen,
     setAiLevel: setAiLevel,
     currentAiLevel: currentAiKey,
-    // v181：主页面「📚 图鉴」入口（内容仍由 window.CardBrowser 渲染）——暴露出来便于调试与自动化验证
     openCodex: openCodex,
     closeCodex: closeCodex,
     isCodexOpen: isCodexOpen,
