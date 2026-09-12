@@ -75,11 +75,15 @@ function cardPower(card) { return isSpell(card) ? 0 : card.def.p + card.buff; }
 // `costDown: N`（现仅 8 费「纯狐」）＝**双方每有一张牌真正被摧毁**，此牌费用 −N（下限 0）：只算**真正离场的那次摧毁**（dw / dwh / dwb / 地形 purge），
 // 摧毁失败（phx / surv / ind / 地形 prot·蕾蒂）与其它离场方式（弃牌、法术消散、终局 leave、撤回手牌、移动、换边）都不算；读的是**摧毁池合计的实时值**，
 // 故纯狐还没抽到手之前被摧毁的牌也计入；减费**不写进** costMod、也不改 def.c，只在 cardCost 里算 ⇒ 手牌角标变绿、放大视图写「本场战斗费用修正 −N」。
-// cardCost = max(0, def.c + costMod − costDown × 摧毁数)；非摧毁/非增减/非放置：不触发 surv/phx/prot/ind、不动区域字段与格位、不进 powerLog/fieldQueue。
+// costDownP: { min, n }（现仅 6 费「星熊勇仪」）＝**自己场上每有一张已翻开、实时战力 ≥ min 的卡**，此牌费用 −n（下限 0）：战力读 cardPowerIn（区域加成 / 持续 og / 永久增益都算），暗牌、法术（战力恒 0）与 un 占位卡都不计；
+// 与 costDown 同为实时派生值、互不覆盖（都不写 costMod / costLog ⇒ 无“费用 ±N”演出，手牌角标在下次 renderHand 时自然变绿）。
+// cardCost = max(0, def.c + costMod − costDown × 摧毁数 − costDownP.n × 己方场上高战力卡数)；非摧毁/非增减/非放置：不触发 surv/phx/prot/ind、不动区域字段与格位、不进 powerLog/fieldQueue。
 function cardCost(card) {
   if (!card) return 0;
-  const base = card.def.c + (card.costMod || 0);
-  const down = (card.def.costDown || 0) * destroyCount();
+  const def = card.def;
+  const base = def.c + (card.costMod || 0);
+  const cdP = def.costDownP;
+  const down = (def.costDown || 0) * destroyCount() + (cdP ? cdP.n * fieldPowerCount(card.side, cdP.min) : 0);
   return down > 0 ? Math.max(0, base - down) : base;
 }
 function addCostLog(card, d, srcCard, tag) {
@@ -476,6 +480,21 @@ function pileTotalOf(side) {
 function destroyCount() {
   return pileOf('p', 'destroy').length + pileOf('a', 'destroy').length;
 }
+/** **某方场上已翻开、实时战力 ≥ min 的卡张数**（实时读取：随翻面 / 增减 / 摧毁 / 移动 / 离场即时变化，不写任何状态）。
+    唯一使用者＝`cardCost` 的「费用随场上高战力递减」（costDownP，现仅 6 费「星熊勇仪」）：战力按 `cardPowerIn` 判定（区域加成 / 持续 `og` / 永久增益都算），
+    暗牌、法术（战力恒 0）与 `un` 占位卡都不计；`card.side` 缺失（归属未知）时按 0 张处理。 */
+function fieldPowerCount(side, min) {
+  const pl = side && state.players[side];
+  if (!pl) return 0;
+  let n = 0;
+  for (let j = 0; j < 3; j++) {
+    for (const c of pl.zones[j]) {
+      if (!c.revealed || c.def.un) continue;
+      if (cardPowerIn(j, c) >= min) n++;
+    }
+  }
+  return n;
+}
 /** 把**牌本体**放进某方某个池的队尾；meta = { turn, by, loc, power }（缺省取当前回合）。返回 { pile, n, kind }，不进 zone / fieldQueue、不改任何战力。 */
 function pushToPile(side, kind, card, meta) {
   if (!card || !card.def) return null;
@@ -824,6 +843,20 @@ function cardPowerIn(locIdx, card) {
   if (isSpell(card)) return 0;
   return cardPower(card) + locRoleBonus(locIdx, card) + locCostBonus(locIdx, card) + locAllBonus(locIdx, card) + cardAuraBonus(card, locIdx);
 }
+/* 区域倍率（`mul`，卡级持续机制；现仅 5 费「丰聪耳神子」）：源卡**已翻开且仍在己方场上**期间，把它**所在区域自己一侧**的
+   结算总点数整体 ×mul（`zoneTotals` ＝ 该侧已翻开卡的实时战力之和 ＋ 放满加成 `fill`，故 fill 一起被翻倍）。
+   与 `og` 同为实时派生（不进 `powerLog` 台账、不改任何单张卡的战力数字），源卡离场 / 失去卡牌文字（封印 ∪ 静海）即消失。
+   ⚠️ 与地形 `dbl` 的分工：`dbl` 是地形效果、双方同乘；本键是卡面效果、只乘**源卡所属的那一侧**。多个来源各乘一次（同区两张 ＝ ×4）。 */
+function cardZoneMul(side, locIdx) {
+  let m = 1;
+  for (const c of state.players[side].zones[locIdx]) {
+    const mul = c.def.mul;
+    if (!mul || !c.revealed || c.def.un) continue; // 源卡须已翻开且仍在场上
+    if (cardMuted(c)) continue; // 失去卡牌文字（封印 ∪ 静海）：源卡的倍率整条失效
+    m *= mul;
+  }
+  return m;
+}
 // ---- 占格（occ）口径：普通卡占 1 格、大体积卡（如伊吹萃香 occ:4）占满多格；出牌/生成/移动/放满等所有“还能放几张”的判定统一走这里，避免只用 zone.length 误判；法术恒按 1 格（暗牌占 1 个空位，揭示瞬间同样占 1 格）----
 function occOf(card) {
   if (isSpell(card)) return 1;
@@ -884,11 +917,13 @@ function zoneFillBonus(side, locIdx) {
   return (m > 0 && sideUsed(side, locIdx) >= m) ? def.fill : 0;
 }
 // 区域总点数：默认只统计“已翻开的牌”（暗牌不计入，翻面后才计入）；includeHidden=true 供 AI 估值。
+// 最后整体乘「区域倍率」（`cardZoneMul`：己方该侧的 `mul` 来源，如丰聪耳神子）——倍率作用在结算总点数上（含 `fill`），不改卡牌自身数字。
 function zoneTotals(side, locIdx, includeHidden) {
-  return state.players[side].zones[locIdx].reduce(
+  const sum = state.players[side].zones[locIdx].reduce(
     (s, c) => (includeHidden || c.revealed ? s + cardPowerIn(locIdx, c) : s),
     0
   ) + zoneFillBonus(side, locIdx);
+  return sum * cardZoneMul(side, locIdx);
 }
 // 区域“有效战力”（比较口径）：总点数 × dbl 后，若是反转区域（inv，如辉针城）则取负值 —— 实际战力更低的一方在比较中反而更大（= 低者胜）。
 function zoneEff(side, locIdx, includeHidden) {
@@ -1027,23 +1062,23 @@ async function restart(opts) {
     const custom = (opts.playerDeckDefs.length === 12) ? opts.playerDeckDefs : null;
     if (custom) {
       lastPlayerDeckDefs = custom.slice();
-      state.players.p.deck = buildDeckFromDefs(custom);
+      state.players.p.deck = buildDeckFromDefs(custom, 'p');
     } else {
       lastPlayerDeckDefs = null;
-      state.players.p.deck = buildDeckCards(DECK_CURVE);
+      state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
     }
   } else if (lastEmptyPlayerDeck) {
     state.players.p.deck = [];
   } else {
     const custom = (lastPlayerDeckDefs && lastPlayerDeckDefs.length === 12) ? lastPlayerDeckDefs : null;
     if (custom) {
-      state.players.p.deck = buildDeckFromDefs(custom);
+      state.players.p.deck = buildDeckFromDefs(custom, 'p');
     } else {
-      state.players.p.deck = buildDeckCards(DECK_CURVE);
+      state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
     }
   }
   // 对手每局按 AI 费用结构从卡池随机组一套 12 张（同费用不重复）
-  state.players.a.deck = buildDeckCards(AI_DECK_CURVE);
+  state.players.a.deck = buildDeckCards(AI_DECK_CURVE, 'a');
 
   // 对手初始 3 张先在数据层发放（无动画）；玩家 3 张由 playOpening 逐张滑入；第 1 回合开始双方再各抓 1 张（起手共 4 张）
   for (let i = 0; i < 3; i++) drawOne('a');
@@ -1121,7 +1156,7 @@ async function playOpening(gen) {
   await sleep(500);
 }
 
-function buildDeckCards(curve) {
+function buildDeckCards(curve, side) {
   // curve：费用序列（默认玩家兜底曲线）；每种费用从 POOL 随机抽、同费用不重复，抽牌顺序纯随机
   curve = curve || DECK_CURVE;
   const buckets = {};
@@ -1131,7 +1166,9 @@ function buildDeckCards(curve) {
   // 按抽牌顺序生成卡牌；drawOne() 从队尾取牌，因此反转存储
   const inDrawOrder = draw.map((c) => {
     const def = buckets[c].pop();
-    return newCard(def || (POOL[c] && POOL[c][0]) || POOL[1][0]);
+    const card = newCard(def || (POOL[c] && POOL[c][0]) || POOL[1][0]);
+    card.side = side; // 归属（与 drawOne 一致；牌库里的实例也要带 side —— costDownP 之类按“己方场上”判定的机制在牌库里就要读得到）
+    return card;
   });
   inDrawOrder.reverse();
   return inDrawOrder;
@@ -1193,10 +1230,14 @@ function movesForSide(side) {
   }
   return out;
 }
-function buildDeckFromDefs(defs) {
+function buildDeckFromDefs(defs, side) {
   const base = (defs || []).slice(0, 12);
-  if (base.length !== 12) return buildDeckCards(DECK_CURVE);
-  const cards = shuffle(base.slice()).map((d) => newCard(d));
+  if (base.length !== 12) return buildDeckCards(DECK_CURVE, side);
+  const cards = shuffle(base.slice()).map((d) => {
+    const card = newCard(d);
+    card.side = side; // 归属（同 buildDeckCards；牌库实例一律带 side）
+    return card;
+  });
   cards.reverse();
   return cards;
 }
@@ -2859,7 +2900,7 @@ function cardNoDown(card) {
    ② 卡级抹除（卡牌效果键 `mute`，游戏内叫**「封印」**）——**永久**：标记落在**卡实例**上（`card.muteP`，同 `card.buff` 的永久口径），
       整局有效——被摧毁后再复活、`phx` 回手再打出、换边、`morph` 变身、`shuffleIn` 洗回牌库全都保持，离开静海也**不**恢复。
    被抹除：`k`（含五个分步演出键）、`og`（只看源卡）、`fx`（错过的时机不补）、`surv`/`phx`/`prot`/`ind`、`fly`；法术揭示不发动但**照常消散**。
-   不受影响：手牌 / 牌库 / 三池里的**同名**卡（封印除外，它认实例）、`costDown`/`gs`/`playReq`、印刷费用与威力、`occ` 占格与 `tk` 标记、
+   不受影响：手牌 / 牌库 / 三池里的**同名**卡（封印除外，它认实例）、`costDown`/`costDownP`/`gs`/`playReq`、印刷费用与威力、`occ` 占格与 `tk` 标记、
    区域类效果（`aff`/`cb`/`all`/`fill`/`inv`/`purge`/`gust`/`noDown`/`prot` 等）、摧毁候选与筛选口径（它只是“哑巴”，不是 `un`）。
    ⚠️ 不追溯：已结算的 `buff` / `powerLog` 不回滚，错过的时机效果不补结算；每张牌**首次**被拦截记一条日志（`card.muteNoted`）。
    守卫点（读下面两个判定、无一处写状态）：`applyEffect` 入口（覆盖揭示 / 时机 / morph / 集结 / 复活 / retrigger 等连锁路径）、
@@ -2882,11 +2923,11 @@ function cardMuted(card) {
 function cardSealed(card) {
   return !!(card && card.muteP);
 }
-/* **「含持续效果」**＝卡面标着「持续」的卡（与 `kindTags` 的三条「持续」标记同口径）：`og`（持续效果）/ 卡级 `prot`（持续 · 区域免摧毁）/
-   卡级 `ind`（持续 · 自身不可摧毁）。⚠️ `fly`（每回合移动一次）/`surv`（防摧毁）/`phx`（凤凰重生）/`fx`（时机效果）/`costDown` 都**不算**。 */
+/* **「含持续效果」**＝卡面标着「持续」的卡（与 `kindTags` 的「持续」标记同口径）：`og`（持续效果）/ `mul`（持续 · 区域倍率）/
+   卡级 `prot`（持续 · 区域免摧毁）/ 卡级 `ind`（持续 · 自身不可摧毁）。⚠️ `fly`（每回合移动一次）/`surv`（防摧毁）/`phx`（凤凰重生）/`fx`（时机效果）/`costDown`/`costDownP` 都**不算**。 */
 function cardHasOngoing(card) {
   const d = card && card.def;
-  return !!(d && (d.og || d.prot || d.ind));
+  return !!(d && (d.og || d.mul || d.prot || d.ind));
 }
 // 时机名 → 日志里的可读说法（供 resolveTimedEffects / applyEffect 的拦截日志复用）
 const FX_TIMING_TXT = { turnStart: '「回合开始」效果', turnEnd: '「回合结束」效果', gameEnd: '「游戏结束」效果' };
@@ -2919,7 +2960,7 @@ function muteNoteHTML(card, locIdx) {
    本区域双方所有卡牌的**揭示不发动**（翻开那一刻在本区的牌：揭示视为没写、不产生任何变化）。
    实时、零状态（同静海 `mute` 的读法）：卡此刻在带 `noReveal` 的区域里就被封锁，法界被换掉
    （`xform`/`collapse`/`xformTurn`/开发者「🗻 指定地形」）或卡被移出本区（`mv`/`fly`/`shift`/`roam`/`gust`）即不再被拦，无需收尾代码。
-   **只拦揭示**：持续 `og`、时机 `fx`、防护（`surv`/`phx`/`prot`/`ind`）、`fly`、`costDown`/`gs`/`playReq`、
+   **只拦揭示**：持续 `og`、时机 `fx`、防护（`surv`/`phx`/`prot`/`ind`）、`fly`、`costDown`/`costDownP`/`gs`/`playReq`、
    印刷费用与威力、`occ` 占格与 `tk` 标记、全部地形类效果（`gamble`/`gust`/`purge`/`grow`/`decay` 等）、
    摧毁候选与筛选口径都照常；法术揭示不发动但**照常消散**（消散不是卡面文字）。
    ⚠️ 不追溯、不补结算（同 `dice`/`rally` 的“错过的时机不补”）：被拦下的**那一次**揭示不会在卡离开法界后补发动，
@@ -2997,12 +3038,25 @@ function surviveDestroy(card) {
   return true;
 }
 
-// 凤凰重生（def.phx=N，现仅藤原妹红）：被任何“摧毁”指向时**不消失**，而是从场上移除后**返回自己手牌**并**永久 +N 战力**（可重复打出并再次触发）；
-// 手牌已满 7 张则重生失败、按原样被摧毁。返回 true = 本函数已处理完（调用方不得再移除该卡）。
+/* 「本体战力翻倍」的统一收口（揭示键 x2 与凤凰重生 phx 共用）：增量＝结算那一刻的 cardPower（印刷威力 + 永久增益），
+   **不含**区域加成（aff/cb/all）与持续光环 og ⇒ 翻倍结果照常叠加后者；走 applyPermBuff 收口（±N 演出 + 战力影响历史）。
+   ⚠️ 按字面严格翻倍：本体战力 0 ⇒ 不产生变化（返回 null）、为负 ⇒ 更负（该 −N 在带 noDown 的区域会被拦下 ⇒ 返回 false）；
+   其余情况返回本次增量（＝翻倍前的本体战力）。法术无战力 ⇒ 调用方各自先挡。 */
+function doubleCardPower(card, srcCard, tag) {
+  const before = cardPower(card);
+  if (!before) return null;
+  if (applyPermBuff(card, before, srcCard, tag) === false) return false;
+  return before;
+}
+
+// 凤凰重生（def.phx，现仅藤原妹红）：被任何“摧毁”指向时**不消失**，而是从场上移除后**返回自己手牌**并**战力翻倍**
+// （翻倍口径同 x2，收口见 doubleCardPower ⇒ 可反复「摧毁→重生→再打出」逐次翻倍：2 → 4 → 8…）；
+// 手牌已满 7 张则重生失败、按原样被摧毁。重生瞬间已离场 ⇒ 本次翻倍读的是**离开区域之后**的本体战力（区域 noDown 不参与）。
+// 返回 true = 本函数已处理完（调用方不得再移除该卡）。
 function phoenixRevive(card, locIdx) {
   const phx = card && card.def && card.def.phx;
   if (!phx) return false;
-  // 失去文字 ⇒「凤凰重生」一并失效：该卡照常被摧毁（不回手、不 +N）
+  // 失去文字 ⇒「凤凰重生」一并失效：该卡照常被摧毁（不回手、不翻倍）
   if (cardMuted(card)) { muteSkipLog(card, '「凤凰重生」（phx）'); return false; }
   const st = state;
   const side = card.side;
@@ -3011,10 +3065,11 @@ function phoenixRevive(card, locIdx) {
   if (i >= 0) zone.splice(i, 1);
   dequeueField(card); // 离开场上：移出放置队列（回手后再打出时重新入队）
   if (st.players[side].hand.length < 7) {
-    applyPermBuff(card, phx, null, '凤凰重生');
+    const before = doubleCardPower(card, null, '凤凰重生');
     card.revealed = false; // 回手后再次打出需重新暗出/翻面
     st.players[side].hand.push(card);
-    log('danger', `🔥 「${card.def.n}」被摧毁时触发凤凰重生：返回手牌并永久 +${phx} 战力（下次打出威力 ${cardPower(card)}）。`);
+    if (typeof before === 'number' && before) log('danger', `🔥 「${card.def.n}」被摧毁时触发凤凰重生：返回手牌并战力翻倍（本体战力 ${before} → ${cardPower(card)}）。`);
+    else log('danger', `🔥 「${card.def.n}」被摧毁时触发凤凰重生：返回手牌（本体战力为 0，翻倍后仍是 0）。`);
   } else {
     log('danger', `🔥 「${card.def.n}」被摧毁时想凤凰重生，但手牌已满（7 张），重生失败、被摧毁。`);
   }
@@ -3474,7 +3529,7 @@ function spawnSOwnSide(side, locIdx, card, fx) {
    **只有在它真的被摧毁离场时**，才把它的**复制体**分别落到另外两个区域自己一侧各 1 张（该侧放满 / 区域未开放 /
    占格数不够则跳过该区）。返回落下的复制体清单 `[{ card, loc }]`，由调用方按同步版或分步版结算它们的揭示。
    ① 摧毁走完整摧毁管线（口径同 `dwb`）：本区免摧毁 `locNoDestroy`（睡鼠神祠 / 蕾蒂）⇒ 整条失效；
-      目标带 `ind`（判定失败、判定结束）、`phx`（回手 +N）或 `surv`（不离场、改降战力）都算**摧毁失败 ⇒ 不生成复制体**；
+      目标带 `ind`（判定失败、判定结束）、`phx`（回手并翻倍）或 `surv`（不离场、改降战力）都算**摧毁失败 ⇒ 不生成复制体**；
       真被摧毁才 `recordDestroy` 进摧毁池，并因此喂纯狐 `costDown` 计数。
    ② 复制体＝被摧毁那张牌的**完整副本**：同 `def`（卡面效果照抄，含 `og`/`fx`/`surv`/`phx`/`ind`/`occ` 等卡级机制）
       ＋ 实例级状态照抄（永久战力修正 `buff` 与台账 `powerLog`、卡级封印 `muteP`、费用修正 `costMod`）
@@ -3643,15 +3698,14 @@ function applyEffect(side, locIdx, card, spec) {
       break;
     }
     case 'x2': {
-      // 揭示：此牌**自身**战力翻倍（现仅 5 费「绵月依姬」）——增量＝结算那一刻的**本体战力** `cardPower`
-      // （印刷威力 + 永久增益），**不含**区域加成（aff/cb/all）与持续光环 `og` ⇒ 翻倍结果照常叠加后者；
-      // 走 `applyPermBuff` 收口（±N 演出 + 战力影响历史按来源记本卡）。
-      // ⚠️ 按字面严格翻倍：本体战力 0 → 不产生变化（不写台账）、负 → 更负（在「免减攻」区会被拦下）；法术无战力 ⇒ 不生效。
+      // 揭示：此牌**自身**战力翻倍（现仅 5 费「绵月依姬」）——口径与凤凰重生共用 `doubleCardPower`
+      // （增量＝结算那一刻的本体战力 `cardPower`，不含区域加成 aff/cb/all 与持续光环 `og`；走 `applyPermBuff` 收口）。
+      // ⚠️ 法术无战力 ⇒ 本键不生效；本体战力 0 → 不产生变化（不写台账、不排演出）、负 → 更负（在「免减攻」区被拦下）。
       if (isSpell(card)) { log(side, `✦ 「${card.def.n}」是法术（没有战力），「战力翻倍」不生效。`); break; }
-      const before = cardPower(card);
-      if (!before) { log(side, `✦ ${txt}：此牌本体战力为 0，翻倍后仍是 0（本次无变化）。`); break; }
+      const before = doubleCardPower(card, card);
+      if (before === null) { log(side, `✦ ${txt}：此牌本体战力为 0，翻倍后仍是 0（本次无变化）。`); break; }
       // 负增量在「免减攻」区域会被 applyPermBuff 拦下 —— 它自己已记一条日志，这里不再重复记
-      if (applyPermBuff(card, before, card) === false) break;
+      if (before === false) break;
       log(side, `✦ ${txt}：本体战力 ${before} → ${cardPower(card)}（永久 ${before > 0 ? '+' : '−'}${Math.abs(before)}）`);
       break;
     }
@@ -3668,7 +3722,7 @@ function applyEffect(side, locIdx, card, spec) {
         if (p < minP) { minP = p; target = c; }
       }
       if (indestructibleBlock(target, def.n)) break; // ind → 摧毁失败、判定结束（不改打其他牌）
-      if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手 +N 战力
+      if (phoenixRevive(target, locIdx)) break; // 凤凰重生（如藤原妹红）：回手并翻倍
       if (surviveDestroy(target)) break; // 防摧毁（如灵乌路空）：替代为降战力、卡不离场
       recordDestroy(target, locIdx, def.n); // 真正离场 → 进归属方的摧毁池（⚠️ 须在移出区域之前记）
       playShatter(target);
@@ -3698,6 +3752,29 @@ function applyEffect(side, locIdx, card, spec) {
       lowZone.splice(lowZone.indexOf(lowTarget), 1);
       dequeueField(lowTarget);
       log('danger', `✦ ${def.n} 摧毁了${lowSide === side ? '己方' : '对方'}「${lowTarget.def.n}」（威力 ${minBoth}${lowPool.length > 1 ? `；并列最低共 ${lowPool.length} 张，随机选中这一张` : ''}）`);
+      break;
+    }
+    case 'dwOwn': {
+      // 摧毁本区**己方**一张**随机**卡（现由 4 费「茨木华扇之臂」以 `fx.turnEnd` 使用）：候选＝本区自己一侧、已翻开、
+      // **实时战力严格低于此牌**（`cardPowerIn`，含区域加成 / 持续 og / 永久增益；此牌自己也按同一口径读）的卡，排除自己 / 法术 /
+      // `un` 占位卡（含落场 token）；在候选里**随机挑一张**。与 dw/dwh 的差别：不打对方、也不按最弱/最强挑。
+      // 本区免摧毁 `locNoDestroy`（睡鼠神祠 / 蕾蒂）⇒ 整条失效、不选目标；`ind`（判定失败、判定结束）/ `phx`（回手并翻倍）/
+      // `surv`（不离场、改永久降战力）按各自机制结算且都**不算被摧毁**；真被摧毁才 `recordDestroy` 进摧毁池（并喂纯狐 `costDown`）。
+      // 候选为空（本区没有战力低于自己的其他己方已翻开卡）⇒ 无事发生、只记日志。
+      const selfP = cardPowerIn(locIdx, card);
+      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁己方卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      const weaker = mine.filter((c) => c !== card && c.revealed && !c.def.un && !c.def.spell && cardPowerIn(locIdx, c) < selfP);
+      if (weaker.length === 0) { log(side, `✦ ${def.n} 想摧毁一张战力低于自己的己方卡牌，但本区没有这样的已翻开卡牌（暗牌、法术与战力不低于它 ${selfP} 的卡都不算），无事发生。`); break; }
+      const wPick = weaker[Math.floor(Math.random() * weaker.length)];
+      const wP = cardPowerIn(locIdx, wPick);
+      if (indestructibleBlock(wPick, def.n)) break; // ind → 摧毁失败、判定结束（不改打其他牌）
+      if (phoenixRevive(wPick, locIdx)) { log(side, `✦ ${def.n}：己方「${wPick.def.n}」凤凰重生回手（摧毁失败）。`); break; }
+      if (surviveDestroy(wPick)) { log(side, `✦ ${def.n}：己方「${wPick.def.n}」触发防摧毁、未被摧毁。`); break; }
+      recordDestroy(wPick, locIdx, def.n); // 真正离场 → 进归属方摧毁池（⚠️ 须在移出区域之前记）
+      playShatter(wPick);
+      mine.splice(mine.indexOf(wPick), 1);
+      dequeueField(wPick);
+      log('danger', `✦ ${def.n} 摧毁了己方「${wPick.def.n}」（威力 ${wP}；本区战力低于 ${selfP} 的己方已翻开卡共 ${weaker.length} 张，随机选中这一张）`);
       break;
     }
     case 'dwc': {
@@ -4296,7 +4373,7 @@ function applyEffect(side, locIdx, card, spec) {
       const maxPool = vis.filter((c) => cardPowerIn(locIdx, c) === maxP);
       const target = maxPool[Math.floor(Math.random() * maxPool.length)]; // 并列：随机挑一张
       if (indestructibleBlock(target, def.n)) break;
-      if (phoenixRevive(target, locIdx)) break; // 凤凰重生：回手 +N 战力
+      if (phoenixRevive(target, locIdx)) break; // 凤凰重生：回手并翻倍
       if (surviveDestroy(target)) break; // 防摧毁：替代为降战力、卡不离场
       recordDestroy(target, locIdx, def.n);
       playShatter(target);
@@ -4329,7 +4406,7 @@ function applyEffect(side, locIdx, card, spec) {
       for (const c of picks) {
         const p = cardPowerIn(locIdx, c);
         if (indestructibleBlock(c, def.n)) continue; // ind：这一张打不死，另一张照常（不顺位补第 3 名）
-        if (phoenixRevive(c, locIdx)) continue; // 凤凰重生：回手 +N 战力
+        if (phoenixRevive(c, locIdx)) continue; // 凤凰重生：回手并翻倍
         if (surviveDestroy(c)) continue; // 防摧毁：替代为降战力、卡不离场
         recordDestroy(c, locIdx, def.n);
         playShatter(c);
@@ -4804,7 +4881,7 @@ function reactorPurge() {
     const removed = [];
     for (const c of doomed) {
       if (indestructibleBlock(c, def.n)) continue;
-      if (phoenixRevive(c, j)) continue; // 凤凰重生：回手 +N 战力
+      if (phoenixRevive(c, j)) continue; // 凤凰重生：回手并翻倍
       if (surviveDestroy(c)) continue; // 防摧毁：替代为降战力、卡不离场
       recordDestroy(c, j, def.n);
       playShatter(c);
@@ -4844,7 +4921,11 @@ function finishMatch() {
     else if (at > pt) aw += def.wt;
     else tie += def.wt;
     const who = pt > at ? '你胜' : at > pt ? '对手胜' : '平手';
-    const tag = (def.dbl > 1 ? '（威力×2）' : '') + (def.inv ? '（低者胜）' : '');
+    // 区域倍率（mul，如丰聪耳神子）已计入上面的 rawP/rawA ⇒ 结算行点明是哪一侧被翻倍
+    const mulP = cardZoneMul('p', j), mulA = cardZoneMul('a', j);
+    const tag = (def.dbl > 1 ? '（威力×2）' : '')
+      + (mulP > 1 ? `（你方总点数×${mulP}）` : '') + (mulA > 1 ? `（对手总点数×${mulA}）` : '')
+      + (def.inv ? '（低者胜）' : '');
     lines.push(`${def.n}${tag}：你 ${rawP} : ${rawA} 对手 → ${who}`);
   }
   const hasInv = st.locs.some((l) => !l.shattered && l.def.inv);
@@ -5168,6 +5249,10 @@ function renderZones() {
     const tp = zoneTotals('p', j) * dbl;
     Game._els.totA[j].textContent = ta;
     Game._els.totP[j].textContent = tp;
+    // 区域倍率（mul，如丰聪耳神子）作用在结算总点数上、不改卡面数字 ⇒ 悬停横幅点明差额来源
+    const mulA = cardZoneMul('a', j), mulP = cardZoneMul('p', j);
+    Game._els.totA[j].title = mulA > 1 ? `含持续倍率 ×${mulA}（区域倍率类持续效果；卡面各自的原战力不变）` : '';
+    Game._els.totP[j].title = mulP > 1 ? `含持续倍率 ×${mulP}（区域倍率类持续效果；卡面各自的原战力不变）` : '';
     // 谁领先谁亮黄（反转区域按有效口径：真实战力更低的一方亮黄）；平点则双方蓝色
     const eA = locDef(j).inv ? -ta : ta;
     const eP = locDef(j).inv ? -tp : tp;
@@ -5761,6 +5846,7 @@ function kindTags(def) {
   if (def.ind) parts.push('持续 · 自身不可摧毁');
   // og 的两种匹配口径：tk（强化指定 token）/ cost（强化己方指定费用的卡牌）
   if (def.og) parts.push((def.og.tk == null && def.og.cost != null) ? '持续 · 强化己方指定费用的卡牌' : '持续 · 强化指定 token');
+  if (def.mul) parts.push(`持续 · 此区域己方战力 ×${def.mul}`);
   if (def.surv) parts.push('防摧毁');
   if (def.phx) parts.push('凤凰重生');
   if (def.leave) parts.push('终局离场');
@@ -5778,6 +5864,7 @@ function kindTags(def) {
     parts.push('游戏开始时 · 在卡组中即触发' + (bits.length ? `（${bits.join('、')}）` : ''));
   }
   if (def.costDown) parts.push(`持续 · 双方每有一张牌被摧毁，此牌能量消耗 −${def.costDown}（最低 0 费）`);
+  if (def.costDownP) parts.push(`持续 · 你的场上每有一张已翻开的战力 ≥ ${def.costDownP.min} 的卡牌，此牌能量消耗 −${def.costDownP.n}（最低 0 费）`);
   if (def.playReq) parts.push(`放置条件 · 仅当你场上已有 ≥ ${def.playReq.n || 1} 张已翻开的「${tokenNameLabel(def.playReq.tk)}」时可从手牌打出`);
   // 手牌回合结束（fx.handEnd）：只在**手牌里**生效，打到场上后不再触发 —— 故与 fx.turnEnd 分开标注
   if (def.fx && def.fx.handEnd) parts.push('手牌回合结束 · 仅当此牌仍在手牌中时触发（打到场上后不再生效）');
@@ -5786,6 +5873,17 @@ function kindTags(def) {
   return base || parts.join('、');
 }
 
+/* 费用随场上高战力递减（`costDownP`，现仅 6 费「星熊勇仪」）在放大视图里的补充说明行：写出「己方场上实时战力 ≥ min 的已翻开卡张数」与
+   「因此减了多少费」；没有该字段则返回空串。显示点两处：showHandCard 与 showFieldCard。 */
+function costDownPNote(card) {
+  const def = card && card.def;
+  if (!def || !def.costDownP) return '';
+  const cd = def.costDownP;
+  const n = fieldPowerCount(card.side, cd.min);
+  const cut = cd.n * n;
+  const atZero = cut >= def.c;
+  return `<div class="zm-kind cost-mod-note">费用随场上高战力卡递减（每张 −${cd.n}）：你的场上已有 ${n} 张已翻开、战力 ≥ ${cd.min} 的卡牌 → 能量消耗 −${cut}${atZero ? '（已减到最低 0 费）' : ''}</div>`;
+}
 /* 费用随摧毁递减（`costDown`，现仅 8 费「纯狐」）在放大视图里的补充说明行：写出「双方摧毁池合计」与
    「因此减了多少费」；没有该字段则返回空串。显示点两处：showHandCard 与 showFieldCard。 */
 function costDownNote(def) {
@@ -5821,6 +5919,7 @@ function showHandCard(card) {
     ${muteNoteHTML(card, -1)}
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
     ${costDownNote(def)}
+    ${costDownPNote(card)}
     ${isSpellDef(def)
       ? '<div class="zm-kind">法术：只有能量花费与「揭示」效果 —— 无战力，任何增减都不影响它；揭示结算完后自行消散</div>'
       : (diff !== 0 ? `<div class="zm-kind">基础威力 ${def.p} · 永久增益 ${diff > 0 ? '+' : ''}${diff}</div>` : `<div class="zm-kind">基础威力 ${def.p}</div>`)}
@@ -5931,6 +6030,7 @@ function showFieldCard(card, locIdx) {
     ${revealBlockNoteHTML(card, locIdx)}
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
     ${costDownNote(def)}
+    ${costDownPNote(card)}
     <div class="zm-kind">${isSpellDef(def) ? '法术 · 无战力（揭示结算完后即自行消散）' : `基础威力 ${def.p}`}</div>
     <div class="zm-kind">${kindTags(def)}</div>
     <div class="zm-desc${strike ? ' text-muted' : ''}">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
