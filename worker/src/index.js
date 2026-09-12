@@ -174,10 +174,13 @@ export class Room {
     this.send(peerOf(role), { t: "msg", from: role, msg });
   }
 
-  // 断开只清自己那把 socket；角色与 token 留着，同一个 token 回来还是同一个角色
+  // 断开就**释放这个角色**（连同 token）：房间不保存任何对局状态，所以刷新/重开页面的人
+  // 可以用同一个房间码重新进来（否则他会看到"房间已满"）。对手会先收到 peer:false。
   gone(role, ws) {
     if (this.sockets[role] !== ws) return; // 已被新连接顶替，别动新的
     this.sockets[role] = null;
+    delete this.tokens[role];
+    this.save();
     this.send(peerOf(role), { t: "peer", online: false });
   }
 }

@@ -213,6 +213,12 @@
       peerOnline = !!data.online;
       ui.bar();
       if (started) ui.tip(data.online ? '对手已回到房间。' : '对手的连接断了 —— 轮到他交牌时会在超时后判他认输。', !data.online);
+      // 对手刚进来：把在场时发过、但当时房间里没人的消息**再报一次** —— 房间只转发、不保存，
+      // 先到的人在自己连上时发的 hello / ready 都是"发给空气"的。不补这一下，后进来的一方会缺对手的卡组与版本。
+      if (data.online && !started) {
+        sendHello();
+        if (readySelf) send({ t: 'ready' });
+      }
       return;
     }
     if (data.t === 'msg') { onPeer(data.from, data.msg || {}); return; }
@@ -274,6 +280,7 @@
         if (!checkHello()) { abort('双方版本不一致，未开局。'); return; }
         ui.tip('对手就位（' + (msg.name || '匿名') + '）—— 双方都点「我已准备」即可开局。');
         maybeStart();
+        if (seed !== null) beginGame(); // 种子（房主的 start）先到、对方的 hello 后到：立刻补开局，不再干等
         return;
       case 'ready':
         readyPeer = true;
@@ -327,7 +334,13 @@
     if (started) return;
     var host = role === 'host' ? (myHello && myHello.codes) : (peerHello && peerHello.codes);
     var guest = role === 'host' ? (peerHello && peerHello.codes) : (myHello && myHello.codes);
-    if (seed === null || !host || !guest) { ui.tip('开局信息不全（少种子或卡组）—— 退出房间重来一次。', true); return; }
+    if (seed === null || !host || !guest) {
+      var miss = (seed === null ? '还没收到种子' : '') + (seed === null && (!host || !guest) ? '、' : '')
+        + (!host || !guest ? '还没收到双方的卡组' : '');
+      ui.tip('开局信息不全（' + miss + '）—— 本机已把版本与卡组再报一次；若几秒后仍是这样，双方各自点「退出房间」重来。', true);
+      sendHello(); // 我这边缺的可能是对方的 hello：再报一次自己的，对面收到后会回敬一份
+      return;
+    }
     started = true;
     ui.bar('开局中…');
     if (window.Home && window.Home.hide) window.Home.hide();
