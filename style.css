@@ -3100,6 +3100,16 @@ body.in-home #battleDeckMask:not(.hidden) {
   display: flex;
   z-index: 210;
 }
+/* 挑战码弹窗（主页面「🔗 挑战码」打开）：与图鉴同为"挂在主页流程上的游戏弹窗"，需盖过首页（z-index 200） */
+body.in-home #challengeMask:not(.hidden) {
+  display: flex;
+  z-index: 212;
+}
+/* 挑战码弹窗要能开在**结算弹窗之上**：两者都是 .modal-mask（z-index 50），不抬起来就会被
+   DOM 里更靠后的结算弹窗盖住 —— 表现是"点了生成挑战码，什么都没出现"（框里其实已经有码了） */
+#challengeMask {
+  z-index: 58;
+}
 
 .home-screen {
   position: fixed;

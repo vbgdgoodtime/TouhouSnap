@@ -87,6 +87,18 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
+        <!-- 挑战码入口 —— 主入口的最后一项（「设置」之后、「新手引导」之前）。
+             打开 #challengeMask 的**导入形态**：粘贴朋友发来的挑战码 → 「看复盘」或「挑战同一局面」。
+             反方向（把本局变成一行码）在结算弹窗的「生成挑战码」上，复用同一个弹窗的导出形态。
+             码的格式、重放口径与「同一局面挑战」的含义见 js/game.js 的 encodeRecord / decodeRecord /
+             replayGame，以及 docs/联机对战.md。 -->
+        <button type="button" class="home-btn" id="homeBtnChallenge">
+          <span class="hb-icon">🔗</span>
+          <span class="hb-text">
+            <span class="hb-main">挑战码</span>
+            <span class="hb-sub">粘贴朋友的挑战码 · 看复盘 / 挑战同一局面</span>
+          </span>
+        </button>
       </nav>
       <!-- 新手引导 —— 主页面最下方的次级入口（五个主入口之下的轻量按钮）。
            打开只读的机制速览弹窗（#guideMask，纯静态文案）；交互见 js/home.js，
@@ -367,6 +379,30 @@
     </div>
   </div>
 
+  <!-- 挑战码弹窗（同一套 DOM 两种形态，由 game.js 的 setChallengeMode() 切换按钮与标题）：
+       导出形态 = 结算弹窗「📤 生成挑战码」把本局烘焙成一行文本码（只读 + 「📋 复制」）；
+       导入形态 = 主页面「🔗 挑战码」粘贴别人的码，两种玩法：
+         「👁️ 看复盘」   ＝ 按记录把那一局完整重算一遍（只看，全程不需要操作）；
+         「⚔️ 挑战同一局面」＝ 你执原局我方的座位（同一副卡组、同一副起手、同样地形），
+                            对手按它当时的动作出牌 —— 打完可以再生成一行码回传。
+       码的格式与校验见 js/game.js 的 encodeRecord / decodeRecord；Esc / 点遮罩空白 = 关闭。
+       主页面态下由 style.css 的 `body.in-home #challengeMask:not(.hidden)` 放开显示（同 #settingsMask）。 -->
+  <div class="modal-mask hidden" id="challengeMask">
+    <div class="modal undo-modal challenge-modal">
+      <div class="modal-emblem" id="challengeEmblem">🔗</div>
+      <h2 id="challengeTitle">打开挑战码</h2>
+      <textarea id="challengeInput" class="deck-import-input" rows="4" spellcheck="false"
+                autocomplete="off" placeholder="粘贴一行挑战码（TH2P1:…）"></textarea>
+      <div class="deck-import-tip" id="challengeTip"></div>
+      <div class="undo-btns">
+        <button type="button" class="btn" id="challengeCancel" onclick="Game.ui.closeChallenge()">取消</button>
+        <button type="button" class="btn btn-primary hidden" id="challengeCopy" onclick="Game.ui.onChallengeCopy()">📋 复制</button>
+        <button type="button" class="btn btn-primary hidden" id="challengeReview" onclick="Game.ui.onChallengeReview()">👁️ 看复盘</button>
+        <button type="button" class="btn btn-primary hidden" id="challengeShadow" onclick="Game.ui.onChallengeShadow()">⚔️ 挑战同一局面</button>
+      </div>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="logo">⚡</span>
@@ -485,6 +521,7 @@
       <div class="modal-cubes" id="modalCubes"></div>
       <div class="modal-btns">
         <button class="btn" id="btnResultClose" onclick="Game.ui.closeResult()">确认</button>
+        <button class="btn" id="btnChallenge" onclick="Game.ui.onChallengeExport()">📤 生成挑战码</button>
         <button class="btn btn-primary" id="btnAgain" onclick="Game.restart()">再来一局</button>
       </div>
     </div>

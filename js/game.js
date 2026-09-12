@@ -54,10 +54,82 @@ const gradOf = (def) => (def && def.cg) || GRADS[def && def.c] || BACK_GRAD;
 const DECK_CURVE = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 6];
 const AI_DECK_CURVE = [1, 1, 2, 2, 2, 3, 3, 3, 4, 5, 6, 6];
 
+/* ---------------- 逻辑随机（可种子化） ----------------
+   只给**影响状态**的随机用（洗牌 / 抽地形 / 翻牌先后 / 掷骰 / 并列取谁 / 随机取牌）；表现随机（粒子 / 飘字 / 装饰）
+   继续用原生 `Math.random` —— 否则两端动画帧数不同会拖乱同一条随机流。
+   两条**互相独立**的流：`rng()`＝主逻辑流；`aiRng()`＝只给 AI 决策用（阶段③ 临时接管全局 `Math.random`，见那里的注释）。
+   必须分开：掉线托管只有一端会跑 AI，若 AI 消耗主逻辑流，另一端没跑就会错位。
+   两条流都由 `restart` 每局重新播种（`opts.seed` 不传就取一个新的随机种子）⇒ **每一局都能复现、每一局都能录成挑战码**。 */
+// 原生随机的一份引用：阶段③ 会把全局 `Math.random` 临时换成 `aiRng`，**未播种时的回退必须指向原生那一份**，
+// 否则就成了"自己调自己"→ 无限递归（RangeError: Maximum call stack size exceeded）。
+// 在脚本加载时捕获 ⇒ 冒烟测试在 beforeParse 里替换过的 Math.random 照样就是这一份。
+const NATIVE_RANDOM = Math.random;
+let rngSeed = null;   // null ＝未种子化（跟随原生随机）
+let rngState = 0;
+let aiSeed = null;
+let aiState = 0;
+// mulberry32 单步：把 32 位状态推进一格 → { s: 新状态, v: 0~1 }
+function prngStep(s) {
+  s = (s + 0x6D2B79F5) >>> 0;
+  let t = s;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  t = (t ^ (t >>> 14)) >>> 0;
+  return { s: s, v: t / 4294967296 };
+}
+// 设定种子（联机 / 影子 / 复现同一局才用）：同一个 seed 在两端得到完全相同的随机序列
+function seedRng(n) {
+  rngSeed = (n >>> 0);
+  rngState = rngSeed;
+  aiSeed = (rngSeed ^ 0x9E3779B9) >>> 0; // AI 流用错开的初值，免得和主逻辑流是同一串数字
+  aiState = aiSeed;
+  return rngSeed;
+}
+// 未设种子时与原生随机完全等价 ⇒ 单机行为不变、冒烟测试替换全局 Math.random 依然生效
+function rng() {
+  if (rngSeed === null) return NATIVE_RANDOM();
+  const r = prngStep(rngState);
+  rngState = r.s;
+  return r.v;
+}
+function aiRng() {
+  if (aiSeed === null) return NATIVE_RANDOM();
+  const r = prngStep(aiState);
+  aiState = r.s;
+  return r.v;
+}
+
+/* ---------------- 数据一致性哈希（卡池 / 特殊卡 / 地形） ----------------
+   用途：联机握手时校验两端**数据**是否同版 —— 同名卡两端效果或数值不同，会让对局结果分叉。
+   从数据内容**现算**，不手写版本号：改任何一张卡的名称 / 费用 / 战力 / 效果键，哈希自动跟着变。
+   只排除纯表现字段（`img` 图名 / `i` 图标 emoji）——换一张配图不该逼双方刷新。
+   ⚠️ 覆盖的是**数据**，不含引擎代码；引擎不一致靠"版本不同、请刷新"的提示兜（见 PvP 方案）。 */
+const HASH_SKIP_KEYS = { img: 1, i: 1 };
+// 稳定序列化：对象键排序、跳过纯表现字段 —— 保证两端拿到同一串
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(v).filter((k) => !HASH_SKIP_KEYS[k]).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+// FNV-1a 32 位 → 8 位十六进制：短、确定、无依赖
+function shortHash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+const DATA_HASH = shortHash(stableStringify({
+  pool: POOL, tokens: TOKENS, groups: GROUPS, locs: LOCATION_POOL, locExtra: LOCATION_EXTRA,
+}));
+function dataHash() { return DATA_HASH; }
+
 /* ---------------- 工具 ---------------- */
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
@@ -550,7 +622,7 @@ function recordSpellExile(card, locName) {
      （不是 cardCost；同区域 cb、og.cost、图鉴与卡组页分档口径）；③ 候选**保持手牌顺序**（左 → 右＝数组顺序）⇒ pick 的 right/left 就是玩家看到的手牌左右位置，
      maxCost ＝取印刷费用最高者、并列最高之间随机（口径同 dw/dwh/dwb）；④ 候选不足＝部分弃（日志写明）；一张都没有＝无事发生、只记一条日志；`n:'all'` 时 pick 不起作用；
      ⑤ **公开**：日志点名 + 中央弹出被弃那张牌的**完整卡面**并播**斜切两半**演出（playDiscardFx，约 1.6s），此后可在该方弃牌池里看到；
-     ⑥ 手牌上限 7 只约束“加入/抽牌”，弃牌是**减少**手牌、与本机制无关（被弃的牌也不返场、不返牌库）；⑦ 与「重置暗牌」无冲突：playHandOrder 里已弃的 id 取不到、undoPlacedCards 自然跳过。 */
+     ⑥ 手牌上限 7 只约束“加入/抽牌”，弃牌是**减少**手牌、与本机制无关（被弃的牌也不返场、不返牌库）；⑦ 与「重置暗牌」无冲突：重置只把 `playerMoves` 里**本回合暗出的那几张**按各自 `hi` 插回原位，被弃的牌不在其中、也不会被带回手牌。 */
 const DISCARD_ANIM_MS = 1600; // 弃牌演出总时长；与 style.css 的 discard* 关键帧时长对齐，改时长要两边一起改
 
 /** `discard.card` 的筛选归一化：卡名（字符串/数组）或 SPECIAL 键名 → **卡名数组**（键名先经 TOKENS 解析成该 token 的卡名，如 'stone' → '石块'）。⚠️ 同名卡（如法术「祖母绿巨石」与占位 token「祖母绿巨石」）会一起命中。返回 null = 不筛选。 */
@@ -625,7 +697,7 @@ function discardFromHand(side, spec, srcCard, tag, onlyCard) {
   const cands = onlyCard ? all.filter((c) => c === onlyCard) : all;
   const want = sp.n === 'all' ? cands.length : Math.max(1, Math.floor(sp.n || 1));
   if (!cands.length) return { ok: false, side, cards: [], cands: 0, want, by: null, why: 'no-candidate' };
-  // 取牌：缺省 'random'＝在候选里**随机**取（沿用全局 Math.random，可被冒烟测试替换成种子化 PRNG）；'right' / 'left' ＝按**手牌左右位置**取
+  // 取牌：缺省 'random'＝在候选里**随机**取（走逻辑随机 rng()）；'right' / 'left' ＝按**手牌左右位置**取
   // （候选数组已保持手牌顺序：最右＝队尾、最左＝队首）；'maxCost' ＝取印刷费用最高者、并列最高时随机；`n: 'all'` 时位置与费用排序都无意义（全都要）。
   const pick = (sp.pick === 'right' || sp.pick === 'left' || sp.pick === 'maxCost') ? sp.pick : 'random';
   let picked;
@@ -997,14 +1069,13 @@ const state = {
   pendingEnergySrc: { p: [], a: [] },
   // 游戏开始时效果（卡级字段 `gs`，现仅 7 费「哆来咪」）登记的**每回合最大能量加成**：由阶段 ⓪ runGameStartEffects 写入，在每次回合开始的能量结算（grantTurnEnergy）里并入基数；与 pendingEnergyGain 不同，它**本局永久**，只在 restart 时重置。
   energyAddPerTurn: { p: 0, a: 0 },
-  playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc, side?}]；side 缺省为 'p'（切换立场时记为 'a'）
+  playerMoves: [],     // 本回合玩家已暗出的牌 [{cardId, loc, side?, hi}]：side 缺省为 'p'（切换立场时记为 'a'）、hi ＝暗出时的手牌下标（重置暗牌时按它插回原位）
   aiMoves: [],
   playAsSide: 'p',     // 开发调试「切换立场」：'a' 时玩家落牌进敌方区且归属对手
   fieldQueue: [],      // 场上放置顺序队列：双方卡牌按“放入场上”先后记录，供回合开始/结束/终局按序结算
-  playHandOrder: [],   // 本回合开始时玩家手牌 id 顺序（供重置暗牌时恢复）
   moveCardId: null,    // “每回合可移动一次”的牌：当前正在选目标区域的卡 id
-  flyMoved: new Set(), // 本回合已自移过的卡 id（如射命丸文）
-  flyMovedFrom: {},    // 本回合自移过的卡：卡 id → 回合初所在区域下标（供重置）
+  flyMoved: new Set(), // 本回合已自移过的卡 id（如射命丸文）；Set 保持加入顺序，供重置时逆序回位
+  flyMovedFrom: {},    // 本回合自移过的卡：卡 id → { j: 回合初区域下标, zi: 该区内的格位下标 }（供重置）；AI 侧只写区域下标（数字）
   logCount: 0,
 };
 
@@ -1014,9 +1085,369 @@ let pendingSwitchFly = null; // 换边演出待播 {card, srcRect}（由 switch/
 let pendingDriftFly = [];
 // pickDef（开发者“指定卡牌”选中）已随页面实现拆到 card-browser.js
 
+/* ---------------- 本局录制（挑战码 / 影子对战的原料） ----------------
+   一局的完整输入 = **种子 + 双方卡组 + 数据版本 + 双方每回合的动作**。前三项在开局确定，
+   动作在两个提交点采集（玩家提交时 / 对手思考完时）。有了这四样，另一端就能把这一局一字不差地重算出来。
+   码里的卡组写成 `费用.该费用档内的下标`：中文卡名直接进码会显著变长；下标依赖 data 里的顺序，已由 `dataHash` 兜住。 */
+let gameRecord = null;     // { seed, dataHash, pDeck: [...], aDeck: [...], turns: [...] }
+let currentTurnRec = null;
+// 重放模式（阶段 1）：非 null 时，阶段② 的我方动作与阶段③ 的对手动作都**取自记录**，不再等玩家 / 不跑 AI。
+// ⚠️ 每次 `restart` 都会显式设定或清空它 —— 靠"每局重设"而不是"记得手动清"，避免脏状态漏进下一局。
+let replayMode = null;
+
+function freshSeed() { return Math.floor(NATIVE_RANDOM() * 4294967296) >>> 0; }
+
+function cardCodeOf(def) {
+  for (const c of POOL_COST_KEYS) {
+    const arr = POOL[c] || [];
+    for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].n === def.n) return c + '.' + i;
+  }
+  return '-'; // 池里找不到（理论上不会）：留个占位，重放时会被判成码损坏
+}
+function cardDefOfCode(code) {
+  const p = String(code).split('.');
+  return ((POOL[Number(p[0])] || [])[Number(p[1])]) || null;
+}
+
+// 开局：记下这一局的种子 / 数据版本 / 双方卡组。**必须在两副牌被抽掉之前调用**（否则记到的是残牌库）
+// 重放中：不重新录制（让 `gameRecord` 继续指向原局、`Game._code()` 仍能拿回原来那行码），
+// 但**必须在同一时刻核对码里的两副卡组** —— 此刻牌库还是完整的 12 张；晚一步就只剩 9 张，永远比不相等。
+function startRecord(pDeckMode) {
+  if (replayMode) {
+    const codesOf = (deck) => deck.map((c) => cardCodeOf(c.def));
+    const nowP = codesOf(state.players.p.deck), nowA = codesOf(state.players.a.deck);
+    const eq = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+    const rec = replayMode.rec;
+    replayMode.decksOk = (rec.pDeckMode === pDeckMode) && eq(nowP, rec.pDeck) && eq(nowA, rec.aDeck);
+    if (!replayMode.decksOk) {
+      // 只说"对不上"没法排查 —— 把本机算出来的和码里记的**整份**打出来，直接看差在哪一位
+      console.warn('[重放中止] 输入对不上：种子 ' + rec.seed
+        + ' · 建牌路径 本机=' + pDeckMode + ' 码里=' + rec.pDeckMode
+        + '\n本机我方牌组: ' + nowP.join(' ')
+        + '\n码里我方牌组: ' + rec.pDeck.join(' ')
+        + '\n本机对手牌组: ' + nowA.join(' ')
+        + '\n码里对手牌组: ' + rec.aDeck.join(' '));
+      return;
+    }
+    // 复盘：保留原局记录（`Game._code()` 仍能拿回原来那行码）。
+    // 影子（同一局面挑战）：朋友这一局也要能录 —— 打完可以再生成一行码回传，所以照常开始一份新录制。
+    if (replayMode.mode !== 'shadow') return;
+  }
+  gameRecord = {
+    seed: rngSeed,
+    dataHash: DATA_HASH,
+    pDeckMode: pDeckMode, // 'defs' 自建 12 张 / 'curve' 费用曲线随机组 / 'empty' 开发调试空牌库 —— 重放必须走同一条建牌路径
+    pDeck: state.players.p.deck.map((c) => cardCodeOf(c.def)),
+    aDeck: state.players.a.deck.map((c) => cardCodeOf(c.def)),
+    turns: [],
+  };
+  currentTurnRec = null;
+}
+
+/* 采集"本回合某方做了什么"，在各自的提交点调用一次：玩家＝点「结束回合」/「认输」之后，对手＝AI 思考完之后。
+   移动（fly）不在 playerMoves / aiMoves 里，从 `flyMovedFrom` + 该方场上所在区域反推。 */
+function recordTurnInputs(side, extra) {
+  // 复盘不重录（免得把原记录覆盖成"没有动作的一局"）；影子模式照常录，朋友打完能回传自己的打法
+  if (!gameRecord || (replayMode && replayMode.mode !== 'shadow')) return;
+  if (!currentTurnRec || currentTurnRec.t !== state.turn) {
+    currentTurnRec = { t: state.turn, p: null, a: null };
+    gameRecord.turns.push(currentTurnRec);
+  }
+  const zones = state.players[side].zones;
+  const zoneOf = (id) => {
+    for (let j = 0; j < 3; j++) if (zones[j].some((c) => c.id === id)) return j;
+    return -1;
+  };
+  const fly = [];
+  for (const idStr of Object.keys(state.flyMovedFrom)) {
+    const id = Number(idStr);
+    const to = zoneOf(id);
+    if (to < 0) continue; // 这张牌不在该方场上 ⇒ 不是它的移动
+    const rec = state.flyMovedFrom[id];
+    const from = (rec && typeof rec === 'object') ? rec.j : rec;
+    if (from !== to && from >= 0) fly.push([id, from, to]);
+  }
+  currentTurnRec[side] = {
+    moves: movesForSide(side).map((m) => [m.cardId, m.loc, m.side || side]),
+    fly: fly,
+    stakes: state.stakes, // 赌注是玩家在回合中的互动，落牌之外的唯一可变项
+    retreat: !!(extra && extra.retreat),
+  };
+}
+
+/* 一行文本码 `TH2P1:<种子>:<数据哈希>:<建牌路径>:<我方卡组>:<对方卡组>:<逐回合动作>`
+   —— 建牌路径 1 个字符：`d` 自建 12 张 / `c` 费用曲线随机组 / `e` 开发调试空牌库（两条路径消耗的随机数个数不同，必须原样重放）；
+   逐回合按 `|` 分隔，每回合 7 个字段以 `:` 分隔：回合号、我方落牌、我方移动、我方赌注、我方是否认输、对方落牌、对方移动
+   （落牌项 `卡id.区域`，开发调试的敌方立场落牌追加 `A`；移动项 `卡id.来源区域.目标区域`；各项内以 `,` 分隔） */
+function encodeRecord() {
+  if (!gameRecord) return '';
+  const r = gameRecord;
+  const mode = r.pDeckMode === 'defs' ? 'd' : (r.pDeckMode === 'empty' ? 'e' : 'c');
+  const turns = r.turns.map((tr) => {
+    // 落牌项 `卡id.区域`，开发调试的「敌方立场」落牌追加 `A`（该牌归属对手）；
+    // `amv` 字段按定义就是对手的动作，不再重复标注 A
+    const mv = (side) => (tr[side] ? tr[side].moves.map((m) => m[0] + '.' + m[1] + (side === 'p' && m[2] === 'a' ? 'A' : '')).join(',') : '');
+    const fl = (side) => (tr[side] ? tr[side].fly.map((f) => f.join('.')).join(',') : '');
+    const p = tr.p;
+    return [tr.t, mv('p'), fl('p'), p ? p.stakes : 0, (p && p.retreat) ? 1 : 0, mv('a'), fl('a')].join(':');
+  }).join('|');
+  return 'TH2P1:' + r.seed + ':' + r.dataHash + ':' + mode + ':' + r.pDeck.join('-') + ':' + r.aDeck.join('-') + ':' + turns;
+}
+
+/* 把一行码解回**与 `Game._record()` 完全同构**的结构（连字段顺序也一致，所以可以直接用
+   `JSON.stringify(解码结果) === JSON.stringify(原记录)` 做往返验证）。
+   前缀不对 / 结构损坏 → null；**数据版本不同不在这里判**，由调用方比对 `dataHash`。 */
+function decodeRecord(code) {
+  const raw = String(code == null ? '' : code).replace(/\s+/g, ''); // 聊天工具常把长码按行折断
+  if (raw.indexOf('TH2P1:') !== 0) return null;
+  const f = raw.slice(6).split(':');
+  if (f.length < 6) return null;
+  const seed = Number(f[0]);
+  if (!isFinite(seed)) return null;
+  const mode = f[2] === 'd' ? 'defs' : (f[2] === 'e' ? 'empty' : (f[2] === 'c' ? 'curve' : null));
+  if (!mode) return null;
+  const turns = [];
+  for (const seg of f.slice(5).join(':').split('|')) { // 逐回合用 `|` 分隔、回合内用 `:`，故先把后段拼回来再切
+    if (!seg) continue;
+    const t = seg.split(':');
+    if (t.length < 7) return null;
+    const pm = parseMoves(t[1], 'p'), pf = parseFly(t[2]);
+    const am = parseMoves(t[5], 'a'), af = parseFly(t[6]);
+    if (!pm || !pf || !am || !af) return null;
+    const stakes = Number(t[3]) || 1;
+    turns.push({
+      t: Number(t[0]),
+      p: { moves: pm, fly: pf, stakes: stakes, retreat: t[4] === '1' },
+      a: { moves: am, fly: af, stakes: stakes, retreat: false },
+    });
+  }
+  return { seed: seed, dataHash: f[1], pDeckMode: mode, pDeck: f[3] ? f[3].split('-') : [], aDeck: f[4] ? f[4].split('-') : [], turns: turns };
+}
+// 落牌项 `卡id.区域[+A]`；`defSide` ＝本字段的默认归属（我方字段 'p' / 对手字段 'a'）
+function parseMoves(str, defSide) {
+  if (!str) return [];
+  const out = [];
+  for (const x of str.split(',')) {
+    const m = /^(\d+)\.(\d+)(A?)$/.exec(x);
+    if (!m) return null;
+    out.push([Number(m[1]), Number(m[2]), m[3] === 'A' ? 'a' : defSide]);
+  }
+  return out;
+}
+// 移动项 `卡id.来源区域.目标区域`
+function parseFly(str) {
+  if (!str) return [];
+  const out = [];
+  for (const x of str.split(',')) {
+    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(x);
+    if (!m) return null;
+    out.push([Number(m[1]), Number(m[2]), Number(m[3])]);
+  }
+  return out;
+}
+
+/* ---------------- 重放（挑战码 → 在本机重算这一局） ---------------- */
+
+// 记录里"当前回合"那一条（按回合号找）；记录比实际局短时返回 null ⇒ 该回合双方都不动
+function replayTurn() {
+  if (!replayMode) return null;
+  for (const tr of replayMode.rec.turns) if (tr.t === state.turn) return tr;
+  return null;
+}
+
+/* 把记录里的落牌 / 移动灌回引擎。**不做合法性校验**：录制时已经合法过一次，两端盘面也一致，重放的是同一串事实。
+   状态改动与玩家点牌落子 / `aiThink` 等价：进区、进放置队列、出手牌、扣能量、记进 playerMoves / aiMoves。
+   对不上（码损坏或版本不同）⇒ 返回 false 并记一条红字，由调用方把重放标为中断。 */
+function applyRecordedMoves(side, moves, fly) {
+  const pl = state.players[side];
+  const who = side === 'p' ? '我方' : '对手';
+  for (const m of moves || []) {
+    const cardId = m[0], locIdx = m[1], owner = m[2] || side; // owner：开发调试的敌方立场落牌，归属对手
+    const hi = pl.hand.findIndex((c) => c.id === cardId);
+    if (hi < 0) {
+      log('danger', `⟲ 重放中断：${who}手牌里找不到卡 #${cardId}（码与盘面不符）。`);
+      return false;
+    }
+    const card = pl.hand[hi];
+    const paid = cardCost(card);
+    card.side = owner;
+    state.players[owner].zones[locIdx].push(card);
+    enqueueField(card);
+    pl.hand.splice(hi, 1);
+    pl.energyLeft -= paid;
+    (side === 'p' ? state.playerMoves : state.aiMoves).push({ cardId: card.id, loc: locIdx, side: owner });
+    log(owner, `⟲ 重放暗出「${card.def.n}」(${paid}费) → ${state.locs[locIdx].def.n}`);
+  }
+  for (const f of fly || []) {
+    const cardId = f[0], from = f[1], to = f[2];
+    const src = state.players[side].zones[from];
+    const ci = src.findIndex((c) => c.id === cardId);
+    if (ci < 0) {
+      log('danger', `⟲ 重放中断：${who}区域 ${from + 1} 里找不到卡 #${cardId}。`);
+      return false;
+    }
+    const [card] = src.splice(ci, 1);
+    state.players[side].zones[to].push(card);
+    state.flyMoved.add(card.id);
+    state.flyMovedFrom[card.id] = { j: from, zi: ci };
+    log(side, `⟲ 重放移动「${card.def.n}」：区域 ${from + 1} → ${to + 1}`);
+  }
+  return true;
+}
+
+// 重放某一方的回合：先还原赌注（赌注是回合中的互动，只在玩家侧变化），再灌动作；动作对不上就标记中断
+function replayApply(side, rec) {
+  if (!rec) return true;
+  if (rec.stakes) { state.stakes = rec.stakes; state.pSnapped = state.stakes > 1; }
+  const ok = applyRecordedMoves(side, rec.moves, rec.fly);
+  if (!ok && replayMode) replayMode.aborted = true;
+  return ok;
+}
+
+/* 重放一行挑战码：按码里的种子 + 双方卡组 + 逐回合动作，在本机把这一局**完整重算**一遍（全程不需要操作）。
+   返回终局指纹 —— 与原局的终局指纹一致，就说明"同一份输入 ⇒ 同一局"在这个码上成立。
+   码不合法 / 数据版本不同 / 对手牌组对不上 ⇒ 立刻中止返回 null（绝不带着不一致的输入往下跑）。 */
+async function replayGame(code, opts) {
+  const rec = decodeRecord(code);
+  if (!rec) { setStatus('挑战码格式不对（应以 TH2P1: 开头）。'); return null; }
+  if (rec.dataHash !== DATA_HASH) {
+    setStatus(`这个挑战码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}），没法重放 —— 请双方刷新后再试。`);
+    return null;
+  }
+  if (rec.pDeckMode === 'empty') {
+    setStatus('开发调试对局（空牌库）没有可分享的挑战码。');
+    return null;
+  }
+  if (rec.pDeckMode === 'defs') {
+    const pDefs = rec.pDeck.map(cardDefOfCode);
+    if (pDefs.length !== 12 || pDefs.some((d) => !d)) {
+      setStatus('挑战码里的卡组解析失败（可能码被截断，或来自不同版本）。');
+      return null;
+    }
+  }
+  // 两条建牌路径各自原样复原（'defs' 走"按记录顺序直接建牌"，见 buildDeckInOrder）
+  const restartOpts = { seed: rec.seed, replay: rec, replayMode: (opts && opts.mode) || 'review' };
+  if (rec.pDeckMode === 'curve') restartOpts.playerDeckCurve = true;
+  else restartOpts.playerDeckDefs = rec.pDeck.map(cardDefOfCode);
+  await restart(restartOpts);
+  // 两副卡组在开局（牌库还完整时）就核对过：对不上 ⇒ 引擎或数据变过，宁可中止也不跑出一局假的
+  if (!replayMode.decksOk) {
+    setStatus('这个挑战码与当前版本算不出同一副双方卡组（版本可能变过），重放已中止 —— 具体差在哪见控制台。');
+    await restart({});
+    return null;
+  }
+  const shadow = (opts && opts.mode) === 'shadow';
+  log('sys', shadow
+    ? `⟲ 同一局面挑战（种子 ${rec.seed}）—— 你执原局我方的座位（同一副卡组与起手），对手按它当时的动作出牌。`
+    : `⟲ 开始重放挑战码（种子 ${rec.seed}）—— 双方动作都取自记录，不需要你操作。`);
+  const limit = Math.ceil((shadow ? 30000 : 90000) / 50);
+  for (let i = 0; i < limit; i++) {
+    if (state.phase === 'over' || (replayMode && replayMode.aborted)) break;
+    if (shadow && state.phase === 'play' && pendingResolve) break; // 轮到你了：交还控制权，不替你打完
+    await sleep(50);
+  }
+  if (replayMode && replayMode.aborted) {
+    replayMode = null; // 交还操作权：后面的回合按普通对局继续
+    setStatus('重放中断（码与盘面不符），已把操作权交还给你。');
+    return null;
+  }
+  return stateFingerprint();
+}
+
+/* ---------------- 挑战码弹窗（导出 / 导入两形态，同一套 DOM） ---------------- */
+function challengeMaskEl() { return $('challengeMask'); }
+function closeChallenge() {
+  const m = challengeMaskEl();
+  if (m) m.classList.add('hidden');
+}
+function isChallengeOpen() {
+  const m = challengeMaskEl();
+  return !!m && !m.classList.contains('hidden');
+}
+function setChallengeTip(text, warn) {
+  const tip = $('challengeTip');
+  if (!tip) return;
+  tip.textContent = text;
+  tip.classList.toggle('warn', !!warn);
+}
+// 导出＝只读展示本局的码；导入＝可编辑、等粘贴。两形态共用标题/图标/按钮，只切显隐与文案
+function setChallengeMode(exporting) {
+  const emblem = $('challengeEmblem'), title = $('challengeTitle'), ta = $('challengeInput');
+  if (emblem) emblem.textContent = exporting ? '📤' : '🔗';
+  if (title) title.textContent = exporting ? '我的挑战码' : '打开挑战码';
+  const cancel = $('challengeCancel');
+  if (cancel) cancel.textContent = exporting ? '关闭' : '取消';
+  const show = (id, on) => { const el = $(id); if (el) el.classList.toggle('hidden', !on); };
+  show('challengeCopy', exporting);
+  show('challengeReview', !exporting);
+  show('challengeShadow', !exporting);
+  if (ta) ta.readOnly = !!exporting;
+}
+// 结算弹窗「📤 生成挑战码」
+function uiChallengeExport() {
+  if (!gameRecord || gameRecord.pDeckMode === 'empty') {
+    setStatus('开发调试对局（空牌库）没有可分享的挑战码 —— 用正常对局打完一局再生成。');
+    return;
+  }
+  const ta = $('challengeInput'), mask = challengeMaskEl();
+  if (!ta || !mask) return;
+  setChallengeMode(true);
+  ta.value = encodeRecord();
+  setChallengeTip('这一行码装着整局的种子、双方卡组与每一手的动作。发给朋友，对方在主页「🔗 挑战码」里粘贴即可。', false);
+  mask.classList.remove('hidden');
+  if (typeof ta.select === 'function') ta.select(); // 自动复制不可用时，玩家按 Ctrl+C 就能拷走
+}
+// 主页面「🔗 挑战码」
+function uiChallengeOpen() {
+  const ta = $('challengeInput'), mask = challengeMaskEl();
+  if (!ta || !mask) return;
+  setChallengeMode(false);
+  ta.value = '';
+  setChallengeTip('粘贴朋友发来的挑战码，再选「👁️ 看复盘」（自动重放整局）或「⚔️ 挑战同一局面」（你执他当时的座位、照同一副起手打）。', false);
+  mask.classList.remove('hidden');
+  if (typeof ta.focus === 'function') ta.focus();
+}
+function uiChallengeCopy() {
+  const ta = $('challengeInput');
+  if (!ta || !ta.value) return;
+  if (typeof ta.select === 'function') ta.select();
+  const clip = navigator.clipboard; // 非 https / 无权限时不算错误：框里已全选，手动作业即可
+  if (clip && typeof clip.writeText === 'function') {
+    clip.writeText(ta.value).then(
+      () => setChallengeTip('已复制 —— 粘贴到聊天窗口发给朋友即可。', false),
+      () => setChallengeTip('这台浏览器不允许自动复制 —— 码已全选，请按 Ctrl+C 手动复制。', true));
+    return;
+  }
+  setChallengeTip('这台浏览器不支持自动复制 —— 码已全选，请按 Ctrl+C 手动复制。', true);
+}
+// 「👁️ 看复盘」/「⚔️ 挑战同一局面」：先在前端把码校验一遍（好给出人话的提示），再交给 replayGame
+function uiChallengeStart(mode) {
+  const ta = $('challengeInput');
+  const code = ta ? ta.value : '';
+  const rec = decodeRecord(code);
+  if (!rec) {
+    setChallengeTip('这不是一个有效的挑战码（应以 TH2P1: 开头，可能被截断或改动过）。如果对方刚改过游戏，也请先按 Ctrl+F5 硬刷新本页再试。', true);
+    return;
+  }
+  if (rec.pDeckMode === 'empty') { setChallengeTip('这是开发调试对局（空牌库）的码，打不开。', true); return; }
+  if (rec.dataHash !== DATA_HASH) {
+    setChallengeTip(`这个码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}），打不开 —— 请双方都刷新页面后再试。`, true);
+    return;
+  }
+  closeChallenge();
+  if (window.Home) window.Home.hide(); // 从主页面进入时要先把主页面收起来，否则看不到对局
+  replayGame(code, { mode: mode });    // 不复用返回值：复盘会自己打完；影子会把控制权交还给你
+}
+
 /* ---------------- 流程主循环 ---------------- */
 async function restart(opts) {
   opts = opts || {};
+  // 重放模式：**每局显式设定或清空**（不靠"记得手动清"），因此它不可能从上一局漏到这一局
+  replayMode = opts.replay ? { rec: opts.replay, mode: opts.replayMode || 'review', aborted: false } : null;
+  // 本局种子：`opts.seed` 指定则用它，否则**每局取一个新的随机种子**（单机观感与原来一致：每局都是新的一局）。
+  // ⚠️ 每次重开都必须重新播种、把随机流拨回起点 —— 这是"一局能被完整重现"的前提：
+  // 录下来的种子 + 双方卡组 + 动作序列，要在另一端从同一个起点重算出同一局。
+  seedRng(opts.seed === undefined ? freshSeed() : opts.seed);
   state.gen++;
   const gen = state.gen;
 
@@ -1035,7 +1466,6 @@ async function restart(opts) {
   buffFlashQueue = [];
   pendingDriftFly = [];
   pendingSwitchFly = null;
-  state.playHandOrder = [];
   state.players.p.zones = [[], [], []]; state.players.p.hand = [];
   state.players.a.zones = [[], [], []]; state.players.a.hand = [];
   // 清空上一局的特殊牌池（摧毁池 / 弃牌池 / 放逐池）
@@ -1052,26 +1482,40 @@ async function restart(opts) {
   state.players.p.energyGain = 0;
   state.players.a.energyGain = 0;
 
-  // 玩家卡组来源：opts.playerDeckDefs（自建满编 12 张）→ 上一局自建 → 随机曲线；opts.emptyPlayerDeck 为开发调试空牌库（「重新开始」会沿用）
+  // 玩家卡组来源：opts.playerDeckDefs（自建满编 12 张）→ 上一局自建 → 随机曲线；opts.emptyPlayerDeck 为开发调试空牌库（「重新开始」会沿用）。
+  // ⚠️ 两条建牌路径**消耗的随机数个数不同**（自建 12 张＝洗 1 次；费用曲线＝每个费用档各洗一次 + 再洗一次曲线），
+  //    所以重放时必须走**同一条** —— 走错一条，后面整条随机流就错位，对手牌组与三块地形全都会变。
+  //    `pDeckMode` 就是为这件事记的（写进挑战码），取值：'defs' / 'curve' / 'empty'。
+  let pDeckMode = 'curve';
   if (opts.emptyPlayerDeck === true) {
+    pDeckMode = 'empty';
     lastEmptyPlayerDeck = true;
     lastPlayerDeckDefs = null;
     state.players.p.deck = [];
+  } else if (opts.playerDeckCurve === true) {
+    // 重放专用：这一局原本就是"按费用曲线随机组牌"，必须原样走同一条路径
+    lastEmptyPlayerDeck = false;
+    lastPlayerDeckDefs = null;
+    state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
   } else if (opts.playerDeckDefs) {
     lastEmptyPlayerDeck = false;
     const custom = (opts.playerDeckDefs.length === 12) ? opts.playerDeckDefs : null;
     if (custom) {
+      pDeckMode = 'defs';
       lastPlayerDeckDefs = custom.slice();
-      state.players.p.deck = buildDeckFromDefs(custom, 'p');
+      // 重放：`custom` 已经是"洗完之后的顺序"，按原样建牌（详见 buildDeckInOrder）；正常对局照旧洗一次
+      state.players.p.deck = replayMode ? buildDeckInOrder(custom, 'p') : buildDeckFromDefs(custom, 'p');
     } else {
       lastPlayerDeckDefs = null;
       state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
     }
   } else if (lastEmptyPlayerDeck) {
+    pDeckMode = 'empty';
     state.players.p.deck = [];
   } else {
     const custom = (lastPlayerDeckDefs && lastPlayerDeckDefs.length === 12) ? lastPlayerDeckDefs : null;
     if (custom) {
+      pDeckMode = 'defs';
       state.players.p.deck = buildDeckFromDefs(custom, 'p');
     } else {
       state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
@@ -1079,6 +1523,8 @@ async function restart(opts) {
   }
   // 对手每局按 AI 费用结构从卡池随机组一套 12 张（同费用不重复）
   state.players.a.deck = buildDeckCards(AI_DECK_CURVE, 'a');
+  // 两副牌此刻都是完整 12 张 —— 记下本局输入（必须在下面抽牌之前）
+  startRecord(pDeckMode);
 
   // 对手初始 3 张先在数据层发放（无动画）；玩家 3 张由 playOpening 逐张滑入；第 1 回合开始双方再各抓 1 张（起手共 4 张）
   for (let i = 0; i < 3; i++) drawOne('a');
@@ -1095,7 +1541,7 @@ async function restart(opts) {
       let total = 0;
       for (const d of remain) total += d.pick || 1;
       if (!(total > 0)) break;
-      let r = Math.random() * total;
+      let r = rng() * total;
       let idx = 0;
       for (let i = 0; i < remain.length; i++) {
         const w = remain[i].pick || 1;
@@ -1107,7 +1553,7 @@ async function restart(opts) {
   } else {
     picks = [];
     while (picks.length < 3) {
-      const def = LOCATION_POOL[Math.floor(Math.random() * LOCATION_POOL.length)];
+      const def = LOCATION_POOL[Math.floor(rng() * LOCATION_POOL.length)];
       if (picks.length === 2 && picks[0] === def && picks[1] === def) continue;
       picks.push(def);
     }
@@ -1240,6 +1686,24 @@ function buildDeckFromDefs(defs, side) {
   });
   cards.reverse();
   return cards;
+}
+
+/* 重放专用：按给定顺序**直接建牌、不再洗**。
+   为什么不能直接复用 buildDeckFromDefs：记录里存的 `pDeck` 是**洗完之​后**的数组顺序，而洗牌的输入是"玩家选的顺序"
+   （记录里没有）—— 再洗一遍等于把同一个洗牌作用在另一个输入上，会得到另一个排列：牌一样、顺序不同 ⇒ 重放与对局分叉。
+   两件事必须同时做对：
+   ① **照样消耗掉 `buildDeckFromDefs` 会消耗的那 11 次随机数**（不补的话，后面的对手牌组与三块地形全都会错位）；
+   ② **卡牌 id 的分配顺序要与原局一致**：原来"先按洗牌序建、再整体反转"，所以这里按记录的倒序建牌再反转回来。 */
+function buildDeckInOrder(defs, side) {
+  const base = (defs || []).slice(0, 12);
+  if (base.length !== 12) return buildDeckCards(DECK_CURVE, side);
+  shuffle(base.slice()); // 只为消耗随机数，结果丢弃
+  const made = base.slice().reverse().map((d) => {
+    const card = newCard(d);
+    card.side = side;
+    return card;
+  });
+  return made.reverse();
 }
 
 function newCard(defProto) {
@@ -1618,7 +2082,7 @@ function runLocAppearSpawn(idx, def) {
     for (const side of ['p', 'a']) {
       for (let i = 0; i < cnt; i++) {
         if (sideRoom(side, idx) < 1) break;
-        const pick = cands[Math.floor(Math.random() * cands.length)];
+        const pick = cands[Math.floor(rng() * cands.length)];
         if (!placeToken(side, idx, pick, 1, made)) break;
         names[side].push(pick.n);
         placed++;
@@ -1877,7 +2341,7 @@ async function locXformTurnEffects() {
       log('danger', `${def.icon} ${def.n}：地形池里没有可变成的其它地形，本次不变形。`);
       continue;
     }
-    const target = cands[Math.floor(Math.random() * cands.length)];
+    const target = cands[Math.floor(rng() * cands.length)];
     st.locs[j].def = target;
     resetLocGaps(j);
     refreshLocHeader(j);
@@ -1938,8 +2402,6 @@ async function roundStartStage(gen) {
   st.flyMovedFrom = {};
   st.playerMoves = [];
   st.aiMoves = [];
-  // 记录本回合开始时的玩家手牌顺序（重置暗牌时按此顺序放回）
-  st.playHandOrder = st.players.p.hand.map((c) => c.id);
   renderAll();
   flushPendingDriftFly(); // 回合开始自动移动（幽灵 roam 等）的「滑行+缩放」演出
   log('sys', `—— 第 ${st.turn} 回合 · 双方各抓 1 张 ——`);
@@ -1955,14 +2417,34 @@ async function playRound(gen) {
   if (gen !== state.gen) return;
 
   // 阶段 ②：玩家放置与移动（出牌 / 跳过 / 认输 / 双倍 / 移动 / 重置均在此阶段触发）
-  const act = await waitPlayer();
-  if (gen !== state.gen) return;
-  if (act.type === 'retreat') { doRetreat(); return; }
+  // 重放时不等玩家：我方动作直接取自记录，并把阶段置为 busy —— 玩家的各个入口都带 `phase === 'play'` 判断，
+  // 于是选牌、落牌、结束回合、重置、移动、认输会被它们自己的守卫挡掉（`uiSnap` 额外单独挡，见那里）。
+  let retreat = false;
+  if (replayMode && replayMode.mode === 'review') {
+    const tr = replayTurn();
+    state.phase = 'busy';
+    replayApply('p', tr && tr.p);
+    retreat = !!(tr && tr.p && tr.p.retreat);
+    setStatus(`⟲ 重放中 —— 第 ${st.turn} 回合`);
+    renderAll();
+    await sleep(300);
+  } else {
+    // 影子（同一局面挑战）走这条：玩家照常操作，只有对手的动作来自记录
+    const act = await waitPlayer();
+    if (gen !== state.gen) return;
+    retreat = act.type === 'retreat';
+  }
+  recordTurnInputs('p', { retreat: retreat }); // 玩家已提交：采集本回合我方动作
+  if (retreat) { doRetreat(); return; }
 
-  // 阶段 ③：对手放置（开发调试跳过，AI 不出牌）
+  // 阶段 ③：对手放置（重放时来自记录；开发调试跳过，AI 不出牌）
   state.phase = 'busy';
   renderControls();
-  if (isDevMode()) {
+  if (replayMode) {
+    replayApply('a', (replayTurn() || {}).a);
+    renderAll();
+    await sleep(300);
+  } else if (isDevMode()) {
     setStatus('开发调试：对手本回合不出牌。');
     state.aiMoves = [];
     await sleep(200);
@@ -1970,11 +2452,28 @@ async function playRound(gen) {
     setStatus('对手思考中…');
     await sleep(600);
     if (gen !== state.gen) return;
-    aiThink();
+    // AI 决策期间的随机改走**独立种子流**（`aiRng`）：只在这一次同步调用期间临时换掉全局 `Math.random`。
+    // 为什么不能放着不管：`js/ai.js` 在"并列打分"处用全局 Math.random，同一颗种子跑两遍会挑到不同的并列项 ⇒ 整局结果对不上、无法复现/对账。
+    // 为什么不让 AI 直接用主逻辑流 `rng()`：掉线托管只有一端会跑 AI，另一端没跑 ⇒ 主逻辑流错位。两条流独立，各管各的。
+    // 每次 `restart` 都会重新播种，所以这里正常恒为真；留着是为了"未播种时一个全局都不碰"（那时 aiRng 本来就等于原生随机）。
+    const realRandom = Math.random;
+    if (aiSeed !== null) Math.random = aiRng;
+    try {
+      aiThink();
+    } catch (err) {
+      // AI 抛异常**不再打死整局**（否则页面会无声卡死，只能开控制台才发现）：打印完整错误，本回合按"它已经放下的牌"继续。
+      // ⚠️ 不做事后回滚 —— 异常可能发生在落牌中途，这一回合的盘面可能不完整，但整局能正常打完。
+      console.error('[对手AI] 思考出错，本回合按已放下的牌继续：', err);
+      log('danger', '⚠️ 对手思考出错，本回合按它已放下的牌继续（完整错误见浏览器控制台）。');
+      setStatus('对手思考出错 —— 本局会继续，完整错误见浏览器控制台。');
+    } finally {
+      Math.random = realRandom;
+    }
     renderAll();
     await sleep(600);
   }
   if (gen !== state.gen) return;
+  recordTurnInputs('a'); // 对手已提交：采集本回合对方动作
 
   // 阶段 ④：翻牌结算（翻开暗牌，逐张按放置顺序结算「揭示」效果）
   await revealRound(gen);
@@ -2078,8 +2577,9 @@ function tryMoveFlyTo(locIdx) {
   // 与八云紫（shift）同款的“滑行 + 缩放”飞行演出——先记录源卡当前位置
   const srcEl = miniCardElById(card.id);
   const srcRect = srcEl ? srcEl.getBoundingClientRect() : null;
-  st.flyMovedFrom[card.id] = found.j; // 记录回合初所在区域，供“能量重置”退回
-  found.zone.splice(found.zone.indexOf(card), 1);
+  const zi = found.zone.indexOf(card); // 该区内的格位下标：重置时要插回这一格，不能一律塞到队尾
+  st.flyMovedFrom[card.id] = { j: found.j, zi }; // 记录回合初所在区域 + 格位，供“能量重置”退回
+  found.zone.splice(zi, 1);
   dz.push(card);
   st.flyMoved.add(card.id);
   st.moveCardId = null;
@@ -2151,11 +2651,12 @@ function tryPlayAt(locIdx) {
   card.side = side; // 归属：敌方立场时按对手卡结算揭示/持续等
   zone.push(card);
   enqueueField(card); // 暗出：进入场上放置顺序队列
-  st.players.p.hand.splice(st.selected, 1);
+  const handIdx = st.selected; // 暗出时的手牌下标：重置暗牌要按它插回原位（手牌顺序必须完全回到出牌阶段刚开始）
+  st.players.p.hand.splice(handIdx, 1);
   st.selected = -1;
   const paid = cardCost(card); // 按修正后的费用扣能量（可能被桑尼米尔克加过费）
   st.players.p.energyLeft -= paid;
-  st.playerMoves.push({ cardId: card.id, loc: locIdx, side });
+  st.playerMoves.push({ cardId: card.id, loc: locIdx, side, hi: handIdx });
   if (side === 'a') {
     log('a', `你（敌方立场）暗出「${card.def.n}」(${paid}费) → ${st.locs[locIdx].def.n}`);
   } else {
@@ -2172,6 +2673,7 @@ function tryPlayAt(locIdx) {
 
 function uiSnap() {
   const st = state;
+  if (replayMode && replayMode.mode === 'review') return; // 复盘不接受玩家操作；影子则由玩家照常出牌、也可加倍
   if (st.phase !== 'play' && st.phase !== 'busy') return;
   if (st.stakes >= 8) { setStatus('赌注已达上限 8。'); return; }
   st.stakes = Math.min(8, st.stakes * 2);
@@ -2222,7 +2724,7 @@ function confirmEnergyReset() {
 function undoPlacedCards() {
   const st = state;
   const pl = st.players.p;
-  // 1) 从区域里取回暗牌（含开发调试敌方立场落到对手区的牌）
+  // 1) 从区域里取回暗牌（含开发调试敌方立场落到对手区的牌），连同暗出时记下的手牌下标一起收好
   const removed = [];
   for (const mv of st.playerMoves) {
     const side = mv.side || 'p';
@@ -2231,24 +2733,22 @@ function undoPlacedCards() {
     if (ci >= 0) {
       const [card] = zone.splice(ci, 1);
       card.side = 'p'; // 回手后归属恢复为我方
-      removed.push(card);
+      removed.push({ card, hi: mv.hi });
       dequeueField(card);
     }
   }
   if (removed.length === 0) { st.playerMoves = []; st.selected = -1; renderAll(); return; }
-  const pool = new Map();
-  for (const c of pl.hand) pool.set(c.id, c);
-  for (const c of removed) pool.set(c.id, c);
-  const restored = [];
-  for (const id of st.playHandOrder) {
-    const c = pool.get(id);
-    if (c) { restored.push(c); pool.delete(id); }
+  // 2) 按**暗出顺序的倒序**逐个插回暗出时的下标 —— 等价于逐次撤销那次出牌。
+  //    ⚠️ 不能用「按回合初手牌顺序重建整个手牌」的写法：出牌阶段中途新加入手牌的牌（如开发者「🎯 指定卡牌」）不在那张表里，
+  //    会被当成"剩余牌"追加到手牌队尾 ⇒ 玩家可以「出牌→重置」把任意手牌挪到最左/最右，从而操纵弃牌类效果（`pick:'left'/'right'`）切哪张。
+  for (let k = removed.length - 1; k >= 0; k--) {
+    const hi = Number.isInteger(removed[k].hi) ? removed[k].hi : pl.hand.length;
+    pl.hand.splice(Math.min(Math.max(hi, 0), pl.hand.length), 0, removed[k].card);
   }
-  for (const c of pool.values()) restored.push(c);
-  pl.hand = restored;
-  // 3) 能量返还（只返还玩家侧；敌方立场落牌仍耗玩家能量）
-  const en = pl;
-  en.energyLeft = Math.min(en.energyTotal, en.energyLeft + removed.reduce((s, c) => s + cardCost(c), 0));
+  // 3) 能量返还（只返还玩家侧；敌方立场落牌仍耗玩家能量）。上限只是防御写法：出牌阶段没有任何东西会改费用，
+  //    返还额恒等于当初扣掉的那一笔，正常永远不会顶到 energyTotal
+  const refund = removed.reduce((s, r) => s + cardCost(r.card), 0);
+  pl.energyLeft = Math.min(pl.energyTotal, pl.energyLeft + refund);
   st.selected = -1;
   st.playerMoves = [];
   log('p', `↺ 你重置了本回合暗出的 ${removed.length} 张牌，已放回手牌，能量返还。`);
@@ -2259,15 +2759,23 @@ function undoFlyMoves() {
   const st = state;
   const froms = st.flyMovedFrom || {};
   st.moveCardId = null;
-  for (const idStr of Object.keys(froms)) {
-    const id = Number(idStr);
-    const from = froms[id];
+  // 按本回合的移动先后**倒着**回（`flyMoved` 是 Set、保持加入顺序）：同一区域飞走多张时，
+  // 先插回后飞的那张，格位下标才对得上。AI 侧只记了区域下标（数字），一并兼容
+  const ids = Array.from(st.flyMoved).filter((id) => froms[id] !== undefined);
+  for (const id of Object.keys(froms).map(Number)) if (!st.flyMoved.has(id)) ids.push(id);
+  for (let k = ids.length - 1; k >= 0; k--) {
+    const id = ids[k];
+    const rec = froms[id];
+    const from = (rec && typeof rec === 'object') ? rec.j : rec;
+    const zi = (rec && typeof rec === 'object' && Number.isInteger(rec.zi)) ? rec.zi : null;
     const found = findPlayerCard(id);
     if (!found || found.j === from) { st.flyMoved.delete(id); continue; }
     const back = st.players.p.zones[from];
     if (back.length >= locSideMax('p', from)) continue; // 理论不会发生：先重置暗牌已腾位（按该侧可用格数判）
     found.zone.splice(found.zone.indexOf(found.card), 1);
-    back.push(found.card);
+    // 插回该区回合初的格位（记不到下标才退回队尾）——「重置暗牌」要求位置完全回到出牌阶段刚开始
+    if (zi === null || zi > back.length) back.push(found.card);
+    else back.splice(zi, 0, found.card);
     st.flyMoved.delete(id);
     log('p', `↺ 移动重置：「${found.card.def.n}」回到「${st.locs[from].def.n}」，本回合可再移动。`);
   }
@@ -2318,13 +2826,13 @@ async function revealRound(gen) {
   // 同一方的多张牌严格按“放置顺序”翻。
   let first;
   if (st.turn === 1) {
-    first = Math.random() < 0.5 ? 'p' : 'a';
+    first = rng() < 0.5 ? 'p' : 'a';
     log('sys', `首回合随机决定翻牌顺序：由${first === 'p' ? '你' : '对手'}先翻开。`);
   } else {
     first = currentLeaderSide();
     if (first) log('sys', `翻牌顺序：当前${first === 'p' ? '你' : '对手'}领先，由${first === 'p' ? '你' : '对手'}先翻开。`);
     else {
-      first = Math.random() < 0.5 ? 'p' : 'a';
+      first = rng() < 0.5 ? 'p' : 'a';
       log('sys', '翻牌顺序：当前形势持平，随机决定先后。');
     }
   }
@@ -3237,7 +3745,7 @@ function reviveCardFromPile(side, card, pile) {
   if (!targets.length) return -1;
   const i = pile.indexOf(card);
   if (i < 0) return -1; // 防御：已被连锁复活走
-  const dst = targets.length === 1 ? targets[0] : targets[Math.floor(Math.random() * targets.length)];
+  const dst = targets.length === 1 ? targets[0] : targets[Math.floor(rng() * targets.length)];
   pile.splice(i, 1); // 离池（牌本体带走自己的一切：powerLog / costMod）
   delete card.pileKind; delete card.pileTurn; delete card.pileBy; delete card.pileLoc; delete card.pilePower;
   card.side = side;
@@ -3551,7 +4059,7 @@ function delCopyCore(side, locIdx, card) {
     log(side, `✦ ${def.n} 想摧毁本区域你的一张卡牌，但本区没有可摧毁的其他己方已翻开卡牌（不含自己、法术与暗牌），无事发生。`);
     return [];
   }
-  const target = cands[Math.floor(Math.random() * cands.length)];
+  const target = cands[Math.floor(rng() * cands.length)];
   const tp = cardPowerIn(locIdx, target);
   // ind / phx / surv：都算「摧毁失败」⇒ 不生成复制体（各自机制照常结算）
   if (indestructibleBlock(target, def.n)) return [];
@@ -3741,7 +4249,7 @@ function applyEffect(side, locIdx, card, spec) {
       let minBoth = Infinity;
       for (const c of both) minBoth = Math.min(minBoth, cardPowerIn(locIdx, c));
       const lowPool = both.filter((c) => cardPowerIn(locIdx, c) === minBoth);
-      const lowTarget = lowPool[Math.floor(Math.random() * lowPool.length)]; // 并列最低：随机挑一张
+      const lowTarget = lowPool[Math.floor(rng() * lowPool.length)]; // 并列最低：随机挑一张
       const lowSide = lowTarget.side;
       const lowZone = st.players[lowSide].zones[locIdx];
       if (indestructibleBlock(lowTarget, def.n)) break;
@@ -3765,7 +4273,7 @@ function applyEffect(side, locIdx, card, spec) {
       if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁己方卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
       const weaker = mine.filter((c) => c !== card && c.revealed && !c.def.un && !c.def.spell && cardPowerIn(locIdx, c) < selfP);
       if (weaker.length === 0) { log(side, `✦ ${def.n} 想摧毁一张战力低于自己的己方卡牌，但本区没有这样的已翻开卡牌（暗牌、法术与战力不低于它 ${selfP} 的卡都不算），无事发生。`); break; }
-      const wPick = weaker[Math.floor(Math.random() * weaker.length)];
+      const wPick = weaker[Math.floor(rng() * weaker.length)];
       const wP = cardPowerIn(locIdx, wPick);
       if (indestructibleBlock(wPick, def.n)) break; // ind → 摧毁失败、判定结束（不改打其他牌）
       if (phoenixRevive(wPick, locIdx)) { log(side, `✦ ${def.n}：己方「${wPick.def.n}」凤凰重生回手（摧毁失败）。`); break; }
@@ -4021,7 +4529,7 @@ function applyEffect(side, locIdx, card, spec) {
       const cands = hand.filter((c) => c && c.def && !c.def.spell);
       if (!cands.length) { log(side, `✦ ${def.n} 想变身，但对方手牌里没有可作目标的卡（手牌为空或只有法术）。`); break; }
       const oldN = def.n;
-      const pick = cands[Math.floor(Math.random() * cands.length)];
+      const pick = cands[Math.floor(rng() * cands.length)];
       // 大体积目标限制：随机目标是占多格的大体积卡（如萃香 occ:4）时，需本区域 max 恰为该占格数、且己方该区
       // （明牌+暗牌）**有且仅有变身者这一张卡**才能变身，否则失败保持原样（避免占格超限）。
       if (occOf(pick) > 1) {
@@ -4062,7 +4570,7 @@ function applyEffect(side, locIdx, card, spec) {
         if (p < minP) { minP = p; poolT = [c]; }
         else if (p === minP) poolT.push(c);
       }
-      const target = poolT[Math.floor(Math.random() * poolT.length)];
+      const target = poolT[Math.floor(rng() * poolT.length)];
       const gEl = miniCardElById(target.id);
       const gRect = gEl && gEl.isConnected ? gEl.getBoundingClientRect() : null;
       st.players[side].zones[locIdx].splice(st.players[side].zones[locIdx].indexOf(target), 1);
@@ -4106,7 +4614,7 @@ function applyEffect(side, locIdx, card, spec) {
         log('danger', `✦ ${def.n}：地形池里没有可变成的其它地形，本次不变形。`);
         break;
       }
-      const targetR = candsR[Math.floor(Math.random() * candsR.length)];
+      const targetR = candsR[Math.floor(rng() * candsR.length)];
       const prevR = state.locs[locIdx].def;
       state.locs[locIdx].def = targetR;
       resetLocGaps(locIdx);     // 换地形 → 清空本列已封的隙间
@@ -4142,7 +4650,7 @@ function applyEffect(side, locIdx, card, spec) {
         if (locOpen(j) && sideRoom(other, j) >= occOf(target)) cands.push(j);
       }
       if (cands.length === 0) { log('danger', `✦ ${def.n} 想把对方「${target.def.n}」移走，但另外两个区域都放不下，移动失败。`); break; }
-      const dst = cands.length === 1 ? cands[0] : cands[Math.floor(Math.random() * cands.length)];
+      const dst = cands.length === 1 ? cands[0] : cands[Math.floor(rng() * cands.length)];
       theirs.splice(theirs.indexOf(target), 1);
       st.players[other].zones[dst].push(target);
       log('danger', `✦ ${def.n} 把对方「${target.def.n}」（威力 ${minP}）移到了「${st.locs[dst].def.n}」。`);
@@ -4371,7 +4879,7 @@ function applyEffect(side, locIdx, card, spec) {
       let maxP = -Infinity;
       for (const c of vis) maxP = Math.max(maxP, cardPowerIn(locIdx, c));
       const maxPool = vis.filter((c) => cardPowerIn(locIdx, c) === maxP);
-      const target = maxPool[Math.floor(Math.random() * maxPool.length)]; // 并列：随机挑一张
+      const target = maxPool[Math.floor(rng() * maxPool.length)]; // 并列：随机挑一张
       if (indestructibleBlock(target, def.n)) break;
       if (phoenixRevive(target, locIdx)) break; // 凤凰重生：回手并翻倍
       if (surviveDestroy(target)) break; // 防摧毁：替代为降战力、卡不离场
@@ -4459,7 +4967,7 @@ function applyEffect(side, locIdx, card, spec) {
         break;
       }
 
-      const pick = cands[Math.floor(Math.random() * cands.length)];
+      const pick = cands[Math.floor(rng() * cands.length)];
       const before = cardCost(pick);
       applyCostMod(pick, up, card);
       const after = cardCost(pick);
@@ -4522,7 +5030,7 @@ function applyEffect(side, locIdx, card, spec) {
       const got = [];
       for (let i = 0; i < dCnt; i++) {
         if (dHand.length >= 7) break;
-        const pickSpell = spellPool[Math.floor(Math.random() * spellPool.length)];
+        const pickSpell = spellPool[Math.floor(rng() * spellPool.length)];
         const spellCard = newCard(pickSpell);
         spellCard.side = side;
         spellCard.justHandAdded = true;
@@ -4609,7 +5117,7 @@ function moveCardToRandomZone(card) {
     cands.push(j);
   }
   if (cands.length === 0) return -1;
-  const dst = cands.length === 1 ? cands[0] : cands[Math.floor(Math.random() * cands.length)];
+  const dst = cands.length === 1 ? cands[0] : cands[Math.floor(rng() * cands.length)];
   const el = miniCardElById(card.id);
   const srcRect = el && el.isConnected ? el.getBoundingClientRect() : null;
   const srcZone = st.players[owner].zones[from];
@@ -4759,7 +5267,7 @@ function runLocRevealEffects(side, locIdx, card) {
   if (!def.gamble || !card) return 0;
   // 法术无战力且揭示后即消散，不参与博彩
   if (isSpell(card)) return 0;
-  const d = Math.random() < 0.5 ? def.gamble : -def.gamble;
+  const d = rng() < 0.5 ? def.gamble : -def.gamble;
   // tag = 地形名 → 战力影响历史按来源显示「驹草赌场」
   if (applyPermBuff(card, d, null, def.n) === false) {
     log('sys', `${def.icon} ${def.n}：${side === 'p' ? '你方' : '敌方'}「${card.def.n}」赌了一把 → 掷出 ${d}，但被本区「免减攻」拦下（战力不变，现 ${cardPowerIn(locIdx, card)}）`);
@@ -4786,7 +5294,7 @@ function locDiceEffects() {
 
       for (const c of st.players[side].zones[j].slice()) {
         if (c.def.un || c.def.spell) continue;
-        const d = Math.random() < 0.5 ? n : -n; // 每张卡各自掷一次：+n / −n 各半
+        const d = rng() < 0.5 ? n : -n; // 每张卡各自掷一次：+n / −n 各半
 
         if (applyPermBuff(c, d, null, def.n) === false) {
           hit.push(`${side === 'p' ? '你方' : '敌方'}「${c.def.n}」掷出 ${d} 但被「免减攻」拦下(${cardPowerIn(j, c)})`);
@@ -5436,10 +5944,13 @@ function cardFaceHTML(def, opts) {
 
 function uiOnCodex() { if (window.CardBrowser) window.CardBrowser.toggleCodex(); }
 function closeCodex() { if (window.CardBrowser) window.CardBrowser.closeCodex(); }
-function uiOnPick() { if (window.CardBrowser) window.CardBrowser.togglePick(); }
+// 「🎯 指定卡牌」只在开发调试可用：正常对局顶栏已隐藏该按钮，这两处再各守一道，
+// 避免从控制台调 Game.ui.onPick() / onPickConfirm() 绕过（指定卡牌会在出牌阶段中途往手牌加牌）
+function uiOnPick() { if (!isDevMode()) return; if (window.CardBrowser) window.CardBrowser.togglePick(); }
 function uiOnPickClose() { if (window.CardBrowser) window.CardBrowser.closePick(); }
 
 function uiOnEnergyDev() {
+  if (!isDevMode()) return;
   const st = state;
   if (st.phase !== 'play') { setStatus('只有在你的出牌阶段才能修改能量。'); return; }
   const en = st.players.p;
@@ -5468,7 +5979,7 @@ function uiOnSwitchSide() {
   renderAll();
 }
 
-function uiOnPickConfirm() { if (window.CardBrowser) window.CardBrowser.confirmPick(); }
+function uiOnPickConfirm() { if (!isDevMode()) return; if (window.CardBrowser) window.CardBrowser.confirmPick(); }
 
 /* ---------- 开发者「指定地形」（区域 2/3 选不中已修）----------
    ⚠️ 区域按钮必须**直接绑定**（事件委托仅兜底）；选择条放标题下方 —— 放弹窗底部会被 .codex-modal 的 max-height 裁掉且遮罩不可滚动，点不到。 */
@@ -6280,10 +6791,82 @@ function showModal(emblem, title, sub, delta) {
   $('modalMask').classList.remove('hidden');
 }
 
+/* ---------------- 状态指纹（联机对账探针） ----------------
+   把"会影响胜负的那部分状态"压成一个 8 位短码：回合 / 阶段 / 赌注 / 三块地形 / 放置队列 / 双方能量·手牌·牌库·三区·三个特殊牌池。
+   联机时两端各报一次同一个码：**一样 = 算出来完全一致；不一样 = 当场就知道分叉了**，而不是打到终局才发现分数对不上、互相怀疑作弊。
+   ⚠️ 刻意不含 `gen`（本机重开次数）、`selected` / `moveCardId`（本地交互态）以及任何演出状态 —— 那些两端本来就不同。 */
+function stateFingerprint() {
+  const st = state;
+  const snap = {
+    turn: st.turn, phase: st.phase, stakes: st.stakes, rounds: roundsTotal(),
+    locs: st.locs.map((l) => (l && l.def ? l.def.id : '-')),
+    queue: st.fieldQueue.map((c) => c.id),
+  };
+  for (const side of ['p', 'a']) {
+    const pl = st.players[side];
+    snap[side] = {
+      energy: [pl.energyTotal, pl.energyLeft, pl.energyGain || 0],
+      hand: pl.hand.map((c) => [c.id, cardCost(c), cardPower(c)]),
+      deck: pl.deck.map((c) => c.id),
+      zones: pl.zones.map((z, j) => z.map((c) => [c.id, cardPowerIn(j, c), c.revealed ? 1 : 0])),
+      piles: PILE_KINDS.map((k) => pileOf(side, k.key).map((c) => c.id)),
+    };
+  }
+  return shortHash(stableStringify(snap));
+}
+
+/* 控制台 / 联机自检用：设定种子并重开一局，等**已经停在"等你操作"的那一刻**（＝这一回合彻底定型、不会再变）再返回状态指纹。
+   opts.freshDeck = true ⇒ 强制"由种子决定的默认曲线卡组"并退出开发者空牌库，让整局**完全由种子决定**；
+     不给 ⇒ 沿用上一局用的卡组（同「重新开始」/「再来一局」的口径）。
+   opts.autoPass = true ⇒ 之后自动一路「跳过回合」打到终局，返回**终局**指纹（不用手点，避免点击次数/误点污染结果）。
+   ⚠️ 三个坑：① 「种子」不是全部输入，完整输入 = 种子 + 双方卡组 + 数据版本 —— 两次不一致时先比 `Game._inputs()`；
+   ② 不要用「`Game.restart()` 之后立刻读 `_fingerprint()`」代替 —— `restart` 是异步的，那一刻盘面还在重建；
+   ③ 判"定型"必须用 `phase === 'play'` **且 `pendingResolve` 非空**（＝已停在等你操作），只看 `phase` 会读到回合开始尚未走完的中间态。 */
+async function newSeededGame(n, opts) {
+  opts = (opts && typeof opts === 'object') ? opts : {};
+  if (opts.freshDeck) { lastPlayerDeckDefs = null; lastEmptyPlayerDeck = false; }
+  // 防御：第二个参数写错（例如把整个 opts 当 waitMs 传）会让下面的等待循环一次都不跑、直接读到中间态 —— 这里兜住
+  const waitMs = (typeof opts.waitMs === 'number' && isFinite(opts.waitMs)) ? opts.waitMs : 20000;
+  const limit = Math.max(1, Math.ceil(waitMs / 50));
+  const settled = () => state.phase === 'over' || (state.phase === 'play' && !!pendingResolve);
+  await restart({ seed: n });
+  for (let i = 0; i < limit && !settled(); i++) await sleep(50);
+  if (!opts.autoPass) return stateFingerprint();
+  // 自动打完：每回合都走「跳过回合」（与手点同一个入口），直到终局
+  for (let t = 0; t < 20 && state.phase !== 'over'; t++) {
+    if (state.phase === 'play' && pendingResolve) uiEndTurn();
+    for (let i = 0; i < limit && !settled(); i++) await sleep(50);
+  }
+  return stateFingerprint();
+}
+
+/* 这一局是"哪些输入"决定的（联机自检用）：两份卡组顺序 / 三块地形 / 双方起手 / 能量。
+   两次指纹不一致时先比这里：**输入不同是正常差异**（例如换了卡组），"输入全同而指纹不同"才是真问题。 */
+function decidingInputs() {
+  return {
+    playerDeck: state.players.p.deck.map((c) => c.def.n),
+    aiDeck: state.players.a.deck.map((c) => c.def.n),
+    locPlan: state.locPlan.map((d) => d.n),
+    pHand: state.players.p.hand.map((c) => c.def.n),
+    aHand: state.players.a.hand.map((c) => c.def.n),
+    energy: [state.players.p.energyTotal, state.players.p.energyLeft, state.players.a.energyTotal, state.players.a.energyLeft],
+  };
+}
+
 /* ---------------- 导出到 window ---------------- */
 window.Game = {
   _els: null,
   restart,
+  // 逻辑随机：未设种子时与原生 Math.random 等价；本局种子由 `restart({ seed })` 决定（不传则每局随机）
+  rng,
+  dataHash,                 // 本机数据（卡池 / 特殊卡 / 地形）的一致性哈希，联机握手用
+  _fingerprint: stateFingerprint, // 状态指纹探针：同种子 + 同动作 ⇒ 两端必须一致
+  _newGame: newSeededGame,  // 测试用：设种子重开一局并等到「停在等你操作」，返回该时刻指纹（autoPass ⇒ 返回终局指纹）
+  _inputs: decidingInputs,  // 测试用：这一局由哪些输入决定（卡组 / 地形 / 起手 / 能量）—— 指纹不一致时先比它
+  _record: () => gameRecord, // 本局录制内容（种子 / 卡组 / 逐回合动作），可读结构便于核对
+  _code: encodeRecord,      // 本局的一行挑战码（TH2P1:…）
+  _replayInfo: decodeRecord, // 把一行码解回可读结构（与 `_record()` 同构）：往返验证 / 排查码用
+  _replay: replayGame,      // 重放一行挑战码（整局自动重算），返回终局指纹
   ui: {
     onSnap: uiSnap,
     onPass: uiEndTurn,
@@ -6310,6 +6893,13 @@ window.Game = {
     onEnergyReset: uiEnergyReset,
     confirmEnergyReset,
     cancelEnergyReset,
+    // 挑战码（阶段 1）：生成 / 粘贴 / 复制 / 看复盘 / 挑战同一局面
+    onChallengeExport: uiChallengeExport,
+    onChallengeOpen: uiChallengeOpen,
+    onChallengeCopy: uiChallengeCopy,
+    onChallengeReview: () => uiChallengeStart('review'),
+    onChallengeShadow: () => uiChallengeStart('shadow'),
+    closeChallenge,
   },
   _dbg: () => ({
     gen: state.gen, phase: state.phase, turn: state.turn,
@@ -6363,6 +6953,8 @@ window.Game = {
   }
   if (aiSpyMask) aiSpyMask.addEventListener('click', (e) => { if (e.target === aiSpyMask) closeAiSpy(); });
   if (pileMask) pileMask.addEventListener('click', (e) => { if (e.target === pileMask) closePiles(); });
+  const challengeMask = $('challengeMask');
+  if (challengeMask) challengeMask.addEventListener('click', (e) => { if (e.target === challengeMask) closeChallenge(); });
   // 开发者「🪨 添加石块」弹窗：遮罩点击关闭 + 按钮直接绑定 + 输入框实时刷新提示
   const addStoneMask = $('addStoneMask');
   if (addStoneMask) {
@@ -6393,6 +6985,7 @@ window.Game = {
     else if (!pickMask.classList.contains('hidden')) uiOnPickClose();
     else if (aiSpyMask && !aiSpyMask.classList.contains('hidden')) closeAiSpy();
     else if (pileMask && !pileMask.classList.contains('hidden')) closePiles();
+    else if (challengeMask && !challengeMask.classList.contains('hidden')) closeChallenge();
     else if (!undoMask.classList.contains('hidden')) cancelEnergyReset();
   });
 })();

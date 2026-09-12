@@ -432,12 +432,15 @@
     var guide = $('homeBtnGuide');
     var settings = $('homeBtnSettings');
     var codex = $('homeBtnCodex');
+    var challenge = $('homeBtnChallenge');
     if (battle) battle.addEventListener('click', startBattle);
     if (dev) dev.addEventListener('click', function () { openPage('dev'); });
     if (deck) deck.addEventListener('click', function () { openPage('deck'); });
     if (guide) guide.addEventListener('click', openGuide);
     if (settings) settings.addEventListener('click', openSettings);
     if (codex) codex.addEventListener('click', openCodex);
+    // 挑战码入口：同一个弹窗的导入形态（生成方向在对局结算弹窗上）
+    if (challenge) challenge.addEventListener('click', function () { window.Game.ui.onChallengeOpen(); });
     syncSettingsSub();
 
     var sClose = $('settingsCloseBtn');
