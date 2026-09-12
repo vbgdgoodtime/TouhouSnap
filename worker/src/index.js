@@ -44,7 +44,7 @@ export class Room {
     this.room = "";
     this.sockets = { host: null, guest: null };
     this.tokens = {}; // 角色 → token：同一个 token 回来还是原角色；断开也让位不了（免得路人占了空位）
-    this.turns = new Set(); // 已接受的「回合:座位」
+    this.turns = new Set(); // 已接受的「回合:发送方角色」；新一局开局（start / rematch）时清空
     this.loaded = this.load();
   }
 
@@ -165,10 +165,17 @@ export class Room {
     if (!msg || typeof msg !== "object") return;
 
     if (msg.t === "turn") {
-      // 同一个 (回合, 座位) 只认第一条 —— 重复提交（或两端各发一份）不会两份都生效
-      const key = msg.round + ":" + msg.side;
+      // 同一个 (回合, 发送方角色) 只认第一条。
+      // ⚠️ 键里必须是**发送方的角色**（`role`），不能是包里的 `msg.side`：两端各自把本地玩家当 'p'，
+      //    双方交上来的包 `side` 都是 'p' ⇒ 用它做键会让两个人的包互相顶掉
+      //    （症状：一方顺利进下一回合，另一方一直卡在"等对手出牌"）。
+      const key = msg.round + ":" + role;
       if (this.turns.has(key)) return;
       this.turns.add(key);
+    } else if (msg.t === "start" || msg.t === "rematch") {
+      // 新一局（房主发令开局 / 两端各点一次再来一局）的回合号从 1 重新数：不清掉上一局的键，
+      // 第二局的第 1 回合会被当成重复包**静默丢掉**（症状：两边都卡在"等对手出牌"）。
+      this.turns.clear();
     }
 
     this.send(peerOf(role), { t: "msg", from: role, msg });

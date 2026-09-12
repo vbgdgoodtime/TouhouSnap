@@ -3161,7 +3161,7 @@ body.in-home #challengeMask:not(.hidden) {
 .home-title { font-size: 34px; letter-spacing: 8px; margin: 8px 0 6px; color: #2e4527; }
 .home-sub { font-size: 12.5px; color: #64805c; }
 
-/* 三个入口按钮 */
+/* 主入口按钮 */
 .home-menu { display: flex; flex-direction: column; gap: 12px; }
 .home-btn {
   display: flex;
@@ -3194,6 +3194,21 @@ body.in-home #challengeMask:not(.hidden) {
   box-shadow: 0 12px 26px rgba(201, 148, 0, .34);
 }
 .home-btn.primary:hover { background: linear-gradient(135deg, #eab022, #ffd85e); }
+/* 联机入口（.home-btn.net）：淡蓝底 + 蓝色描边，与单机入口一眼分开 ——
+   它是唯一会连自己的房间服务（worker/）的入口，其余都是本地功能 */
+.home-btn.net {
+  color: #1f3f5c;
+  border-color: rgba(96, 150, 200, .55);
+  background: linear-gradient(135deg, rgba(228, 243, 253, .95), rgba(203, 230, 250, .92));
+  box-shadow: 0 8px 20px rgba(70, 120, 170, .14);
+}
+.home-btn.net:hover {
+  border-color: rgba(80, 140, 195, .8);
+  background: linear-gradient(135deg, #ecf6fd, #d7ecfb);
+  box-shadow: 0 12px 26px rgba(70, 120, 170, .24);
+}
+.home-btn.net .hb-sub { color: #4a7292; }
+.home-btn.net .hb-arrow { color: rgba(58, 100, 138, .5); }
 .hb-icon { flex: 0 0 auto; width: 34px; font-size: 26px; text-align: center; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .12)); }
 .hb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .hb-main { font-size: 17px; font-weight: 800; letter-spacing: 1px; }
@@ -3870,7 +3885,7 @@ body.in-home #guideMask:not(.hidden) {
 
 /* ============================================================
    v174：主页面「⚙️ 设置」（#homeBtnSettings 按钮 + #settingsMask 弹窗）
-   - 按钮 = 主入口列里紧接「图鉴」的第 5 项（v181 起「图鉴」插在「卡组设置」与它之间），
+   - 按钮 = 主入口列里紧接「开发调试」的那一项（在「开发调试」与「挑战码」之间），
      样式复用 .home-btn（不加新样式），
      副标题由 home.js 同步为「对手 AI 强度：<当前档位>」，故这里只需要给弹窗写样式；
    - 弹窗 = 复用 .modal-mask + .codex-modal（z-index 50 / max-height:88vh / 纵向 flex），
@@ -3987,7 +4002,7 @@ body.in-home #settingsMask:not(.hidden) {
 
 /* ============================================================
    v181：主页面「📚 图鉴」入口（#homeBtnCodex 按钮 + 复用既有图鉴弹窗）
-   - 按钮 = 主入口列里「卡组设置」与「⚙️ 设置」**之间**的第 4 项，样式**复用 .home-btn**
+   - 按钮 = 主入口列里紧接「卡组设置」下方的那一项，样式**复用 .home-btn**
      （不加新样式；图标用 📚，与对局顶栏的「📖 图鉴」呼应，也与「📖 新手引导」区分开），
      交互见 js/home.js 的 openCodex / closeCodex / isCodexOpen。
    - 弹窗 = **完全复用**既有图鉴弹窗 #codexMask（js/card-browser.js 的 window.CardBrowser，
@@ -4297,13 +4312,37 @@ body.in-home #netMask:not(.hidden) {
   z-index: 212;
 }
 .net-modal { width: min(520px, 94vw); max-width: min(520px, 94vw); }
-.net-server,
 .net-room-info {
-  font-size: 11.5px;
-  color: #78906f;
-  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #4d6b46;
+  margin-bottom: 10px;
   word-break: break-all;
 }
+/* 双方就位面板：两行「你是谁 / 对面是谁」+ 各自的状态（已准备 / 等待中 / 版本不一致） */
+.net-players {
+  margin-bottom: 10px;
+  border: 1px solid rgba(120, 144, 111, .35);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.np-row { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; font-size: 12px; }
+.np-row + .np-row { border-top: 1px solid rgba(120, 144, 111, .22); }
+.np-who { font-weight: 700; color: #4d6b46; }
+.np-state { color: #78906f; }
+.np-state.ok { font-weight: 700; color: #2f7d4f; }
+.np-state.warn { font-weight: 700; color: #d04848; }
+/* 版本不一致：把两边的卡牌数据哈希与页面引擎指纹并排摆出来，排查不必开控制台 */
+.net-version {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(208, 72, 72, .08);
+  border: 1px solid rgba(208, 72, 72, .3);
+}
+.nv-row { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: #a04040; }
+.nv-row b { font-family: ui-monospace, Consolas, monospace; }
 .net-room-row { margin-bottom: 8px; }
 .net-room-input {
   width: 100%;
@@ -4319,17 +4358,62 @@ body.in-home #netMask:not(.hidden) {
 .net-tip { min-height: 34px; margin-bottom: 14px; font-size: 11.5px; line-height: 1.5; color: #78906f; }
 .net-tip.warn { font-weight: 700; color: #d04848; }
 .net-actions { flex-wrap: wrap; }
-/* 对局中的联机状态条：房间码 / 角色 / 对手在线 / 本回合提交与对账 */
+/* 服务器地址：小字收在弹窗底部，不占主视线 */
+.net-server { margin-top: 10px; font-size: 10.5px; color: #93a88b; word-break: break-all; }
+
+/* 对局中的联机状态条：六段各自成块，配色＝等你出牌中性 / 已提交蓝 / 对手离线或超时红 / 对账一致绿 */
 .net-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 700;
   color: #cfe6c4;
   background: rgba(38, 58, 40, .92);
   border-bottom: 1px solid rgba(224, 163, 22, .35);
-  text-align: center;
 }
+.nb-seg { white-space: nowrap; }
+.nb-room { letter-spacing: 2px; color: #ffe08a; }
+.nb-role { color: #a8c89c; }
+.nb-peer.bad { color: #ff8f8f; }
+.nb-phase.sent { color: #7fd1ff; }
+.nb-phase.bad { color: #ff8f8f; }
+.nb-phase.ok { color: #9fe08a; }
+.nb-hash.ok { color: #9fe08a; }
+.nb-hash.bad { color: #ff8f8f; }
+/* 倒计时：进度条随剩余秒数缩短，剩余不足 HURRY_AT 秒时整段转告警色 */
+.nb-time {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .08);
+  overflow: hidden;
+}
+.nb-time i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: rgba(127, 209, 255, .28); }
+.nb-time b { position: relative; font-size: 11px; color: #cfe6c4; }
+.nb-time.hurry i { background: rgba(255, 143, 143, .3); }
+.nb-time.hurry b { font-weight: 700; color: #ff8f8f; }
+
+/* 对手信息区（联机）：头像换成玩家配色，下面一行写对手这一手的提交状态 */
+.av-net { background: linear-gradient(135deg, #7a3e5d, #99567f); border: 2px solid #bd7c9d; }
+.opp-turn-tag {
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #78906f;
+  background: rgba(120, 144, 111, .12);
+}
+.opp-turn-tag.sent { color: #2b7fb8; background: rgba(43, 127, 184, .14); }
+
 @media (max-width: 900px) {
-  .net-bar { font-size: 11px; padding: 5px 8px; }
+  .net-bar { gap: 4px 10px; padding: 5px 8px; font-size: 11px; }
   .net-actions .btn { flex: 1; min-width: 0; }
 }

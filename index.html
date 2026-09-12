@@ -42,11 +42,14 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <button type="button" class="home-btn" id="homeBtnDev">
-          <span class="hb-icon">🎛️</span>
+        <!-- 联机对战入口 —— 紧接「开始对战」下方（主入口的第 2 项：单机入口之前先摆联机）。
+             打开房间弹窗 #netMask（创建 / 加入 6 位房间码）；房间只转发消息、对局本身跑在两端浏览器里，
+             通道与口径见 js/net.js 与 docs/联机对战.md。样式＝.home-btn.net（淡蓝底，与单机入口区分开）。 -->
+        <button type="button" class="home-btn net" id="homeBtnNet">
+          <span class="hb-icon">🌐</span>
           <span class="hb-text">
-            <span class="hb-main">开发调试</span>
-            <span class="hb-sub">能量修改 / 指定卡牌 / 盘面调试工具</span>
+            <span class="hb-main">联机对战</span>
+            <span class="hb-sub">房间码开房 · 双方各带卡组实时对打</span>
           </span>
           <span class="hb-arrow">›</span>
         </button>
@@ -58,7 +61,7 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- 图鉴入口 —— 主入口列里「卡组设置」与「⚙️ 设置」**之间**（第 4 项）。
+        <!-- 图鉴入口 —— 主入口列里紧接「卡组设置」下方（主入口的第 4 项）。
              点它**不进入对局**，只打开既有的图鉴弹窗 #codexMask —— 与对局顶栏「📖 图鉴」
              是**同一个弹窗**（实现仍在 js/card-browser.js 的 window.CardBrowser，
              卡池 / 费用档筛选与卡池排序都沿用同一套）；交互见 js/home.js
@@ -74,7 +77,18 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- 设置入口 —— 紧接「图鉴」下方（主入口的第 5 项）。
+        <!-- 开发调试入口 —— 紧接「图鉴」下方（主入口的第 5 项，夹在「图鉴」与「设置」之间）。
+             点它不校验卡组，直接开一局空牌库的调试对局，见 js/dev-page.js 的 window.DevTools；
+             交互接线在 js/home.js 的 openPage('dev')。 -->
+        <button type="button" class="home-btn" id="homeBtnDev">
+          <span class="hb-icon">🎛️</span>
+          <span class="hb-text">
+            <span class="hb-main">开发调试</span>
+            <span class="hb-sub">能量修改 / 指定卡牌 / 盘面调试工具</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
+        <!-- 设置入口 —— 紧接「开发调试」下方（主入口的第 6 项）。
              打开 #settingsMask：用于切换**对手 AI 强度**（四档：简单 / 普通 / 困难 / 月狂，
              默认「简单」），选项与文案统一来自 js/ai.js 的 window.AI.LEVELS（本页不另写一份），
              交互见 js/home.js（openSettings / closeSettings / setAiLevel）。
@@ -99,17 +113,8 @@
             <span class="hb-sub">粘贴朋友的挑战码 · 看复盘 / 挑战同一局面</span>
           </span>
         </button>
-        <!-- 联机对战入口 —— 打开房间弹窗 #netMask（创建 / 加入 6 位房间码）。
-             房间只转发消息、对局本身跑在两端浏览器里；通道与口径见 js/net.js 与 docs/联机对战.md。 -->
-        <button type="button" class="home-btn" id="homeBtnNet">
-          <span class="hb-icon">🌐</span>
-          <span class="hb-text">
-            <span class="hb-main">联机对战</span>
-            <span class="hb-sub">房间码开房 · 双方各带卡组实时对打</span>
-          </span>
-        </button>
       </nav>
-      <!-- 新手引导 —— 主页面最下方的次级入口（五个主入口之下的轻量按钮）。
+      <!-- 新手引导 —— 主页面最下方的次级入口（主入口列之下的轻量按钮）。
            打开只读的机制速览弹窗（#guideMask，纯静态文案）；交互见 js/home.js，
            样式见 style.css 的 .home-guide-btn / .guide-modal。 -->
       <button type="button" class="home-guide-btn" id="homeBtnGuide">
@@ -413,17 +418,26 @@
   </div>
 
   <!-- 联机对战房间弹窗（主页面「🌐 联机对战」按钮打开，交互与通道见 js/net.js）
+       - 进本弹窗之前**先选一套满 12 张的出战卡组**（复用 #battleDeckMask，与「开始对战」同一条流程），
+         选完才由 js/net.js 的 Net.ui.open() 把本弹窗放出来；选定的卡组码随握手交换出去。
        - 创建房间：本机生成 6 位房间码并当房主；加入房间：填对方的码（两者都由云上的房间转发消息）。
-       - 双方各自带一套满 12 张的卡组；双方都点「我已准备」后由房主定种子开局。
-       - 数据版本（卡牌数据哈希 + 页面引擎指纹）不一致会直接拒绝开局并提示 Ctrl+F5。
+       - 双方都点「我已准备」后由房主定种子开局；数据版本（卡牌数据哈希 + 页面引擎指纹）不一致会拒绝开局。
+       - 按钮与面板都按状态显隐（未进房间 / 已进房间未开局 / 对局进行中），由 js/net.js 的 syncMask() 刷新。
        - 主页面态下由 style.css 的 `body.in-home #netMask:not(.hidden)` 放开显示（同 #challengeMask）。 -->
   <div class="modal-mask hidden" id="netMask">
     <div class="modal undo-modal net-modal">
       <div class="modal-emblem">🌐</div>
       <h2>联机对战</h2>
-      <div class="net-server">服务器：<span id="netServer">（未配置）</span></div>
       <div class="net-room-info" id="netRoomInfo">还没有进入房间</div>
-      <div class="net-room-row">
+      <div class="net-players hidden" id="netPlayers">
+        <div class="np-row"><span class="np-who" id="npSelfWho">你</span><span class="np-state" id="npSelfState">…</span></div>
+        <div class="np-row"><span class="np-who" id="npPeerWho">对手</span><span class="np-state" id="npPeerState">…</span></div>
+      </div>
+      <div class="net-version hidden" id="netVersion">
+        <div class="nv-row"><span>卡牌数据</span><b id="nvData">—</b></div>
+        <div class="nv-row"><span>页面引擎</span><b id="nvEngine">—</b></div>
+      </div>
+      <div class="net-room-row" id="netRoomRow">
         <input type="text" class="deck-import-input net-room-input" id="netRoomInput" maxlength="6"
                spellcheck="false" autocomplete="off" placeholder="6 位房间码（加入时填）">
       </div>
@@ -432,9 +446,11 @@
         <button type="button" class="btn" id="netCreate" onclick="Net.ui.create()">🏠 创建房间</button>
         <button type="button" class="btn" id="netJoin" onclick="Net.ui.join()">🚪 加入房间</button>
         <button type="button" class="btn btn-primary" id="netReady" onclick="Net.ui.ready()">✅ 我已准备</button>
+        <button type="button" class="btn" id="netCopy" onclick="Net.ui.copy()">📋 复制房间码</button>
         <button type="button" class="btn btn-ghost" id="netLeave" onclick="Net.ui.leave()">退出房间</button>
         <button type="button" class="btn" id="netClose" onclick="Net.ui.close()">关闭</button>
       </div>
+      <div class="net-server">服务器：<span id="netServer">（未配置）</span></div>
     </div>
   </div>
 
@@ -464,12 +480,22 @@
       <button id="btnSwitchSide" class="btn btn-ghost hidden" onclick="Game.ui.onSwitchSide()" title="开发调试：切换落牌立场">⇄ 切换立场</button>
       <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
       <button id="btnSnap" class="btn btn-snap" onclick="Game.ui.onSnap()" title="每局一次：把本局结算从 2 抬到 4（双方都加倍则 8），下回合生效">双倍下注</button>
-      <button id="btnRestart" class="btn btn-ghost" onclick="Game.restart()">重新开始</button>
+      <button id="btnRestart" class="btn btn-ghost" onclick="Game.ui.onRestart()">重新开始</button>
     </div>
   </header>
 
-  <!-- 联机状态条（js/net.js 刷新）：只在联机对局中出现，显示房间码 / 角色 / 对手在线 / 本回合提交与对账状态 -->
-  <div class="net-bar hidden" id="netBar"></div>
+  <!-- 联机状态条（js/net.js 的 renderBar 刷新）：只在联机对局中出现，六段各管一件事，
+       一眼看出卡在谁身上、还剩多少秒、上一回合对账过没过 —— 房间码 / 角色 / 对手在线 /
+       本回合阶段（等你出牌＝中性、已提交＝蓝、对手离线或超时＝红）/ 倒计时 / 最近一次对账。
+       倒计时那段带一条随剩余秒数缩短的进度条，剩余不足 HURRY_AT 秒时转告警色。 -->
+  <div class="net-bar hidden" id="netBar">
+    <span class="nb-seg nb-room" id="nbRoom"></span>
+    <span class="nb-seg nb-role" id="nbRole"></span>
+    <span class="nb-seg nb-peer" id="nbPeer"></span>
+    <span class="nb-seg nb-phase" id="nbPhase"></span>
+    <span class="nb-seg nb-time hidden" id="nbTime"><i id="nbTimeFill"></i><b id="nbTimeVal">--</b></span>
+    <span class="nb-seg nb-hash hidden" id="nbHash"></span>
+  </div>
 
   <main class="layout">
     <section class="board-wrap">
@@ -501,9 +527,10 @@
         </div>
       </section>
       <div class="opponent">
-        <div class="side-title">对手（AI）</div>
+        <!-- 标题与头像：单机＝「对手（AI）」+ 🤖，联机时由 js/net.js 的 ui.syncOpponent() 换成对手昵称 + 👤 -->
+        <div class="side-title" id="oppTitle">对手（AI）</div>
         <div class="avatar-row">
-          <div class="avatar av-ai">🤖</div>
+          <div class="avatar av-ai" id="oppAvatar">🤖</div>
           <div class="mini-stats">
             <div>手上还有 <span id="aiCount">3</span> 张</div>
             <div>牌库 <span id="aiDeck">12</span> 张</div>
@@ -512,6 +539,8 @@
           <button type="button" class="btn btn-ghost ai-spy-btn" id="btnAiSpy" title="查看对手手牌与牌库" onclick="Game.ui.onAiSpy()">👁️ 查看</button>
         </div>
         <div id="aiSnapTag" class="snap-tag hidden">⚡ 已加倍</div>
+        <!-- 联机专有：对手这一手交了没有（「⏳ 出牌中…」/「✅ 已提交，等你出牌」），单机恒隐藏 -->
+        <div id="oppTurnTag" class="opp-turn-tag hidden">⏳ 出牌中…</div>
       </div>
       <div class="rules">
         <h3>玩法速览</h3>
@@ -560,7 +589,8 @@
       <div class="modal-btns">
         <button class="btn" id="btnResultClose" onclick="Game.ui.closeResult()">确认</button>
         <button class="btn" id="btnChallenge" onclick="Game.ui.onChallengeExport()">📤 生成挑战码</button>
-        <button class="btn btn-primary" id="btnAgain" onclick="Game.restart()">再来一局</button>
+        <!-- 再来一局：单机就地重开；联机走「两端各点一次、房主定种子」的重开请求（js/net.js 的 ui.rematch） -->
+        <button class="btn btn-primary" id="btnAgain" onclick="Game.ui.onAgain()">再来一局</button>
       </div>
     </div>
   </div>
@@ -764,7 +794,7 @@
   <script src="js/deck-page.js"></script>
   <!-- 开发调试入口（主页面「开发调试」→ window.DevTools；空玩家牌库直接开战） -->
   <script src="js/dev-page.js"></script>
-  <!-- 联机对战：必须放在既有脚本**之后**（它要用 window.Game / window.DeckStorage / window.Home，且不改动既有加载次序） -->
+  <!-- 联机对战：必须放在既有脚本**之后**（它要用 window.Game / window.Home，且不改动既有加载次序） -->
   <script src="js/net.js"></script>
 </body>
 </html>

@@ -5,7 +5,8 @@
    首帧即为主页面、不依赖 JS 执行顺序；本文件只做：
      1) 主页面背景的随机漂浮装饰图标；2) 入口按钮事件接线；
      3) 暴露 window.Home（show / hide / openPage / isHome）；
-     4) 开始对战前弹「选出战卡组」（仅满 12 张可选）；5) 新手引导 / 设置 / 图鉴 / 特殊牌池弹窗的开关与互斥。
+     4) 出战卡组弹窗（仅满 12 张可选）—— 单机「开始对战」与联机前选卡组共用，见 openDeckPicker()；
+     5) 新手引导 / 设置 / 图鉴 / 特殊牌池弹窗的开关与互斥。
 
    ⚠️ 跨文件收口：AI 强度档位的选项与中文文案唯一数据源＝js/ai.js 的 window.AI
       （ORDER / LEVELS[key].{name,desc,tip} / DEFAULT_LEVEL / getLevel / setLevel），
@@ -26,6 +27,10 @@
   };
 
   var pickedDeckId = null;
+  // 出战卡组弹窗的用途：'battle' ＝ 单机开战（选完直接开打）；'net' ＝ 联机选卡组（选完交给 openDeckPicker 传进来的
+  // onPick，由 js/net.js 接着打开房间弹窗）。同一个弹窗两种用途，单机那条流程不经过 onPick 分支。
+  var pickerMode = 'battle';
+  var pickerOnPick = null;
 
   /* ---------- 提示条 ---------- */
   var toastTimer = null;
@@ -112,6 +117,7 @@
 
   function hideBattleDeckPicker() {
     pickedDeckId = null;
+    pickerOnPick = null;
     var m = battleMask();
     if (m) m.classList.add('hidden');
     var ok = $('battleDeckOk');
@@ -131,13 +137,19 @@
 
     var decks = readyDecks();
     var has = decks.length > 0;
+    var net = pickerMode === 'net';
     if (empty) empty.classList.toggle('hidden', has);
     if (list) list.classList.toggle('hidden', !has);
     if (gotoBtn) gotoBtn.classList.toggle('hidden', has);
-    if (ok) ok.classList.toggle('hidden', !has);
+    if (ok) {
+      ok.classList.toggle('hidden', !has);
+      ok.textContent = net ? '用这套卡组联机' : '开始战斗';
+    }
     if (sub) {
       sub.textContent = has
-        ? '请选择一套已凑满 12 张的卡组后再开战（共 ' + decks.length + ' 套可选）'
+        ? (net
+          ? '联机双方各带一套满 12 张的卡组 —— 先选好你这套，选完就打开房间弹窗（共 ' + decks.length + ' 套可选）'
+          : '请选择一套已凑满 12 张的卡组后再开战（共 ' + decks.length + ' 套可选）')
         : '没有可出战的满编卡组';
     }
 
@@ -169,15 +181,24 @@
     }
   }
 
+  /* 打开出战卡组弹窗。opts.mode = 'net' 时只换文案（联机要整成套带出去），
+     并在选定后把卡组交给 opts.onPick（js/net.js 接着打开房间弹窗），不碰对局与主页面显隐。 */
+  function openDeckPicker(opts) {
+    opts = opts || {};
+    pickerMode = opts.mode === 'net' ? 'net' : 'battle';
+    pickerOnPick = typeof opts.onPick === 'function' ? opts.onPick : null;
+    renderBattleDeckList();
+    closeCodex();
+    var m = battleMask();
+    if (m) m.classList.remove('hidden');
+  }
+
   function openBattleDeckPicker() {
     if (!window.Game || typeof window.Game.restart !== 'function') {
       toast('游戏脚本未就绪，无法开始对战（请检查 game.js 是否加载成功）。');
       return;
     }
-    renderBattleDeckList();
-    closeCodex();
-    var m = battleMask();
-    if (m) m.classList.remove('hidden');
+    openDeckPicker();
   }
 
   function confirmBattleDeck() {
@@ -191,7 +212,10 @@
       toast('请选择一套满 12 张的卡组。');
       return;
     }
+    var onPick = pickerOnPick;
+    var net = pickerMode === 'net';
     hideBattleDeckPicker();
+    if (net && onPick) { onPick(deck); return; } // 联机：卡组交给 js/net.js，由它去连房间
     hide();
     document.body.classList.remove('in-dev');
     try {
@@ -481,7 +505,8 @@
     });
     window.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
-      // 主页面弹窗按层级关（与 style.css 的 z-index 一致）：新手引导 212 > 设置 211 > 出战卡组 210
+      // 主页面弹窗按层级关（与 style.css 的 z-index 一致）：新手引导 212 > 设置 211 > 出战卡组 210；
+      // 联机选卡组时引导 / 设置都关着，所以最后这条会命中它。
       if (isGuideOpen()) { closeGuide(); return; }
       if (isSettingsOpen()) { closeSettings(); return; }
       if (isBattlePickerOpen()) hideBattleDeckPicker();
@@ -497,6 +522,8 @@
     show: show,
     hide: hide,
     startBattle: startBattle,
+    // 出战卡组弹窗的通用入口（js/net.js 用它做「联机前先选卡组」）
+    openDeckPicker: openDeckPicker,
     openPage: openPage,
     toast: toast,
     openGuide: openGuide,

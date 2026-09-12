@@ -2242,7 +2242,11 @@ function runLocAppearSpawn(idx, def) {
     const tk = TOKENS[sp.card];
     if (!tk) return 0;
     const made = [];
-    const placed = placeToken('p', idx, tk, cnt, made) + placeToken('a', idx, tk, cnt, made);
+    // ⚠️ 必须按**房间座位序**生成，不能写死 'p' 再 'a'：卡 id 是按创建顺序分配的（`newCard` → `state.cardSeq++`），
+    //    而 id 进状态指纹。两端各自把本地玩家当 'p' ⇒ 写死的顺序会让同一批 id 落在**不同的人**身上，
+    //    当回合对账就对不上（症状：变形成虹龙洞 / 黄瓜田 / 幽灵洋馆的那一回合报"盘面不一致"）。
+    let placed = 0;
+    for (const side of state.seatOrder) placed += placeToken(side, idx, tk, cnt, made);
     log('sys', `${def.icon}「${def.n}」出现：双方各生成 ${cnt} 张「${tk.n}」，已落场翻开。${placed < total ? '（部分区域已放满，未能全部落下）' : ''}`);
     if (sp.reveal) resolveSpawnedReveals(made);
     return placed;
@@ -5678,6 +5682,13 @@ function finishMatch() {
   const cls = title === '你赢了！' ? 'win' : title === '你输了…' ? 'danger' : 'sys';
   log(cls, `—— 终局：${title}（赌注 ${st.stakes}）——`);
   renderAll();
+  // 联机局：结算弹窗上写清是谁对谁、本局结算多少立方（结算值＝赌注，胜负决定正负号）
+  if (state.netRole) {
+    const me = (window.Net && window.Net.myName && window.Net.myName()) || '你';
+    const opp = (window.Net && window.Net.peerName && window.Net.peerName()) || '对手';
+    sub = `联机对局：${me} vs ${opp} · 本局结算 ${Math.abs(delta)} 立方<br>${sub}`;
+    if (window.Net && window.Net.ui && window.Net.ui.onMatchEnd) window.Net.ui.onMatchEnd();
+  }
   showModal(emblem, title, `${sub}<br>${lines.join('<br>')}`, delta);
 }
 
@@ -6482,8 +6493,12 @@ function uiOnAddStoneConfirm() {
   if (input) input.value = String(readAddStoneCount());
   const n = readAddStoneCount();
   const made = [];
-  const placedP = placeToken('p', idx, tk, n, made);
-  const placedA = placeToken('a', idx, tk, n, made);
+  // 生成顺序同样走房间座位序（卡 id 按创建顺序分配，见「地形出现时生成」处的注释）
+  let placedP = 0, placedA = 0;
+  for (const side of state.seatOrder) {
+    const got = placeToken(side, idx, tk, n, made);
+    if (side === 'p') placedP = got; else placedA = got;
+  }
   const short = (placedP < n || placedA < n);
   renderAll();
   log('sys', `🪨 开发者指令：给「${locDef(idx).n}」区域**双方各生成 ${n} 张「${tk.n}」** → 你方实际 ${placedP} 张、敌方实际 ${placedA} 张（落地即翻开、占格位、进放置队列；该侧放满则少放）。`);
@@ -6788,6 +6803,15 @@ function renderSide() {
   $('aiCount').textContent = st.players.a.hand.length;
   $('aiDeck').textContent = st.players.a.deck.length;
   updateDeckCount();
+  // 对手信息区：先写单机口径（AI / 🤖 / 无提交状态行），联机时由 js/net.js 的 ui.syncOpponent() 覆盖成
+  // 对手昵称 + 👤 + 「他这一手交了没有」（单机没有这条状态，恒隐藏）
+  const oppTitle = $('oppTitle');
+  if (oppTitle) oppTitle.textContent = '对手（AI）';
+  const oppAvatar = $('oppAvatar');
+  if (oppAvatar) { oppAvatar.textContent = '🤖'; oppAvatar.classList.remove('av-net'); }
+  const oppTurn = $('oppTurnTag');
+  if (oppTurn) oppTurn.classList.add('hidden');
+  if (netOn() && window.Net && window.Net.ui && window.Net.ui.syncOpponent) window.Net.ui.syncOpponent();
   // 对手的加倍状态：宣布当回合标「下回合生效」，之后就是「已加倍」（单机下 AI 永不使用，该标签不出现）
   const aiTag = $('aiSnapTag');
   if (aiTag) {
@@ -7012,6 +7036,23 @@ function closeResult() {
   hideModal();
   setStatus('终局已确认 —— 可点击场上与手牌卡牌复盘，或点顶部「重新开始」再来一局。');
 }
+/* 结算弹窗「再来一局」：单机就地重开；**联机不能就地重开**——那会与对手分叉，
+   必须走「两端各点一次、房主另定种子」的重开请求（js/net.js 的 ui.rematch）。 */
+function uiOnAgain() {
+  if (state.netRole) {
+    if (window.Net && window.Net.ui && window.Net.ui.rematch) window.Net.ui.rematch();
+    return;
+  }
+  restart();
+}
+/* 顶栏「重新开始」：同理，联机时不许就地重开（本机一重开就与对手分叉），只说明该走哪条路 */
+function uiOnRestart() {
+  if (state.netRole) {
+    setStatus('联机对局不能就地重开 —— 这一局要打到底：打完在结算弹窗点「🔁 再来一局」（两端各点一次），或退出房间重开一局。');
+    return;
+  }
+  restart();
+}
 function showModal(emblem, title, sub, delta) {
   $('modalEmblem').textContent = emblem;
   $('modalTitle').textContent = title;
@@ -7108,8 +7149,10 @@ window.Game = {
   // 联机对局（PvP）引擎侧挂钩：通道与房间逻辑在 js/net.js（`window.Net`），这里只暴露它需要的那几件
   net: {
     active: netOn,
-    // 卡名 → 码（`费用.档内下标`）：卡组在 DeckStorage 里按**卡名**保存，握手交换的是码（取不到返回 null，由调用方拦）
-    codesOfNames: (names) => (names || []).map(cardCodeByName),
+    // 一套卡组 → 握手用的卡组码（`费用.档内下标`）。元素认 **def 对象或卡名**两种：
+    // `#battleDeckMask` 选出来的那套给的是 def 引用（与 `playerDeckDefs` 同一份数据），而 `DeckStorage` 存的是卡名。
+    // 有一张取不到（空位 / 池里没有）返回 null，由调用方拦住不放行。
+    codesOfCards: (cards) => (cards || []).map((d) => cardCodeByName(typeof d === 'string' ? d : (d && d.n))),
     // 按握手结果开局：`o = { role, seed, hostCodes, guestCodes }`。码解析不出卡（版本/数据不一致）就直接拒绝开局
     restart: (o) => {
       const hostDefs = (o.hostCodes || []).map(cardDefOfCode);
@@ -7145,6 +7188,9 @@ window.Game = {
       resolvePlayer({ type: 'peerRetreat' });
     },
     fingerprint: stateFingerprint,
+    // 对手在等「再来一局」时，结算弹窗若已被「确认」关掉就重新打开 —— 那个按钮在弹窗里，
+    // 不打开的话这个请求没有地方能看见。只在终局后才打开（避免对局中被误触）。
+    netReopenResult: () => { if (state.phase === 'over') $('modalMask').classList.remove('hidden'); },
   },
   ui: {
     onSnap: uiSnap,
@@ -7153,6 +7199,8 @@ window.Game = {
     onCodex: uiOnCodex,
     closeZoom,
     closeResult,
+    onAgain: uiOnAgain,
+    onRestart: uiOnRestart,
     onPick: uiOnPick,
     onPickClose: uiOnPickClose,
     onPickConfirm: uiOnPickConfirm,
