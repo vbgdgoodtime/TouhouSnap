@@ -66,7 +66,7 @@ function uid() { return (state.cardSeq++); }
 // ---- 法术（spell，卡级机制）：只带**能量消耗（def.c）**与**「揭示」效果**、战力恒为 0 的卡（POOL 与 SPECIAL 两端都适用），判定统一走 isSpellDef / isSpell ----
 //   ① cardPower / cardPowerIn 恒为 0，卡框不显示战力、任何位置都不吃战力增减；暗牌放置占 1 格，**揭示瞬间同样占 1 格**（影响放满加成与该侧“是否已满”），揭示效果结算完才腾出格位；
 //   ② 消散 ≠ “摧毁”：不触发 surv / phx / prot 与任何摧毁类文本，不进战力影响历史，不返手不返库（一局就这一份），只记一条日志 + 消散演出；
-//   ③ bf/de/ba 等增减跳过它；dw/dwh/mv/gift 这类“按威力选目标”的效果不选它（避免白费一次指向）；但它的“已放置”照常让 oc 触发、格位照常占用。
+//   ③ bf/de/ba 等增减跳过它；dw/dwh/dwh2/mv/gift 这类“按威力选目标”的效果不选它（避免白费一次指向）；但它的“已放置”照常让 oc 触发、格位照常占用。
 function isSpellDef(def) { return !!(def && def.spell); }
 function isSpell(card) { return !!(card && card.def && card.def.spell); }
 function cardPower(card) { return isSpell(card) ? 0 : card.def.p + card.buff; }
@@ -88,11 +88,12 @@ function addCostLog(card, d, srcCard, tag) {
   card.costLog.push({ inst: card, d, src: srcCard ? { id: srcCard.id, n: srcCard.def.n } : null, tag: tag || null });
 }
 // 费用修正的唯一收口（对应战力的 applyPermBuff）：改 costMod + 记账 + 排队“费用 ±N”演出；返回 false = 卡本身不可被改（un 占位卡如隙间）。
-function applyCostMod(card, d, srcCard, tag) {
+// `silent` = 只改值 + 记账、不排演出——供牌库这类看不见卡位的位置做一次性批量改费（`swapDeck` 会改整副牌库，逐张弹中央卡面会拖垮节奏）。
+function applyCostMod(card, d, srcCard, tag, silent) {
   if (!card || !d || (card.def && card.def.un)) return false;
   card.costMod = (card.costMod || 0) + d;
   addCostLog(card, d, srcCard, tag);
-  costFlashQueue.push({ card, d, srcCard: srcCard || null });
+  if (!silent) costFlashQueue.push({ card, d, srcCard: srcCard || null });
   return true;
 }
 // 费用修正演出：中央弹出**被改费那张牌的完整卡面**（配图 / 卡名 / 费用 N → N+1 的横幅，spawnCostReveal）；
@@ -385,6 +386,57 @@ function playShuffleInFx(side, n, cardName, srcName) {
   const sub = document.createElement('span');
   sub.className = 'ep-sub';
   sub.textContent = `${srcName ? srcName + ' · ' : ''}${cardName} → ${side === 'p' ? '你的牌库' : '对手的牌库'}`;
+  pop.appendChild(sub);
+  document.body.appendChild(pop);
+  setTimeout(() => { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1700);
+}
+
+/** 牌库费用战力互换（`swapDeck`／稀神探女）的轻量演出：牌库计数闪光 + 星光迸发 + 「⇄ 交换 ×N」气泡。
+    锚点与跳过条件同 playShuffleInFx（玩家侧＝手牌区「牌库 N」，对手侧＝侧栏「牌库 N 张」；取不到锚点或尺寸为 0 时静默跳过、只留日志）。 */
+function playDeckSwapFx(side, n) {
+  const anchor = side === 'p' ? $('deckCountVal') : document.querySelector('#sidePanel .opponent .mini-stats');
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const box = document.createElement('div');
+  box.className = 'deck-shuffle-flash';
+  box.style.cssText =
+    `position:fixed;left:${rect.left - 5}px;top:${rect.top - 4}px;` +
+    `width:${rect.width + 10}px;height:${rect.height + 8}px;border-radius:999px;` +
+    `z-index:9400;pointer-events:none;`;
+  document.body.appendChild(box);
+  setTimeout(() => { if (box.parentNode) box.parentNode.removeChild(box); }, 1500);
+  // 星光迸发（复用 .energy-star 的飞行关键帧）：掺入 ⇄ / 🔋 / ⚔️ 呼应“能量 ⇄ 战力”
+  const stars = ['⇄', '🔋', '⚔️', '✨'];
+  const count = Math.max(6, Math.min(12, 5 + n * 2));
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('span');
+    p.className = 'energy-star deck-star';
+    p.textContent = stars[i % stars.length];
+    const ang = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+    const dist = 30 + Math.random() * 48;
+    p.style.left = cx + 'px';
+    p.style.top = cy + 'px';
+    p.style.fontSize = (13 + Math.random() * 10).toFixed(1) + 'px';
+    p.style.setProperty('--edx', `${(Math.cos(ang) * dist).toFixed(1)}px`);
+    p.style.setProperty('--edy', `${(Math.sin(ang) * dist - 14).toFixed(1)}px`);
+    p.style.animationDelay = (Math.random() * 0.12).toFixed(2) + 's';
+    document.body.appendChild(p);
+    setTimeout(() => { if (p.parentNode) p.parentNode.removeChild(p); }, 1400);
+  }
+  const pop = document.createElement('div');
+  pop.className = 'energy-pop deck-pop';
+  pop.style.left = cx + 'px';
+  pop.style.top = cy + 'px';
+  const main = document.createElement('span');
+  main.className = 'ep-main';
+  main.textContent = `⇄ 交换 ×${n}`;
+  pop.appendChild(main);
+  const sub = document.createElement('span');
+  sub.className = 'ep-sub';
+  sub.textContent = `稀神探女 → ${side === 'p' ? '你的牌库' : '对手的牌库'}：能量消耗 ⇄ 战力`;
   pop.appendChild(sub);
   document.body.appendChild(pop);
   setTimeout(() => { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1700);
@@ -2257,14 +2309,14 @@ async function revealRound(gen) {
       : `「${card.def.n}」翻牌 — 威力 ${cardPowerIn(mv.loc, card)}`);
     let willChange = false;
     if (card.def.k) {
-      // 失去卡牌文字（封印 ∪ 静海）：被抹除的牌文本视为不存在 ⇒ 揭示不发动；四个走分步演出的键也在这里拦下（那里会绕过 applyEffect 守卫）
+      // 失去卡牌文字（封印 ∪ 静海）：被抹除的牌文本视为不存在 ⇒ 揭示不发动；五个走分步演出的键也在这里拦下（那里会绕过 applyEffect 守卫）
       if (cardMuted(card)) {
         muteSkipLog(card, '揭示效果');
       } else {
         // 只有效果“真的会造成变化”时才停顿展示（缩放动画同时播放，避免同帧重建吞掉入场）
         willChange = revealEffectWillChange(mv.side, mv.loc, card);
         if (willChange) await sleep(400);
-        // 揭示分派统一收口 resolveRevealInZone()：先按 resolveCardReveal 结算该键（四个分步演出键走各自的异步分步版），
+        // 揭示分派统一收口 resolveRevealInZone()：先按 resolveCardReveal 结算该键（五个分步演出键走各自的异步分步版），
         // 再按本列 repeatReveal 决定**是否再来一次**；早苗 retrigger 再触发的揭示也走同一条收口，故同样会被本区加倍。
         await resolveRevealInZone(mv.side, mv.loc, card, repeatRevealHere);
         if (willChange) renderZones(); // 效果确有变化才重建（白板/未触发时保留入场元素直到动画播完）
@@ -2295,7 +2347,7 @@ function revealEffectWillChange(side, locIdx, card) {
   const mine = st.players[side].zones[locIdx];
   const theirs = st.players[other].zones[locIdx];
   const def = card.def;
-  // 法术不算“可被指向的目标”——dw/dwh 的最弱、mv 的最弱、gift 的己方最低都跳过它
+  // 法术不算“可被指向的目标”——dw/dwh/dwh2 的最弱/最强、mv 的最弱、gift 的己方最低都跳过它
   const vis = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
   // 法术没有战力——「落后自增」（bl）与「对方同区落牌自增」（oc）对它没有意义，不产生变化
   if (def.spell && (def.k === 'bl' || def.k === 'oc')) return false;
@@ -2308,6 +2360,22 @@ function revealEffectWillChange(side, locIdx, card) {
     case 'de': return vis.length > 0 && !locNoDown(locIdx); // 本区「免减攻」→ 不产生变化，跳过结算前停顿
     case 'ba': return true;
     case 'bl': return zoneEff(side, locIdx) < zoneEff(other, locIdx);
+    // 自身战力翻倍：本体战力（印刷 + 永久增益，法术恒 0）≠ 0 才会真的变化，否则不空等结算前的 400ms
+    case 'x2': return cardPower(card) !== 0;
+    case 'reset': {
+      // 战力归位：本区**双方已翻开**的卡里，只要有一张的实时战力 ≠ 印刷战力就真会变化（暗牌不算、法术与 `un` 排除）；
+      // ⚠️ 在带 `noDown`（蓬莱药局）的区域里“往下修”的差额会被收口拦下（战力不变）⇒ 该张不算变化，只有需往上补的照常结算
+      return mine.concat(theirs).some((c) => {
+        if (c.def.un || c.def.spell || !c.revealed) return false;
+        const d = c.def.p - cardPower(c);
+        return d !== 0 && !(d < 0 && cardNoDown(c));
+      });
+    }
+    // 摧毁本区己方随机一张（绵月丰姬）：本区免摧毁 ⇒ 整条失效；候选里只要有“摧毁判定选得中的”（已翻开、
+    // 排除自己 / 法术 / un 占位卡 / ind 卡）就一定会产生变化（surv/phx 虽算摧毁失败，但降战力 / 回手**也是**变化）
+    // ⇒ 照常走结算前的 400ms 停顿与结算后重渲染
+    case 'delCopy': return !locNoDestroy(locIdx)
+      && mine.some((c) => c !== card && c.revealed && !c.def.un && !c.def.spell && isDestroyable(c));
     case 'dw':
     case 'dwh': {
       // ind 卡照常参与判定，只是判定落在它身上时摧毁失败、判定结束——故这里要复刻“谁会被判定选中”：dw 取最弱（并列取先遇到的，与实际结算同序），dwh 取最强（并列随机）
@@ -2323,6 +2391,15 @@ function revealEffectWillChange(side, locIdx, card) {
       let maxP = -Infinity;
       for (const c of vis) maxP = Math.max(maxP, cardPowerIn(locIdx, c));
       return vis.filter((c) => cardPowerIn(locIdx, c) === maxP).some(isDestroyable);
+    }
+    case 'dwh2': {
+      // 摧毁本区对方战力最高的**两张**：候选里凡是“可能被选中”的那两档（最高一档 ≥2 张时只看该档；只 1 张时看最高档 ＋ 次高档）
+      // 只要有可摧毁的牌就真会变化（ind 卡不算变化、phx/surv 虽算摧毁失败但降战力 / 回手**也是**变化）
+      if (vis.length === 0 || locNoDestroy(locIdx)) return false;
+      const ranks = [...new Set(vis.map((c) => cardPowerIn(locIdx, c)))].sort((a, b) => b - a);
+      const top = vis.filter((c) => cardPowerIn(locIdx, c) === ranks[0]);
+      const pool = top.length >= 2 ? top : (ranks.length > 1 ? top.concat(vis.filter((c) => cardPowerIn(locIdx, c) === ranks[1])) : top);
+      return pool.some(isDestroyable);
     }
     case 'dwb': {
       // 摧毁本区**双方**最弱随机一张：本区存在可摧毁的已翻开卡、且本区没有免摧毁时才真会变化；ind 卡照常参与“最低”判定与并列抽取，故并列池里还有非 ind 卡时才可预测
@@ -2495,6 +2572,9 @@ function revealEffectWillChange(side, locIdx, card) {
     case 'energyNext':
       // 总是真的会造成变化（下回合能量 +N；末回合时仍按“会触发”处理并记日志）
       return true;
+    case 'swapDeck':
+      // 牌库还有牌才会真的造成变化（空牌库 → 跳过结算前的 400ms 停顿，不空等）
+      return st.players[side].deck.length > 0;
     case 'shift': {
       const roomR = sideRoom(side, 2);
       if (roomR < 1) return false;
@@ -2778,7 +2858,7 @@ function cardNoDown(card) {
       静海被换掉或卡被移出本区（`mv`/`fly`/`shift`/`roam`/`gust`）即自动恢复，无需收尾代码；
    ② 卡级抹除（卡牌效果键 `mute`，游戏内叫**「封印」**）——**永久**：标记落在**卡实例**上（`card.muteP`，同 `card.buff` 的永久口径），
       整局有效——被摧毁后再复活、`phx` 回手再打出、换边、`morph` 变身、`shuffleIn` 洗回牌库全都保持，离开静海也**不**恢复。
-   被抹除：`k`（含四个分步演出键）、`og`（只看源卡）、`fx`（错过的时机不补）、`surv`/`phx`/`prot`/`ind`、`fly`；法术揭示不发动但**照常消散**。
+   被抹除：`k`（含五个分步演出键）、`og`（只看源卡）、`fx`（错过的时机不补）、`surv`/`phx`/`prot`/`ind`、`fly`；法术揭示不发动但**照常消散**。
    不受影响：手牌 / 牌库 / 三池里的**同名**卡（封印除外，它认实例）、`costDown`/`gs`/`playReq`、印刷费用与威力、`occ` 占格与 `tk` 标记、
    区域类效果（`aff`/`cb`/`all`/`fill`/`inv`/`purge`/`gust`/`noDown`/`prot` 等）、摧毁候选与筛选口径（它只是“哑巴”，不是 `un`）。
    ⚠️ 不追溯：已结算的 `buff` / `powerLog` 不回滚，错过的时机效果不补结算；每张牌**首次**被拦截记一条日志（`card.muteNoted`）。
@@ -2847,7 +2927,7 @@ function muteNoteHTML(card, locIdx) {
    每张牌**首次**被拦截记一条日志（`card.nrNoted` 防刷屏）。
    守卫点（读下面两个判定、无一处写状态）：① `applyEffect` 入口的**揭示分支**（`spec` 缺省；覆盖 `morph` 重触发 / 落场法术
    `settleFieldSpell` / `spawn.reveal` / 复活 / 同步版 `retrigger`；`fx` 时机效果走 `spec`、**不**受影响）；
-   ② `resolveRevealInZone`（翻牌主路径 + 守矢神社重复的第 2 次 + `retriggerOneStaged` 的每一条揭示，四个分步演出键也走这里；
+   ② `resolveRevealInZone`（翻牌主路径 + 守矢神社重复的第 2 次 + `retriggerOneStaged` 的每一条揭示，五个分步演出键也走这里；
    它内部的重复分支另有一道**实时**判定：卡被自己的揭示挪进法界后，那第 2 次重复同样不发动）；
    ③ `revealEffectWillChange`（被封锁 → 返回 false，不空等结算前的 400ms 停顿）；④ 显示层（放大视图提示条，见 `revealBlockNoteHTML`）。 */
 function locNoReveal(locIdx) {
@@ -3334,8 +3414,29 @@ async function applyRetriggerReveal(side, card) {
   }
 }
 
+/** 绵月丰姬「摧毁己方一张 → 复制体落另外两区」的**分步演出版**（翻牌流程 / 早苗再触发的每一条走这里）：
+    摧毁与落场由 `delCopyCore` 一次做完（同步），随后停 `SHATTER_CARD_MS` 让「分崩离析」播完，再逐张结算复制体的
+    揭示——每张走 `resolveRevealInZone`（⇒ 目标区是「守矢神社」时照常结算两次，且被复制的是 `shift`/`gather`/
+    `reviveDiscard`/`retrigger` 时保留它们自己的分步间隔）。中途重新开局（`state.gen` 变化）即中断。 */
+async function applyDelCopyReveal(side, card) {
+  const gen = state.gen;
+  const locIdx = fieldLocOf(card);
+  if (locIdx < 0) return;
+  const copies = delCopyCore(side, locIdx, card);
+  if (!copies.length) return;
+  renderZones(); // 先让复制体显形、被摧毁的那张消失
+  await sleep(SHATTER_CARD_MS);
+  if (gen !== state.gen) return;
+  for (const x of copies) {
+    if (gen !== state.gen) return;
+    if (!x.card.def.k) continue; // 白板复制体没有揭示可结算（口径同 applyReviveDiscardReveal 跳过无 k 的牌）
+    await resolveRevealInZone(side, x.loc, x.card); // 复制体自身的揭示（守矢神社里结算两次）
+    renderZones();
+  }
+}
+
 /* ==================== 翻牌流程内的「揭示分派」收口（`resolveCardReveal`）====================
-   **为什么需要它**：`shift` / `gather` / `reviveDiscard` / `retrigger` 在**翻牌流程**里走异步分步演出（各带自己的
+   **为什么需要它**：`shift` / `gather` / `reviveDiscard` / `retrigger` / `delCopy` 在**翻牌流程**里走异步分步演出（各带自己的
    间隔），而 `applyEffect` 里的同名分支是**同步版**（供 morph / fx 时机效果 / 落场生成等**无法 await** 的路径复用）；
    任何“在翻牌流程里再次执行某张牌揭示”的新机制都必须走本函数，否则会静默退化成同步版、把间隔全部吞掉。
    调用方（全在可 await 的翻牌流程内）：`revealRound`（暗牌翻面后的首次揭示）、`resolveRevealInZone`（本区一次
@@ -3347,6 +3448,7 @@ async function resolveCardReveal(side, locIdx, card) {
   if (k === 'gather') { await applyGatherReveal(side, card); return; } // 三妖精集结：逐区 0.5s
   if (k === 'reviveDiscard') { await applyReviveDiscardReveal(side, card); return; } // 四季映姬：逐张 500ms
   if (k === 'retrigger') { await applyRetriggerReveal(side, card); return; } // 东风谷早苗：逐张 0.5s
+  if (k === 'delCopy') { await applyDelCopyReveal(side, card); return; } // 绵月丰姬：摧毁己方一张 → 复制体落另两区
   applyEffect(side, locIdx, card);
 }
 
@@ -3365,6 +3467,79 @@ function spawnSOwnSide(side, locIdx, card, fx) {
   }
   const placedS = cntS > 0 ? placeToken(side, locIdx, tkS, cntS) : 0;
   return { cnt: cntS, placed: placedS, name: tkS.n, fill: !!spcS.fill };
+}
+
+/* ==================== 绵月丰姬「摧毁己方一张 → 复制体落另外两区」（`delCopy` 效果键）====================
+   一句话口径：**先用“摧毁”摧毁本区域自己一侧随机一张已翻开的卡**（候选＝不含自己 / 法术 / `un` 占位卡，含落场 token）；
+   **只有在它真的被摧毁离场时**，才把它的**复制体**分别落到另外两个区域自己一侧各 1 张（该侧放满 / 区域未开放 /
+   占格数不够则跳过该区）。返回落下的复制体清单 `[{ card, loc }]`，由调用方按同步版或分步版结算它们的揭示。
+   ① 摧毁走完整摧毁管线（口径同 `dwb`）：本区免摧毁 `locNoDestroy`（睡鼠神祠 / 蕾蒂）⇒ 整条失效；
+      目标带 `ind`（判定失败、判定结束）、`phx`（回手 +N）或 `surv`（不离场、改降战力）都算**摧毁失败 ⇒ 不生成复制体**；
+      真被摧毁才 `recordDestroy` 进摧毁池，并因此喂纯狐 `costDown` 计数。
+   ② 复制体＝被摧毁那张牌的**完整副本**：同 `def`（卡面效果照抄，含 `og`/`fx`/`surv`/`phx`/`ind`/`occ` 等卡级机制）
+      ＋ 实例级状态照抄（永久战力修正 `buff` 与台账 `powerLog`、卡级封印 `muteP`、费用修正 `costMod`）
+      ⇒ 与 `clone`（赫卡提亚的分身：白板 token、只快照战力）刻意不同；落地即翻开、占格位、进放置队列、播「凝聚显形」。
+   ③ 复制体的揭示：翻牌路径由 `applyDelCopyReveal` 走 `resolveRevealInZone` ⇒ 目标区是「守矢神社」时照常结算两次；
+      但它不经 `revealRound` ⇒ 不参与区域「翻开时」博彩 `gamble`、也不被「揭示后吹飞」`gust` 吹走（口径同 `reviveDiscard` / 落场生成）。
+   ④ 复制体此后就是一张普通的“自己一侧、已翻开”的卡：照吃 `og`/`tkBuff`/区域加成、计入大鲶鱼 `playReq` 的石块计数等。 */
+function delCopyCore(side, locIdx, card) {
+  const st = state;
+  const def = card.def;
+  const zone = st.players[side].zones[locIdx];
+  if (locNoDestroy(locIdx)) {
+    log(side, `✦ ${def.n} 想摧毁本区域你的一张卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等）→ 摧毁失败，不生成复制体。`);
+    return [];
+  }
+  // 候选＝本区域自己一侧、已翻开，排除自己 / 法术 / un 占位卡（含落场 token）
+  const cands = zone.filter((c) => c !== card && c.revealed && !c.def.un && !c.def.spell);
+  if (!cands.length) {
+    log(side, `✦ ${def.n} 想摧毁本区域你的一张卡牌，但本区没有可摧毁的其他己方已翻开卡牌（不含自己、法术与暗牌），无事发生。`);
+    return [];
+  }
+  const target = cands[Math.floor(Math.random() * cands.length)];
+  const tp = cardPowerIn(locIdx, target);
+  // ind / phx / surv：都算「摧毁失败」⇒ 不生成复制体（各自机制照常结算）
+  if (indestructibleBlock(target, def.n)) return [];
+  if (phoenixRevive(target, locIdx)) {
+    log(side, `✦ ${def.n}：己方「${target.def.n}」凤凰重生回手（摧毁失败），不生成复制体。`);
+    return [];
+  }
+  if (surviveDestroy(target)) {
+    log(side, `✦ ${def.n}：己方「${target.def.n}」触发防摧毁、未被摧毁（摧毁失败），不生成复制体。`);
+    return [];
+  }
+  recordDestroy(target, locIdx, def.n); // 真正离场 → 进归属方摧毁池（⚠️ 须在移出区域之前记）
+  playShatter(target);
+  zone.splice(zone.indexOf(target), 1);
+  dequeueField(target);
+  log('danger', `✦ ${def.n} 摧毁了己方「${target.def.n}」（威力 ${tp}${cands.length > 1 ? `；本区己方共 ${cands.length} 张候选，随机选中这一张` : ''}）→ 将把它的复制体送到另外两个区域`);
+  // 复制体：另外两个区域自己一侧各 1 张（放不下 / 未开放 / 占格不够则跳过该区，不补到别区）
+  const copies = [];
+  const skipped = [];
+  for (let j = 0; j < 3; j++) {
+    if (j === locIdx) continue;
+    if (!locOpen(j)) { skipped.push(`第 ${j + 1} 区「${locDef(j).n}」（区域未开放）`); continue; }
+    if (sideRoom(side, j) < occOf(target)) { skipped.push(`第 ${j + 1} 区「${locDef(j).n}」（该侧放不下）`); continue; }
+    const c2 = newCard(target.def); // 卡面效果照抄（def 是浅拷贝，不与原牌共享改写的风险）
+    c2.side = side;
+    c2.revealed = true;
+    c2.justSpawned = true; // 落场生成演出（凝聚显形）
+    c2.buff = target.buff; // 永久战力修正
+    c2.powerLog = target.powerLog.map((r) => ({ ...r })); // 台账明细照抄 ⇒「战力影响历史」合计仍＝当前威力
+    if (target.muteP) c2.muteP = true; // 封印是卡级的：复制体同样没有卡牌文字
+    if (target.costMod) c2.costMod = target.costMod; // 实例级费用修正
+    st.players[side].zones[j].push(c2);
+    enqueueField(c2); // 记 fieldTurn＝本回合 ⇒ 它的「回合开始」时机效果当回合不结算（口径同落场 token / 复活）
+    copies.push({ card: c2, loc: j });
+  }
+  if (copies.length) {
+    log(side, `✦ ${def.n}：${copies.map((x) => `「${locDef(x.loc).n}」`).join('、')} 自己一侧各添加 1 张「${target.def.n}」的复制体`
+      + `（保留卡面效果与永久战力修正，现 ${copies.map((x) => cardPowerIn(x.loc, x.card)).join(' / ')}）`
+      + (skipped.length ? `；跳过：${skipped.join('、')}` : ''));
+  } else {
+    log(side, `✦ ${def.n}：另外两个区域都放不下或未开放，未能生成「${target.def.n}」的复制体（${skipped.join('、')}）。`);
+  }
+  return copies;
 }
 
 function applyEffect(side, locIdx, card, spec) {
@@ -3437,12 +3612,47 @@ function applyEffect(side, locIdx, card, spec) {
       log(side, `✦ ${txt}`);
       break;
     }
+    case 'reset': {
+      // 战力归位（现仅 2 费「少名针妙丸」）：把本区**双方已翻开**的卡（排除 `un` 占位卡与法术，含落场 token）的战力
+      // 恢复至**印刷战力** `def.p`——差额 `def.p − cardPower` 作为一次永久修正走 `applyPermBuff` 收口（该牌的永久修正
+      // 被补正回 0、`powerLog` 台账记本卡、播 ±N 演出）。区域加成（`aff`/`cb`/`all`）与持续 `og` 是实时计算、不属永久
+      // 修正 ⇒ 不受影响、归位后照常叠在印刷战力之上。只作用于结算那刻已翻开的卡（暗牌错过本次，口径同 bf/de/ba）。
+      // ⚠️ 「免减攻」区域（`noDown` 蓬莱药局）里“往下修”的差额被 `applyPermBuff` 拦下（战力不变、不写台账）。
+      let nR = 0, blockedR = 0;
+      const hitR = [];
+      for (const c of mine.concat(theirs)) {
+        if (c.def.un || c.def.spell || !c.revealed) continue;
+        const dR = c.def.p - cardPower(c);
+        if (!dR) continue; // 已在印刷战力上（含反复触发时第二次结算）⇒ 不产生变化、不写台账
+        if (applyPermBuff(c, dR, card, '战力归位') === false) { blockedR++; continue; }
+        nR++;
+        hitR.push(`${c.def.n}(${cardPowerIn(locIdx, c)})`);
+      }
+      const partsR = [];
+      if (nR) partsR.push(`影响 ${nR} 张：${hitR.join('、')}`);
+      if (blockedR) partsR.push(`${blockedR} 张因本区「免减攻」被拦下（战力不变）`);
+      log(side, `✦ ${txt}${partsR.length ? `（${partsR.join('；')}）` : '（本区双方都没有需要归位的卡牌）'}`);
+      break;
+    }
     case 'bl': {
       if (isSpell(card)) { log(side, `✦ 「${card.def.n}」是法术（没有战力），「落后自增」不生效。`); break; } // 法术无战力 ⇒ 不生效
       const myT = zoneEff(side, locIdx);
       const opT = zoneEff(other, locIdx);
       if (myT < opT) { applyPermBuff(card, fx.a, card); log(side, `✦ 落后触发：${def.n} 威力 +${fx.a}（现 ${cardPowerIn(locIdx, card)}）`); }
       else log(side, `✦ ${def.n} 未落后，效果不触发。`);
+      break;
+    }
+    case 'x2': {
+      // 揭示：此牌**自身**战力翻倍（现仅 5 费「绵月依姬」）——增量＝结算那一刻的**本体战力** `cardPower`
+      // （印刷威力 + 永久增益），**不含**区域加成（aff/cb/all）与持续光环 `og` ⇒ 翻倍结果照常叠加后者；
+      // 走 `applyPermBuff` 收口（±N 演出 + 战力影响历史按来源记本卡）。
+      // ⚠️ 按字面严格翻倍：本体战力 0 → 不产生变化（不写台账）、负 → 更负（在「免减攻」区会被拦下）；法术无战力 ⇒ 不生效。
+      if (isSpell(card)) { log(side, `✦ 「${card.def.n}」是法术（没有战力），「战力翻倍」不生效。`); break; }
+      const before = cardPower(card);
+      if (!before) { log(side, `✦ ${txt}：此牌本体战力为 0，翻倍后仍是 0（本次无变化）。`); break; }
+      // 负增量在「免减攻」区域会被 applyPermBuff 拦下 —— 它自己已记一条日志，这里不再重复记
+      if (applyPermBuff(card, before, card) === false) break;
+      log(side, `✦ ${txt}：本体战力 ${before} → ${cardPower(card)}（永久 ${before > 0 ? '+' : '−'}${Math.abs(before)}）`);
       break;
     }
     case 'dw': {
@@ -3660,6 +3870,15 @@ function applyEffect(side, locIdx, card, spec) {
           ? `✦ ${def.n}：向另外两个区域自己一侧各添加 ${cnt} 张「${tk.n}」（分身快照战力=${snap}${added < cnt * zones ? '，部分区域放不下' : ''}）`
           : `✦ ${def.n} 想生成「${tk.n}」，但另外两个区域自己一侧都放不下或未开放。`);
       }
+      break;
+    }
+    case 'delCopy': {
+      // 同步版（供 morph / fx 时机效果 / 落场生成 / 同步 retrigger 等无法 await 的路径复用；翻牌流程走分步版
+      // `applyDelCopyReveal`）：摧毁 → 落复制体 → 就地同步结算各自揭示。⚠️ 同步路径不做「守矢神社」的第二次揭示
+      // （那是 `resolveRevealInZone` 的口径），与其它「同步版 / 分步版」键一致。
+      const made = delCopyCore(side, locIdx, card);
+      for (const x of made) if (x.card.def.k) applyEffect(side, x.loc, x.card);
+      if (made.length) renderZones();
       break;
     }
     case 'gather': {
@@ -4086,6 +4305,42 @@ function applyEffect(side, locIdx, card, spec) {
       log('danger', `✦ ${def.n} 摧毁了对方「${target.def.n}」（威力 ${maxP}${maxPool.length > 1 ? `；并列最高共 ${maxPool.length} 张，随机选中这一张` : ''}）`);
       break;
     }
+    case 'dwh2': {
+      // 极限火花（法术）：摧毁本区对方**战力最高的两张**（dwh 的“两张”版）。目标**先按实时战力定死**、不因防护改选或补位：
+      // ① 候选同 dw/dwh（已翻开、排除 un 占位卡与法术 ⇒ 暗牌不算）；② 最高那一档有 ≥2 张 ⇒ 在档内随机挑 2 张
+      //（恰好 2 张＝两张都删；3 张及以上＝随机删 2 张）；最高那一档只有 1 张 ⇒ 删它 ＋ **次高一档**里随机 1 张；
+      // ③ 候选只有 1 张就只删这 1 张、一张都没有则跳过；④ 本区免摧毁（locNoDestroy）⇒ 整条失效；
+      // ⑤ 选定后**逐张**走完整摧毁链 ind → phx → surv → recordDestroy：某张被 ind 拦下只让**那一张**摧毁失败
+      //（另一张照常），不因此改选、也不顺位补第 3 名。
+      if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
+      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      const vis2 = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
+      if (vis2.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区没有可摧毁的已翻开卡牌（暗牌与法术不算）。`); break; }
+      const ranks2 = [...new Set(vis2.map((c) => cardPowerIn(locIdx, c)))].sort((a, b) => b - a);
+      const rankPool = (p) => vis2.filter((c) => cardPowerIn(locIdx, c) === p);
+      const topPool2 = rankPool(ranks2[0]);
+      const picks = topPool2.length >= 2
+        ? shuffle(topPool2).slice(0, 2) // 最高一档 ≥2 张：档内随机两张（并列最高全在其中）
+        : (ranks2.length > 1 ? topPool2.concat(shuffle(rankPool(ranks2[1]))[0]) : topPool2.slice()); // 最高只 1 张：连次高一档随机一张
+      const note = topPool2.length >= 2
+        ? `（并列最高共 ${topPool2.length} 张，随机选中其中 ${picks.length} 张）`
+        : (picks.length > 1 ? '（最高的一档只有 1 张，故连同次高一档的一张一起摧毁）' : '');
+      const gone = [];
+      for (const c of picks) {
+        const p = cardPowerIn(locIdx, c);
+        if (indestructibleBlock(c, def.n)) continue; // ind：这一张打不死，另一张照常（不顺位补第 3 名）
+        if (phoenixRevive(c, locIdx)) continue; // 凤凰重生：回手 +N 战力
+        if (surviveDestroy(c)) continue; // 防摧毁：替代为降战力、卡不离场
+        recordDestroy(c, locIdx, def.n);
+        playShatter(c);
+        theirs.splice(theirs.indexOf(c), 1);
+        dequeueField(c);
+        gone.push(`「${c.def.n}」（威力 ${p}）`);
+      }
+      if (gone.length) log('danger', `✦ ${def.n} 摧毁了对方 ${gone.join('、')}${note}`);
+      else log(side, `✦ ${def.n} 想摧毁对方战力最高的两张，但都被防护/替代机制拦下了。`);
+      break;
+    }
     case 'oc': {
       if (isSpell(card)) { log(side, `✦ 「${card.def.n}」是法术（没有战力），「落牌自增」不生效。`); break; }
 
@@ -4132,6 +4387,26 @@ function applyEffect(side, locIdx, card, spec) {
       applyCostMod(pick, up, card);
       const after = cardCost(pick);
       log('danger', `✦ ${txt}：对方手牌里的「${pick.def.n}」能量消耗 ${before} → ${after}（公开：这张牌现在需要 ${after} 点能量，仅本场战斗有效）。`);
+      break;
+    }
+    case 'swapDeck': {
+      // 揭示（稀神探女）：把施放方牌库**剩下的牌**（结算当刻快照）的「实际费用」与「实时战力」互换——读**当前生效值**
+      // （`cardCost` ↔ `cardPower`，含已获得的加费/减费与永久 buff），写成**实例级修正**（`costMod` / `buff`）⇒ 印刷值 `def.c`/`def.p` 不动。
+      // 新费用 = clamp(当前战力, 0, 6)（上限 6 同 `costUp`）、新战力 = 当前费用（**不设上限**：8 费的纯狐会换出 8 战力）。
+      // 实例：纯狐 8/16 → 6/8、哆来咪 7/8 → 6/7、依神紫苑 5/−7 → 0/5、冰块 1/0 → 0/1、0 费卡照常换。
+      // 法术照常参与但战力恒 0（只换到 0 费）；再触发（早苗 retrigger / 守矢神社 repeatReveal）以当前值再换一次 ⇒ 夹取过的值换不回来（有损不可逆）；
+      // 纯狐的 `costDown` 交换后仍继续叠加。完整口径见 `docs/现有机制.md`「牌库费用战力互换（`swapDeck`）」段。
+      const snap = st.players[side].deck.slice(); // 快照：本局此后才洗入牌库的牌不参与
+      for (const c of snap) {
+        const oldCost = cardCost(c);
+        const oldPow = cardPower(c);
+        const newCost = Math.max(0, Math.min(6, oldPow));
+        const newPow = Math.max(0, oldCost); // ⚠️ 战力侧**不夹上限**（费用才夹 6）：8 费卡换出 8 战力
+        if (newCost !== oldCost) applyCostMod(c, newCost - oldCost, card, null, true); // silent：牌库不做逐张改费演出
+        if (newPow !== oldPow) applyPermBuff(c, newPow - oldPow, card); // 法术自动跳过（战力恒 0）
+      }
+      log(side, `⇄ ${txt}：${side === 'p' ? '你' : '对手'}牌库里剩下的 ${snap.length} 张牌的能量消耗与战力互换（本场战斗有效；不列牌名）。`);
+      playDeckSwapFx(side, snap.length);
       break;
     }
     case 'energyNext': {
@@ -4335,7 +4610,7 @@ function locGapEffects() {
       地形）；早苗再触发的每一条揭示按该牌**当前所在区域**实时读（此刻没有“翻开那一刻”）。
    ③ 候选＝“在本区域被翻开”的牌（口径同 gamble/gust）：落场 token、已翻开后被移入本区的卡都不算，地形出现前就
       在本区的旧卡不追溯；白板（键 k 为空串）无揭示可重复。
-   ④ 重复＝对同一张牌再走一次 `resolveCardReveal`（不是直接 `applyEffect`）：所有揭示键照常重跑、四个「分步演出」
+   ④ 重复＝对同一张牌再走一次 `resolveCardReveal`（不是直接 `applyEffect`）：所有揭示键照常重跑、五个「分步演出」
       键保留各自间隔，但**不触发** `og`/`surv`/`phx`/`prot`/`ind`/`fly` 与 `fx`；按该牌**当前所在区域**结算，已不在
       场上则只记日志并跳过；重复点在 `gust` **之前**；含法术 —— 调用点排在 `vanishSpell` 之前、仍占那 1 个格位。
    ⑤ 节奏：重复前停 400ms，重复结算完 `renderZones()`；停顿后校验 `state.gen`（重新开局即放弃本次重复）。
@@ -4351,7 +4626,7 @@ async function resolveRevealInZone(side, locIdx, card, forceRepeat) {
   const locName = locDef(locIdx).n;
   const doRepeat = (forceRepeat === undefined) ? !!locDef(locIdx).repeatReveal : !!forceRepeat;
   // 区域「封锁揭示」（法界）：本次揭示（连它的重复）都不发动。守卫放在这个**收口**上 ⇒ 翻牌主路径、守矢神社的第 2 次、
-  // 早苗 `retriggerOneStaged` 再触发的每一条揭示、四个分步演出键（`resolveCardReveal` 之前）全部覆盖；实时判定，离开法界即放行。
+  // 早苗 `retriggerOneStaged` 再触发的每一条揭示、五个分步演出键（`resolveCardReveal` 之前）全部覆盖；实时判定，离开法界即放行。
   if (revealBlocked(card)) { revealSkipLog(card); return; }
   await resolveCardReveal(side, locIdx, card);
   if (!doRepeat) return;
