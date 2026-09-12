@@ -71,6 +71,7 @@ window.DS_LOCATIONS = {
     { id: 'yukarihouse', n: '八云紫的家', icon: '🌌', wt: 1, dbl: 1, max: 4, gap: 1, eff: '回合结束时：双方各从后往前添加 1 张「隙间」' },
     { id: 'houraipharmacy', n: '蓬莱药局', icon: '💊', wt: 1, dbl: 1, max: 4, noDown: true, eff: '此区域双方所有卡牌都不会被减攻' },
     { id: 'calmsea', n: '静海', icon: '🌊', wt: 1, dbl: 1, max: 4, mute: true, eff: '此区域双方所有卡牌失去卡牌文字' },
+    { id: 'dharma', n: '法界', icon: '🌑', wt: 1, dbl: 1, max: 4, noReveal: true, eff: '此区域双方所有卡牌无法触发揭示效果' },
     { id: 'falsemoon', n: '虚假之月', icon: '🌕', wt: 1, dbl: 1, max: 4, pick: 1, extraRound: 1, eff: '此地形在场时：本局共有第 7 回合' },
     // pick 0.28（与辉针城同款稀有度）：避免“一局只剩一个可用区”这种剧变机制太常见。
     { id: 'heaven', n: '天界', icon: '☁️', wt: 1, dbl: 1, max: 4, pick: 0.28, shatter: true, eff: '出现时：摧毁另外两块地形，此后只剩本区域可用' },

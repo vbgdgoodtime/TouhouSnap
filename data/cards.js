@@ -115,6 +115,13 @@ window.DS_CARDS = {
         discard: { to: 'own', pick: 'random', n: 1, give: { card: 'stone', powerFromCost: true } },
         t: '揭示：随机丢弃你手牌中的 1 张卡，并将 1 张战力等于该卡能量消耗的「石块」加入你的手牌',
       },
+      // 「封印」＝卡级**永久**抹除文本（标记落在卡实例 `card.muteP` 上，整局有效：摧毁/复活、回手再打出、换边、变身、洗回牌库都保持）。
+      // 子句 `mute` 现只有 side / pick / n 三项（缺省 side:'opp' / pick:'lowest' / n:1），目标只从**场上本区**取。
+      {
+        n: '阴阳玉', p: 0, c: 2, k: 'mute', a: 0, spell: true, i: '☯️', img: 'yinyang.png',
+        mute: { side: 'opp', pick: 'lowest' },
+        t: '揭示：封印此区域敌方战力最低的卡牌',
+      },
     ],
     3: [
       { n: '中妖精',     p: 4, c: 3, k: '',       a: 0, i: '💫', t: '' },
@@ -175,6 +182,21 @@ window.DS_CARDS = {
         n: '小野塚小町', p: 5, c: 3, k: 'discard', a: 0, i: '⚰️', img: 'komachi.png',
         discard: { to: 'own', pick: 'maxCost', n: 1 },
         t: '揭示：丢弃你手牌中能量消耗最高的一张牌',
+      },
+      // `has:'ongoing'` 只筛**卡面带「持续」标记**的卡（`og` / 卡级 `prot` / 卡级 `ind`），`n:'all'` 一次封完、不逐张停顿；
+      // `side:'both'` ⇒ 会把己方自己的持续牌一起封（与「妖精大战争」的「双方场上」同款反噬）。
+      {
+        n: '生神停止', p: 0, c: 3, k: 'mute', a: 0, spell: true, i: '⏳',
+        mute: { side: 'both', n: 'all', has: 'ongoing' },
+        t: '揭示：封印此区域所有包含持续效果的卡牌',
+      },
+      // 变出「法界」⇒ 此后本区双方的揭示一律不发动（`noReveal`，实时零状态、只封揭示）；本牌自己落在法界/静海时揭示不发动，
+      // 但法术照常消散（那是法术规则）。
+      {
+        n: '法界之火', p: 0, c: 3, k: 'xform', xf: 'dharma', a: 0, spell: true,
+        i: '🔥',
+        t: '揭示：将此区域替换为「法界」',
+        cg: 'linear-gradient(150deg,#16161e,#ff9a4a)',
       },
     ],
     4: [
@@ -471,5 +493,6 @@ window.DS_CARDS = {
     discard: '揭示 · 弃牌（把牌从手牌移出 → 进该方弃牌池）',
     reviveDiscard: '揭示 · 复活弃牌池里的角色卡牌（随机顺序 → 随机区域，并重新结算其揭示；法术不参与）',
     retrigger: '揭示 · 再触发本区己方卡牌的揭示（不含自己/法术/同为该效果的卡；不触发持续与时机效果）',
+    mute: '揭示 · 封印（永久抹除卡牌文字）',
   },
 };

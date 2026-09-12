@@ -12,17 +12,19 @@
 </head>
 <body class="in-home">
 
-  <!-- v120：body 默认带 in-home（主页面态）——首帧即为主页面：
+  <!-- body 默认带 in-home（主页面态）——首帧即为主页面：
        CSS 隐藏游戏区、#homeScreen 全屏显示；点「开始对战」由 home.js 移除该类并调
        Game.restart() 进入对局。放在 HTML 上而非等 JS 执行，可避免首帧闪一下游戏画面。 -->
 
-  <!-- ============ 主页面（v120）============
-       打开游戏先显示本页（静态标记，不依赖 JS）。三个入口：
-         - 开始对战 → home.js 隐藏本页并调用既有入口 window.Game.restart()（与顶部
-           「重新开始」同一个函数，游戏主逻辑未改动）；
-         - 卡组设置 → deck-page.js 的卡组设置页面（v121，见下方 #deckScreen）；
+  <!-- ============ 主页面 ============
+       打开游戏先显示本页（静态标记，不依赖 JS）。入口：
+         - 开始对战 → home.js 隐藏本页并调用既有入口 window.Game.restart()（与顶栏
+           「重新开始」同一个函数）；
+         - 卡组设置 → deck-page.js 的卡组设置页面（见下方 #deckScreen）；
+         - 图鉴 → 与对局顶栏「📖 图鉴」同一个弹窗 #codexMask；
+         - 设置 → 对手 AI 强度；
          - 开发调试 → dev-page.js（不校验卡组，直接进战斗；玩家空牌库、AI 随机）。
-       游戏引擎自身仍在后台完成首局初始化（未改动 game.js），点击开始对战时重开一局。 -->
+       游戏引擎自身仍在后台完成首局初始化，点击开始对战时重开一局。 -->
   <section class="home-screen" id="homeScreen">
     <div class="home-decor" id="homeDecor" aria-hidden="true"></div>
     <div class="home-inner">
@@ -56,7 +58,7 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- v181：图鉴入口 —— 主入口列里「卡组设置」与「⚙️ 设置」**之间**（第 4 项）。
+        <!-- 图鉴入口 —— 主入口列里「卡组设置」与「⚙️ 设置」**之间**（第 4 项）。
              点它**不进入对局**，只打开既有的图鉴弹窗 #codexMask —— 与对局顶栏「📖 图鉴」
              是**同一个弹窗**（实现仍在 js/card-browser.js 的 window.CardBrowser，
              卡池 / 费用档筛选与卡池排序都沿用同一套）；交互见 js/home.js
@@ -72,8 +74,8 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- v174：设置入口 —— 紧接「图鉴」下方（主入口的第 5 项）。
-             打开 #settingsMask：目前用于切换**对手 AI 强度**（v175 起四档：简单 / 普通 / 困难 / 月狂，
+        <!-- 设置入口 —— 紧接「图鉴」下方（主入口的第 5 项）。
+             打开 #settingsMask：用于切换**对手 AI 强度**（四档：简单 / 普通 / 困难 / 月狂，
              默认「简单」），选项与文案统一来自 js/ai.js 的 window.AI.LEVELS（本页不另写一份），
              交互见 js/home.js（openSettings / closeSettings / setAiLevel）。
              按钮副标题由 home.js 同步成「对手 AI 强度：<当前档位>」。 -->
@@ -86,7 +88,7 @@
           <span class="hb-arrow">›</span>
         </button>
       </nav>
-      <!-- v172：新手引导 —— 主页面最下方的次级入口（五个主入口之下的轻量按钮）。
+      <!-- 新手引导 —— 主页面最下方的次级入口（五个主入口之下的轻量按钮）。
            打开只读的机制速览弹窗（#guideMask，纯静态文案）；交互见 js/home.js，
            样式见 style.css 的 .home-guide-btn / .guide-modal。 -->
       <button type="button" class="home-guide-btn" id="homeBtnGuide">
@@ -98,16 +100,18 @@
     </div>
   </section>
 
-  <!-- ============ 卡组设置页面（v121~v125）============
+  <!-- ============ 卡组设置页面 ============
        入口：主页面「卡组设置」→ home.js 的 PAGES.deck → window.DeckBuilder.open()。
        布局：整页纵向 flex —— 上方卡组栏 flex:1（≈ 1/3）、下方卡牌区 flex:2（≈ 2/3）。
        卡组栏两种形态：浏览态 =「＋ 新建卡组」+ 已创建卡组位（动态列表、无固定空位、
              新建即扩展；显示顺序 = 创建时间倒序，越晚创建越靠左）；
-             编辑态（点卡组位上的 ✏️）= 该卡组的 12 个卡槽（已放卡面 / 未放虚线空位）。
-       卡牌区为 POOL 全部人物卡（不含衍生卡牌 token）：
-             浏览态点卡 = 放大查看；编辑态左键 = 加入 / 移出卡组、右键 = 放大查看。
+             编辑态（点卡组位任意位置）= 该卡组的 12 个卡槽（已放卡面 / 未放虚线空位）。
+       卡牌区为 POOL 全部人物卡（衍生卡牌 token 单列一档、仅可查看）：
+             浏览态点卡 = 放大查看；编辑态左键 = 加入卡组、点上方卡槽 = 移出、右键 = 放大查看。
        骨架为静态标记，卡组位与卡牌网格由 deck-page.js 渲染；
-       新建 / 修改（加入·移出·清空）/ 删除 / 改名 / **保存（排序+本地持久化，v135）**已可用；对局使用自建卡组后续加入。 -->
+       新建 / 修改（加入·移出·清空）/ 删除 / 改名 / **保存（排序 + 本地持久化）**已可用；
+       **导出 / 导入**（顶栏「📤 导出」「📥 导入」，弹窗 #deckImportMask 两种形态）见 deck-page.js；
+       对局使用自建卡组见「开始对战」的选出战卡组弹窗。 -->
   <section class="deck-screen hidden" id="deckScreen">
     <!-- 上方 1/3：标题 + 卡组栏 -->
     <section class="deck-bar">
@@ -119,7 +123,7 @@
             <p class="dt-sub">卡组栏容量 <b id="deckCap">20</b> 套 · 每套 <b id="deckSize">12</b> 张</p>
           </div>
         </div>
-        <!-- v134：bar-head 放进 deck-top，手机端编辑态可与按钮同一行 -->
+        <!-- bar-head 放进 deck-top，手机端编辑态可与按钮同一行 -->
         <div class="deck-bar-head">
           <span class="db-title" id="deckBarTitle">我的卡组</span>
           <span class="db-count" id="deckUsed">0 / 20</span>
@@ -128,6 +132,8 @@
         <div class="deck-top-actions">
           <span class="deck-hint" id="deckHint">点卡组位直接进入修改；缩略图上的 🗑️ 删除卡组；「＋ 新建卡组」随建随扩展</span>
           <!-- 手机端只显示 .bt-ico 图标（.bt-txt 由 CSS 隐藏），title 保留说明 -->
+          <button type="button" class="btn btn-ghost" id="deckExportBtn" title="把当前卡组导出为一行文本码"><span class="bt-ico">📤</span><span class="bt-txt">导出</span></button>
+          <button type="button" class="btn btn-ghost" id="deckImportBtn" title="粘贴一个卡组码，导入为一套新卡组"><span class="bt-ico">📥</span><span class="bt-txt">导入</span></button>
           <button type="button" class="btn btn-ghost hidden" id="deckRenameBtn" title="修改当前卡组名称"><span class="bt-ico">✏️</span><span class="bt-txt">改名</span></button>
           <button type="button" class="btn btn-ghost hidden" id="deckClearBtn" title="清空当前卡组里的所有卡牌"><span class="bt-ico">🧹</span><span class="bt-txt">清空卡组</span></button>
           <button type="button" class="btn btn-primary hidden" id="deckDoneBtn" title="保存卡组到本地"><span class="bt-ico">💾</span><span class="bt-txt">保存</span></button>
@@ -138,8 +144,8 @@
     </section>
 
     <!-- 下方 2/3：全部卡牌。浏览态点卡牌=放大查看；
-         编辑态（点卡组位）左键=加入卡组、右键=放大查看。
-         v131：费用筛选条与游戏图鉴同款（全部 / 0-1 / 2~5 费 / **6 费+**（6 费及以上，v185）/ 衍生卡牌）。 -->
+         编辑态（点卡组位）左键=加入卡组、点上方卡槽=移出、右键=放大查看。
+         费用筛选条与游戏图鉴同款（全部 / 0-1 / 2 / 3 / 4 / 5 / 6 费+ / 衍生卡牌）。 -->
     <section class="deck-pool">
       <div class="deck-pool-head">
         <span class="dp-title">全部卡牌</span>
@@ -154,7 +160,7 @@
     <div class="deck-toast hidden" id="deckToast" role="status" aria-live="polite"></div>
   </section>
 
-  <!-- v137：开始对战前选卡组（仅满 12 张可选）；主页面态需单独放开显示（见 style.css） -->
+  <!-- 开始对战前选卡组（仅满 12 张可选）；主页面态需单独放开显示（见 style.css） -->
   <div class="modal-mask hidden" id="battleDeckMask">
     <div class="modal battle-deck-modal">
       <div class="modal-emblem">⚔️</div>
@@ -172,11 +178,11 @@
     </div>
   </div>
 
-  <!-- v174：设置弹窗（主页面「⚙️ 设置」按钮打开，#homeBtnSettings）
-       目前只有一项：**对手 AI 强度**（v175 起四档：简单（默认）/ 普通 / 困难 / 月狂）。
+  <!-- 设置弹窗（主页面「⚙️ 设置」按钮打开，#homeBtnSettings）
+       目前只有一项：**对手 AI 强度**（四档：简单（默认）/ 普通 / 困难 / 月狂）。
        - 四档的选项、名称、说明全部由 js/home.js 从 window.AI.LEVELS（js/ai.js）渲染，
          本文件只留空容器，避免中文说明出现两份、口径漂移；
-         **v176：玩家可见文案只写难度感受（压力大小 / 适合谁），不写算法与深浅**
+         **玩家可见文案只写难度感受（压力大小 / 适合谁），不写算法与深浅**
          ——本文件这段的「关于对手」也只保留必要说明；技术口径见 LEVELS[key].tech（控制台/文档用）；
        - 点选即生效（对手下一回合就用新强度），并写入 localStorage: touhou2.ai.level；
        - 复用游戏弹窗样式（.modal-mask + .codex-modal 尺寸）；主页面态下由
@@ -210,7 +216,7 @@
     </div>
   </div>
 
-  <!-- v172：新手引导弹窗（主页面最下方「📖 新手引导」按钮打开，#homeBtnGuide）
+  <!-- 新手引导弹窗（主页面最下方「📖 新手引导」按钮打开，#homeBtnGuide）
        只读的机制速览：全部为静态标记（无需 JS 渲染），交互只在 js/home.js
        （开关 / Esc / 点遮罩空白 / 「⚔️ 开始对战」直接进选出战卡组）。
        复用游戏弹窗样式（.modal-mask + .codex-modal 尺寸 + .guide-body 滚动区）；
@@ -284,8 +290,8 @@
           <ul>
             <li><b>开始对战</b>：先选一套<b>满 12 张</b>的出战卡组再开打（对手每局随机组牌）。</li>
             <li><b>卡组设置</b>：组建 / 改名 / 删除卡组（上限 20 套、每套 12 张、同名卡限 1 张），自动存在本地。</li>
-            <li><b>图鉴</b>（📚，v181）：不进对局，直接查看全部卡牌与效果说明（可切换「普通卡牌池 / 衍生卡牌池」，点卡放大查看）。</li>
-            <li><b>设置</b>（⚙️，v174）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
+            <li><b>图鉴</b>（📚）：不进对局，直接查看全部卡牌与效果说明（可切换「普通卡牌池 / 衍生卡牌池」，点卡放大查看）。</li>
+            <li><b>设置</b>（⚙️）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
             <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🪨 添加石块 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制（「🪨 添加石块」＝选区域 1/2/3 + 用 ◀ ▶ 调数量 → 该区域**双方各生成 N 张石块**，方便验「比那名居天子」「大鲶鱼」这类跟石块有关的机制）。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
           </ul>
         </div>
@@ -308,7 +314,7 @@
     </div>
   </div>
 
-  <!-- 卡组改名弹窗（v129）：由编辑态顶部「✏️ 改名」打开（`#deckRenameBtn`）；
+  <!-- 卡组改名弹窗：由编辑态顶部「✏️ 改名」打开（`#deckRenameBtn`）；
        输入框预填原名并全选，回车 = 确定、Esc / 点遮罩 = 取消；
        校验（非空 / 最长 12 字 / 不与其它卡组重名）与写入见 deck-page.js。
        位于 body 层级（复用游戏弹窗样式，z-index 50，盖在卡组页 45 之上）。 -->
@@ -325,7 +331,27 @@
     </div>
   </div>
 
-  <!-- 卡组页确认弹窗（v124 删除卡组用；v125 通用化，删除 / 清空卡组共用）：
+  <!-- 卡组导入 / 导出弹窗（同一套 DOM 两种形态，由 deck-page.js 的 openCodeDialog() 切换）：
+       导出 = 顶部「📤 导出」把当前卡组烘焙成一行文本码，只读显示 + 「📋 复制」；
+       导入 = 顶部「📥 导入」粘贴卡组码，点「📥 导入」先校验并弹确认预览。
+       码 = `TH2D1:` + **明文卡组名** + `:` + base64（名字明文在前，一屏多个码时肉眼可辨）；
+       格式细节、校验与错误提示见 deck-page.js；Esc / 点遮罩 = 取消（优先级见那里的 keydown）。 -->
+  <div class="modal-mask hidden" id="deckImportMask">
+    <div class="modal undo-modal deck-import-modal">
+      <div class="modal-emblem" id="deckImportEmblem">📥</div>
+      <h2 id="deckImportTitle">导入卡组</h2>
+      <textarea id="deckImportInput" class="deck-import-input" rows="3" spellcheck="false"
+                autocomplete="off" placeholder="粘贴卡组码（TH2D1:卡组名:… 一行文本）"></textarea>
+      <div class="deck-import-tip" id="deckImportTip"></div>
+      <div class="undo-btns">
+        <button type="button" class="btn" id="deckImportCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="deckImportOk">📥 导入</button>
+        <button type="button" class="btn btn-primary hidden" id="deckImportCopy">📋 复制</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡组页确认弹窗（删除 / 清空卡组共用）：
        由 deck-page.js 的 openConfirm() 填充标题/图标/文案/按钮并绑定动作；
        位于 body 层级（复用游戏弹窗样式与 z-index 50，盖在卡组页 45 之上）；
        确认 / 取消 / 点遮罩空白 / Esc 均可关闭。 -->
@@ -377,7 +403,7 @@
     </section>
 
     <aside class="side" id="sidePanel">
-      <!-- v187：特殊牌池入口 —— 位置＝**地形区域的下方、对手信息的上方**：它是侧栏
+      <!-- 特殊牌池入口 —— 位置＝**地形区域的下方、对手信息的上方**：它是侧栏
            #sidePanel 的第一个区块（桌面端侧栏在场地右侧；≤900px 时侧栏整体排到场地
            下方，两种布局下都落在“地形下方、对手信息上方”）。
            两个按钮分别打开**己方 / 对手**的特殊牌池弹窗 #pileMask（摧毁池 / 弃牌池 /
@@ -434,7 +460,7 @@
     </aside>
   </main>
 
-  <!-- 状态提示条：手机端显示在地形区（layout）之后、手牌之前（v107 移动，
+  <!-- 状态提示条：手机端显示在地形区（layout）之后、手牌之前（
        避免文案换行增减导致地形上下位移；桌面端隐藏，仍用侧栏状态卡），
        与侧栏 #statusText 同步更新，见 game.js 的 setStatus() -->
   <div class="mob-status" id="mobStatusCard">
@@ -473,14 +499,14 @@
         <span class="codex-tip">点击任意卡牌可放大查看</span>
         <button class="btn btn-ghost codex-close" onclick="Game.ui.onCodex()">关闭 ✕</button>
       </div>
-      <!-- v178：第 1 层筛选=卡池切换（普通卡牌池 / 衍生卡牌池），由 card-browser.js 渲染按钮 -->
+      <!-- 第 1 层筛选=卡池切换（普通卡牌池 / 衍生卡牌池），由 card-browser.js 渲染按钮 -->
       <div class="card-pool-bar" id="codexPool"></div>
       <div class="card-filter-bar" id="codexFilter"></div>
       <div class="codex-grid" id="codexGrid"></div>
     </div>
   </div>
 
-  <!-- v141：查看对手手牌 / 牌库（调试用） -->
+  <!-- 查看对手手牌 / 牌库（调试用） -->
   <div class="modal-mask hidden" id="aiSpyMask">
     <div class="modal codex-modal ai-spy-modal">
       <div class="codex-head">
@@ -499,7 +525,7 @@
     </div>
   </div>
 
-  <!-- v187：特殊牌池弹窗（摧毁池 / 弃牌池 / 放逐池）——由侧栏「特殊牌池」区块的两个按钮
+  <!-- 特殊牌池弹窗（摧毁池 / 弃牌池 / 放逐池）——由侧栏「特殊牌池」区块的两个按钮
        （#btnPileMine 己方 / #btnPileOpp 对手）打开：上方三个切换按钮（页签与张数由
        game.js 的 buildPileTabs 从 PILE_KINDS 渲染，标签唯一数据源在 game.js），
        下方按**入池顺序（旧 → 新）**用卡面网格列出该方该池里的牌（每张卡下方一行小字给出
@@ -519,8 +545,8 @@
   </div>
 
   <!-- 开发者：指定地形（先选区域 1/2/3，再点选地形 → 替换）
-       v149：区域选择条从弹窗底部移到标题下方（底部在矮屏/手机端会被 88vh 裁掉导致点不到），
-             并改为三等分按钮组，目标区域始终可见。 -->
+       区域选择条放在标题下方（底部在矮屏/手机端会被 88vh 裁掉导致点不到），
+       并做成三等分按钮组，目标区域始终可见。 -->
   <div class="modal-mask hidden" id="pickLocMask">
     <div class="modal codex-modal pick-loc-modal">
       <div class="codex-head">
@@ -546,9 +572,9 @@
   </div>
 
   <!-- 开发者：添加石块（先选区域 1/2/3，再用 ◀ ▶ 箭头调数量 → 批量生成石块）
-       v206：口径同「虹龙洞 / 黄瓜田 / 幽灵洋馆」的「区域出现时」——**双方各 N 张**，
-             统一走 placeToken（落地即翻开、占格位、进 fieldQueue），因此也照常尊重
-             限张地形 / 隙间封格 / 大体积卡占满 / v205 的「已破碎」区域（放不下会明确提示）。 -->
+       口径同「虹龙洞 / 黄瓜田 / 幽灵洋馆」的「区域出现时」——**双方各 N 张**，
+       统一走 placeToken（落地即翻开、占格位、进 fieldQueue），因此也照常尊重
+       限张地形 / 隙间封格 / 大体积卡占满 / 「已破碎」区域（放不下会明确提示）。 -->
   <div class="modal-mask hidden" id="addStoneMask">
     <div class="modal codex-modal add-stone-modal">
       <div class="codex-head">
@@ -587,7 +613,7 @@
         <span class="codex-tip" id="pickTip">点选 1 张卡牌，点「确认加入手牌」</span>
         <button class="btn btn-ghost codex-close" onclick="Game.ui.onPickClose()">取消 ✕</button>
       </div>
-      <!-- v178：第 1 层筛选=卡池切换（普通卡牌池 / 衍生卡牌池），由 card-browser.js 渲染按钮 -->
+      <!-- 第 1 层筛选=卡池切换（普通卡牌池 / 衍生卡牌池），由 card-browser.js 渲染按钮 -->
       <div class="card-pool-bar" id="pickPool"></div>
       <div class="card-filter-bar" id="pickFilter"></div>
       <div class="codex-grid" id="pickGrid"></div>
@@ -635,9 +661,9 @@
   <div class="corner-actions corner-left">
     <button id="btnRetreat" class="btn btn-danger" onclick="Game.ui.onRetreat()">🏳️ 认输</button>
   </div>
-  <!-- v118：认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7）；
-       v184：并排补一个「牌库 N」计数（玩家牌库张数原本不可见；「洗入卡组」会改变它，
-       该计数同时是洗入演出的锚点，见 game.js 的 updateDeckCount / playShuffleInFx） -->
+  <!-- 认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7）；并排一个「牌库 N」计数
+       （玩家牌库张数；「洗入卡组」会改变它，该计数同时是洗入演出的锚点，
+       见 game.js 的 updateDeckCount / playShuffleInFx） -->
   <div class="corner-actions corner-center" id="handCountBox">
     <span class="hand-count-chip" id="handCountVal">0/7</span>
     <span class="hand-count-chip deck-count-chip" id="deckCountVal">牌库 12</span>
@@ -647,7 +673,7 @@
   </div>
 
   <!-- 加载顺序即依赖顺序：数据 → 引擎 → 拆分子模块 → 页面入口（纯前端无模块化，勿调整次序） -->
-  <!-- ⚠️ v211 排查遗留提醒（未修复项）：用 `file://` 直接打开本页时，Chrome 出现过“页面执行的是
+  <!-- ⚠️ 排查提醒：用 `file://` 直接打开本页时，Chrome 出现过“页面执行的是
        js/game.js 的旧内容、而磁盘已是新内容”的现象（换 `?v=`、甚至把文件换名重载都复现过）。
        日后若再遇到“改了代码却没反应”，先用本地 HTTP 服务访问一次排除该因素。 -->
   <script src="data/cards.js"></script>
@@ -655,13 +681,13 @@
   <script src="js/game.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/card-browser.js"></script>
-  <!-- v120：主页面脚本（在游戏脚本之后加载，只调用 window.Game.restart() 等既有入口） -->
+  <!-- 主页面脚本（在游戏脚本之后加载，只调用 window.Game.restart() 等既有入口） -->
   <script src="js/home.js"></script>
-  <!-- v135：卡组本地持久化（须在 deck-page.js 之前） -->
+  <!-- 卡组本地持久化（须在 deck-page.js 之前） -->
   <script src="js/deck-storage.js"></script>
-  <!-- v121：卡组设置页面（主页面「卡组设置」入口 → window.DeckBuilder） -->
+  <!-- 卡组设置页面（主页面「卡组设置」入口 → window.DeckBuilder） -->
   <script src="js/deck-page.js"></script>
-  <!-- v142：开发调试入口（主页面「开发调试」→ window.DevTools；空玩家牌库直接开战） -->
+  <!-- 开发调试入口（主页面「开发调试」→ window.DevTools；空玩家牌库直接开战） -->
   <script src="js/dev-page.js"></script>
 </body>
 </html>

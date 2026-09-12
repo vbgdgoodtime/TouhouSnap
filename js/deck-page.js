@@ -4,7 +4,13 @@
      12 个卡槽（已放 = 卡面、点击移出；未放 = 与卡面同构的虚线空位）。MAX_DECKS = 20 套、DECK_SIZE = 12 张。
    下方 #deckFilter + #deckGrid：费用筛选（全部 / 0-1 / 2 / 3 / 4 / 5 / 6 费+ / 衍生卡牌）；「衍生卡牌」=
      SPECIAL token（不含 un），仅可查看不可加入卡组；左键 = 放大查看（编辑态 = 加入卡组）、右键 = 放大查看。
-   卡池与卡槽排序统一走 CardBrowser.orderDefs（见 sortDefsList）；待实装：对局使用自建卡组。
+   卡池与卡槽排序统一走 CardBrowser.orderDefs（见 sortDefsList）；对局侧由 home.js 的
+     「开始对战 · 选出战卡组」消费 listReadyDecks()（仅满 12 张的卡组）。
+   导出 / 导入：一套卡组 ⇄ 一行文本码（`TH2D1:` + 明文卡组名 + `:` + base64(UTF-8 JSON {n, c:[卡名…]})），
+     名字明文写在最前面（一屏多个码时肉眼可辨）；名字含空白或 `:` 时省略明文名，退回不带名的两段形式。
+     码里按**卡名**记录（POOL 内同名唯一，与 deck-storage.js 的存档口径一致）；
+     导入只**新建**一套卡组，不覆盖既有卡组，也不改动当前编辑中的内容。
+     入口 = 顶栏「📤 导出」/「📥 导入」；两种形态共用弹窗 #deckImportMask，由 openCodeDialog 切换。
    入口 / 返回：DeckBuilder.open()（home.js 的 PAGES.deck）/ close() → Home.show()。
    依赖：game.js 的 gradOf / cardFaceHTML / showZoom；deck-storage.js 的 DeckStorage.load/save。
    ========================================================= */
@@ -27,6 +33,7 @@
   var editingDeckId = null;                   // 正在修改的卡组（null = 浏览态）
   var justAddedId = null;                     // 本次渲染需要播“新增入场”动画的卡组位
   var poolFilterKey = 'all';                  // 卡池筛选档（关闭页面后保留）
+  var exportDeckId = null;                    // 导出弹窗当前展示的卡组（导入形态下为 null）
 
   var rendered = false; // 卡牌网格是否已渲染过（卡池是静态数据）
   /* ---------- 卡池筛选（与 card-browser.js 图鉴同款） ---------- */
@@ -93,6 +100,16 @@
   // 法术卡（def.spell）没有战力——标题等文案里不要写成“威力 0”
   function powerText(def) {
     return (def && def.spell) ? '法术 · 无战力' : ('威力 ' + def.p);
+  }
+  // 卡名要拼进 HTML 属性（如 title="「卡名」…"）时先转义——卡名来路目前只有 data/cards.js，
+  // 但属性里的引号一旦混进来就会破坏卡面 DOM，故一律收口到这里。
+  function escapeAttr(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function defByName(name) {
@@ -216,6 +233,149 @@
     return true;
   }
 
+  /* ---------- 卡组码：一行文本码 ⇄ 一套卡组 ----------
+     格式 = `TH2D1:` + **明文卡组名** + `:` + base64(UTF-8 的 JSON `{ n: 卡组名, c: [卡名…] }`)。
+     · 名字**明文放在最前面**：一屏多个卡组码时肉眼就能认出哪行是哪套卡组，不用逐个导入。
+     · 名字里只要出现空白或 `:` 就**不写明文**（退回 `TH2D1:` + base64 的两段形式）——
+       导入时按剥掉空白后的字符串认码，明文里带空白会把码截断；JSON 里始终有完整名字，不影响导入。
+     · 用 base64 是因为码要经聊天工具 / 剪贴板转手：卡组名里的空格、`+`、`/` 直接写会串行。
+     · 手写 UTF-8 编解码、不用 TextEncoder / TextDecoder——本文件通篇 ES5 写法，保持同一取向。
+     · 解析同时接受两段（无明文名）与三段（有明文名）形式；校验不过一律返回 null（不抛异常）。 */
+  var CODE_PREFIX = 'TH2D1:';
+
+  // 明文名只接受「非空、无空白、无冒号」（码本身也要能原样贴回来）
+  function plainNameOf(name) {
+    var s = String(name == null ? '' : name);
+    if (!s || /\s/.test(s) || s.indexOf(':') >= 0) return '';
+    return s;
+  }
+
+  function utf8Encode(str) {
+    var bytes = [];
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      if (c < 0x80) {
+        bytes.push(c);
+      } else if (c < 0x800) {
+        bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+      } else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+        var lo = str.charCodeAt(i + 1); // 代理对（emoji 等）合成一个码点
+        if (lo >= 0xdc00 && lo <= 0xdfff) {
+          var cp = 0x10000 + ((c - 0xd800) << 10) + (lo - 0xdc00);
+          i++;
+          bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+          continue;
+        }
+        bytes.push(0xef, 0xbf, 0xbd); // 落单的高代理 → U+FFFD
+      } else if (c >= 0xd800 && c <= 0xdfff) {
+        bytes.push(0xef, 0xbf, 0xbd); // 落单的低代理 → U+FFFD
+      } else {
+        bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+      }
+    }
+    return bytes;
+  }
+  function utf8Decode(bytes) {
+    var out = '';
+    for (var i = 0; i < bytes.length;) {
+      var b = bytes[i];
+      if (b < 0x80) { out += String.fromCharCode(b); i += 1; continue; }
+      if (b >= 0xc0 && b < 0xe0 && i + 1 < bytes.length) {
+        out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i + 1] & 0x3f));
+        i += 2; continue;
+      }
+      if (b >= 0xe0 && b < 0xf0 && i + 2 < bytes.length) {
+        out += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f));
+        i += 3; continue;
+      }
+      if (b >= 0xf0 && b < 0xf8 && i + 3 < bytes.length) {
+        var cp = ((b & 0x07) << 18) | ((bytes[i + 1] & 0x3f) << 12) | ((bytes[i + 2] & 0x3f) << 6) | (bytes[i + 3] & 0x3f);
+        cp -= 0x10000;
+        out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
+        i += 4; continue;
+      }
+      out += '\ufffd'; i += 1; // 残缺序列：以替换字符吞掉，后面的内容照常解出
+    }
+    return out;
+  }
+  function codeOf(name, cardNames) {
+    var plain = String(name == null ? '' : name);
+    var json = JSON.stringify({ n: plain, c: cardNames || [] });
+    var bytes = utf8Encode(json);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    var easy = plainNameOf(plain);
+    return CODE_PREFIX + (easy ? easy + ':' : '') + btoa(bin);
+  }
+  // 返回 { n, c, label } 或 null（前缀 / 编码 / 结构任一步不过关都算格式不对）
+  // label = 码里明文写的名字（没有明文名时退回 JSON 里的名字），供「这码属于哪套卡组」的提示用
+  function deckFromCode(code) {
+    var raw = String(code == null ? '' : code).replace(/\s+/g, ''); // 聊天工具常按行折断
+    if (raw.indexOf(CODE_PREFIX) !== 0) return null;
+    var body = raw.slice(CODE_PREFIX.length);
+    var data = null;
+    for (var cut = body.length; cut > 0; cut--) { // 明文名里即使混进 `:` 也能靠「后半截是不是 base64」找回
+      if (body.charAt(cut - 1) !== ':') continue;
+      data = decodeCodeBody(body.slice(cut));
+      if (data) break;
+    }
+    if (!data) data = decodeCodeBody(body); // 两段形式（无明文名）
+    if (!data) return null;
+    if (typeof data.n !== 'string' || !Array.isArray(data.c)) return null;
+    for (var k = 0; k < data.c.length; k++) {
+      if (typeof data.c[k] !== 'string') return null;
+    }
+    return { n: data.n, c: data.c, label: plainNameOf(data.n) || data.n };
+  }
+  function decodeCodeBody(b64) {
+    if (!b64) return null;
+    try {
+      var bin = atob(b64);
+      var bytes = [];
+      for (var i = 0; i < bin.length; i++) bytes.push(bin.charCodeAt(i) & 0xff);
+      var data = JSON.parse(utf8Decode(bytes));
+      return (data && typeof data === 'object') ? data : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  // 一套卡组 → 码。卡池里查不到的名字照原样写进去（导入端会报出来，不静默丢卡）。
+  function deckCodeOfDeck(deck) {
+    if (!deck) return '';
+    var names = (deck.cards || []).map(function (d) { return d && d.n; }).filter(Boolean);
+    return codeOf(deck.name, names);
+  }
+  // 码里的卡名 → 去重后的 def 列表；顺带报出被跳过的名字（本次卡池里没有，或只是衍生卡牌）
+  function resolveCodeCards(names) {
+    var cards = [];
+    var skipped = [];
+    for (var i = 0; i < names.length; i++) {
+      var name = names[i];
+      if (!name || skipped.indexOf(name) >= 0) continue;
+      var def = defByName(name);
+      if (!def || isTokenDef(def)) { skipped.push(name); continue; } // 改名 / 已删 / token → 跳过并报出
+      if (cards.indexOf(def) >= 0) continue;                         // 同名限 1（与加入卡组的规则一致）
+      cards.push(def);
+    }
+    return { cards: cards, skipped: skipped };
+  }
+  // 导入用的卡组名：裁到 NAME_MAX 字；与既有卡组重名时后缀递增到不撞为止（导入是新建动作，
+  // 直接报「重名」会把用户卡住；改名按钮随时可再改）
+  function uniqueDeckName(raw) {
+    var base = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX) || '导入卡组';
+    function taken(name) {
+      for (var i = 0; i < DECKS.length; i++) if (DECKS[i].name === name) return true;
+      return false;
+    }
+    if (!taken(base)) return base;
+    for (var n = 2; n < 100; n++) {
+      var suffix = ' ' + n;
+      var candidate = base.slice(0, Math.max(1, NAME_MAX - suffix.length)) + suffix;
+      if (!taken(candidate)) return candidate;
+    }
+    return base;
+  }
+
   function buildFilterChips() {
     var holder = $('deckFilter');
     if (!holder) return;
@@ -239,6 +399,11 @@
 
   function findDeck(id) {
     for (var i = 0; i < DECKS.length; i++) if (DECKS[i].id === id) return DECKS[i];
+    return null;
+  }
+  function findDeckByName(name) {
+    if (!name) return null;
+    for (var i = 0; i < DECKS.length; i++) if (DECKS[i].name === name) return DECKS[i];
     return null;
   }
   function editingDeck() { return editingDeckId ? findDeck(editingDeckId) : null; }
@@ -377,7 +542,7 @@
     btn.className = 'hand-card deck-card-slot filled';
     btn.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色
     btn.innerHTML = cardFaceHTML(def);
-    btn.title = '第 ' + (index + 1) + ' 张：' + def.n + '（' + def.c + ' 费 / ' + powerText(def) + '）· 点击移出卡组';
+    btn.title = '第 ' + (index + 1) + ' 张：' + escapeAttr(def.n) + '（' + def.c + ' 费 / ' + powerText(def) + '）· 点击移出卡组';
     btn.addEventListener('click', function () { removeFromDeck(deck.id, def); });
     return btn;
   }
@@ -461,12 +626,12 @@
     el.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色与结构
     el.innerHTML = cardFaceHTML(def);
     if (token) {
-      el.title = def.n + '（衍生卡牌 · 仅可查看，不可加入卡组）';
+      el.title = escapeAttr(def.n) + '（衍生卡牌 · 仅可查看，不可加入卡组）';
     } else if (inDeck) {
       el.setAttribute('aria-disabled', 'true');
-      el.title = def.n + '（已在卡组中）· 点上方卡槽可移出 · 右键放大查看';
+      el.title = escapeAttr(def.n) + '（已在卡组中）· 点上方卡槽可移出 · 右键放大查看';
     } else {
-      el.title = def.n + '（' + def.c + ' 费 / ' + powerText(def) + '）· ' + (deck ? '点击加入卡组' : '点击放大查看');
+      el.title = escapeAttr(def.n) + '（' + def.c + ' 费 / ' + powerText(def) + '）· ' + (deck ? '点击加入卡组' : '点击放大查看');
     }
     el.addEventListener('click', function () {
       if (token) { // 衍生卡：任何状态都只放大查看
@@ -721,6 +886,132 @@
     toast('卡组「' + oldName + '」已改名为「' + name + '」。');
     return deck;
   }
+  /* ---------- 导出 / 导入（弹窗 #deckImportMask，两种形态共用） ---------- */
+  function importMaskEl() { return $('deckImportMask'); }
+  function isImportOpen() {
+    var m = importMaskEl();
+    return !!m && !m.classList.contains('hidden');
+  }
+  function setImportTip(text, warn) {
+    var el = $('deckImportTip');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('warn', !!warn);
+  }
+  // 唯一入口：mode='export' 只读展示当前卡组的码并给「📋 复制」；mode='import' 空框等粘贴
+  function openCodeDialog(mode) {
+    var mask = importMaskEl();
+    var input = $('deckImportInput');
+    if (!mask || !input) return false;
+    exportDeckId = mode === 'export' ? activeDeckId : null;
+    var em = $('deckImportEmblem');
+    var ti = $('deckImportTitle');
+    var ok = $('deckImportOk');
+    var copy = $('deckImportCopy');
+    input.readOnly = false;
+    input.value = '';
+    if (mode === 'export') {
+      var deck = exportDeckId ? findDeck(exportDeckId) : null;
+      if (!deck) { toast('先点一套卡组把它设为当前卡组，再导出。'); return false; }
+      input.value = deckCodeOfDeck(deck);
+      input.readOnly = true; // 只读：导出码不该在框里被误改
+      if (em) em.textContent = '📤';
+      if (ti) ti.textContent = '导出卡组';
+      if (ok) ok.classList.add('hidden');
+      if (copy) copy.classList.remove('hidden');
+      setImportTip('「' + deck.name + '」共 ' + deck.cards.length + ' / ' + DECK_SIZE +
+        ' 张 · 复制这行码发给别人，对方在「📥 导入」里粘贴即可。', false);
+    } else {
+      if (em) em.textContent = '📥';
+      if (ti) ti.textContent = '导入卡组';
+      if (ok) ok.classList.remove('hidden');
+      if (copy) copy.classList.add('hidden');
+      setImportTip('粘贴一行以 ' + CODE_PREFIX + ' 开头的卡组码（开头的名字就是卡组名）；导入会新建一套卡组（不覆盖现有卡组）。', false);
+    }
+    mask.classList.remove('hidden');
+    input.focus();
+    if (mode === 'export' && typeof input.select === 'function') input.select();
+    return true;
+  }
+  function askExportDeck() { return openCodeDialog('export'); } // 没选中卡组时 openCodeDialog 已给提示
+  function askImportDeck() { return openCodeDialog('import'); }
+  function cancelImportDeck() {
+    exportDeckId = null;
+    var mask = importMaskEl();
+    if (mask) mask.classList.add('hidden');
+  }
+  function confirmExportCopy() {
+    var input = $('deckImportInput');
+    var text = input ? String(input.value || '') : '';
+    copyText(text);
+  }
+  // 剪贴板不可用（非 https / 无权限 / 老浏览器）不是错误：框里内容已全选，手动作业即可
+  function copyText(text) {
+    if (!text) return false;
+    var input = $('deckImportInput');
+    if (input && typeof input.select === 'function') input.select();
+    var clip = navigator.clipboard;
+    if (clip && typeof clip.writeText === 'function') {
+      clip.writeText(text).then(function () {
+        toast('卡组码已复制，粘贴到别处即可分享。');
+      }, function () {
+        toast('这台浏览器不允许自动复制——码已全选，请按 Ctrl+C 手动复制。');
+      });
+      return true;
+    }
+    toast('这台浏览器不支持自动复制——码已全选，请按 Ctrl+C 手动复制。');
+    return false;
+  }
+  // 「📥 导入」：先校验 + 预览，确认后才真正新建卡组
+  function confirmImportDeck() {
+    var input = $('deckImportInput');
+    var data = deckFromCode(input ? input.value : '');
+    if (!data) {
+      setImportTip('这不是一个有效的卡组码（应以 ' + CODE_PREFIX + ' 开头，可能复制时被截断或改动了）。', true);
+      if (input) input.focus();
+      return null;
+    }
+    var resolved = resolveCodeCards(data.c);
+    var cards = resolved.cards.slice(0, DECK_SIZE); // 超过 12 张只取前 12 张
+    var trimmed = resolved.cards.length > DECK_SIZE ? resolved.cards.length - DECK_SIZE : 0;
+    if (!cards.length) {
+      setImportTip('码是有效的，但里面 ' + data.c.length + ' 张卡在本卡池里都找不到（可能卡牌已改名或删除），没有可导入的卡。', true);
+      if (input) input.focus();
+      return null;
+    }
+    if (DECKS.length >= MAX_DECKS) {
+      toast('卡组栏已满（' + DECKS.length + ' / ' + MAX_DECKS + ' 套）——先删除一套卡组再导入。');
+      return null;
+    }
+    var name = uniqueDeckName(data.n);
+    var lines = ['导入为「' + name + '」，共 ' + cards.length + ' / ' + DECK_SIZE + ' 张。'];
+    // 码里的卡组名：明文写在码最前面，提示里再点一次，避免「这码是哪套卡组」的犹豫
+    if (data.n) lines.push('码里的卡组名：' + data.n + (data.n === name ? '。' : '（已按卡组命名规则调整）。'));
+    if (data.n && findDeckByName(data.n)) lines.push('你这里已经有一套「' + data.n + '」了，导入会新增一套，不会覆盖它。');
+    if (trimmed) lines.push('码里共 ' + resolved.cards.length + ' 张，只取前 ' + DECK_SIZE + ' 张，忽略 ' + trimmed + ' 张。');
+    if (resolved.skipped.length) lines.push('跳过 ' + resolved.skipped.length + ' 张本卡池没有的卡：' + resolved.skipped.join('、'));
+    openConfirm({
+      emblem: '📥',
+      title: '确认导入卡组？',
+      lines: lines,
+      okText: '确认导入',
+      danger: false,
+      onOk: function () { doImportDeck(name, cards); },
+    });
+    return cards;
+  }
+  // 真正落库：新建一套并选中它（不碰当前编辑中的卡组内容）；排序走与加入卡组同一套口径
+  function doImportDeck(name, cards) {
+    var deck = { id: 'deck-' + (++deckSeq), name: name, cards: sortDefsList(cards) };
+    DECKS.push(deck);
+    justAddedId = deck.id;
+    activeDeckId = deck.id;
+    persistDecks();
+    cancelImportDeck();
+    render();
+    toast('已导入「' + name + '」（' + deck.cards.length + ' / ' + DECK_SIZE + ' 张）。');
+    return deck;
+  }
   /* ---------- 确认弹窗（删除 / 清空共用）---------- */
   var confirmAction = null;
 
@@ -822,6 +1113,7 @@
     editingDeckId = null;
     cancelConfirm();
     cancelRenameDeck();
+    cancelImportDeck();
     hideToast();
     if (window.Home) window.Home.show();
   }
@@ -838,6 +1130,18 @@
     if (done) done.addEventListener('click', finishEdit);
     var clear = $('deckClearBtn');
     if (clear) clear.addEventListener('click', askClearDeck);
+    var exp = $('deckExportBtn');
+    if (exp) exp.addEventListener('click', askExportDeck);
+    var imp = $('deckImportBtn');
+    if (imp) imp.addEventListener('click', askImportDeck);
+    var iOk = $('deckImportOk');
+    if (iOk) iOk.addEventListener('click', confirmImportDeck);
+    var iCopy = $('deckImportCopy');
+    if (iCopy) iCopy.addEventListener('click', confirmExportCopy);
+    var iNo = $('deckImportCancel');
+    if (iNo) iNo.addEventListener('click', cancelImportDeck);
+    var iMask = importMaskEl();
+    if (iMask) iMask.addEventListener('click', function (e) { if (e.target === iMask) cancelImportDeck(); });
     var rename = $('deckRenameBtn');
     if (rename) rename.addEventListener('click', askRenameDeck);
     var rOk = $('deckRenameOk');
@@ -854,6 +1158,7 @@
     if (mask) mask.addEventListener('click', function (e) { if (e.target === mask) cancelConfirm(); });
     window.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
+        if (isImportOpen()) { cancelImportDeck(); return; }
         if (isConfirmOpen()) { cancelConfirm(); return; }
         if (isRenameOpen()) { cancelRenameDeck(); return; }
         // #zoomMask（游戏侧「放大查看」）打开时 Esc 交给游戏的处理器，不退出编辑态
@@ -908,6 +1213,13 @@
     cancelRename: cancelRenameDeck,
     isRenameOpen: isRenameOpen,
     askClearDeck: askClearDeck,
+    // 导出 / 导入（弹窗 #deckImportMask；导出走 activeDeckId，导入只新建卡组）
+    askExportDeck: askExportDeck,
+    askImportDeck: askImportDeck,
+    confirmExportCopy: confirmExportCopy,
+    confirmImport: confirmImportDeck,
+    cancelImport: cancelImportDeck,
+    isImportOpen: isImportOpen,
     editingDeck: editingDeck,
     askDeleteDeck: askDeleteDeck,
     confirmOk: runConfirm,

@@ -662,7 +662,7 @@ function playDiscardFx(cards, side, by) {
     const sign = live > def.p ? 'up' : live < def.p ? 'down' : '';
     const liveCost = cardCost(card);
     const costSign = liveCost > def.c ? 'up' : liveCost < def.c ? 'down' : '';
-    const faceHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign });
+    const faceHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign, sealed: cardSealed(card) });
     const grad = gradOf(def);
     const box = document.createElement('div');
     box.className = 'discard-card-wrap';
@@ -757,7 +757,7 @@ function cardAuraBonus(card, locIdx) {
     for (const c of state.players[card.side].zones[j]) {
       const og = c.def.og;
       if (!og || !c.revealed || c.def.un) continue; // 源卡须已翻开且仍在场上
-      if (locMuted(j)) continue; // 静海「抹除文本」：源卡在静海 ⇒ 它的持续光环整条失效
+      if (cardMuted(c)) continue; // 失去卡牌文字（封印 ∪ 静海）：源卡被抹除 ⇒ 它的持续光环整条失效
       if (tk && og.tk === tk) b += og.add;
       else if (og.cost != null && og.cost === cost) b += og.add;
     }
@@ -1223,7 +1223,7 @@ function resolveTimedEffects(timing) {
     }
     const locIdx = fieldLocOf(card);
     if (locIdx < 0) continue; // 防御：已不在场上
-    // 静海「抹除文本」：在该区的牌其时机效果不结算（错过的时机不补结算）
+    // 失去卡牌文字（封印 ∪ 静海）：被抹除的牌其时机效果不结算（错过的时机不补结算）
     if (cardMuted(card)) { muteSkipLog(card, FX_TIMING_TXT[timing] || '时机效果'); continue; }
     applyEffect(card.side, locIdx, card, fx);
   }
@@ -1810,7 +1810,7 @@ function randomLocCandidates(locIdx) {
 /* ==================== 区域「随机变形」（卡牌键 `xformR`，现仅 1 费「梅莉」）====================
    口径：**揭示：把本区域地形整体换成地形池里随机另一个地形**（＝把「秘封俱乐部」的 `xformTurn` 搬到卡牌揭示上），写法 `k: 'xformR'`
    （**无需附加字段**）；立刻结算目标地形「出现时」+ `resetLocGaps` + `refreshLocHeader`，新地形从那一刻起全量生效（含**同一回合末**的
-   grow/decay/dice/rally/purge/collapse/gap）；特殊地形照旧（虚假之月 → 变 7、天界 → 启动 `shatter` 链）；非摧毁/增减/放置类，静海守卫照常拦下。
+   grow/decay/dice/rally/purge/collapse/gap）；特殊地形照旧（虚假之月 → 变 7、天界 → 启动 `shatter` 链）；非摧毁/增减/放置类，失去文字守卫照常拦下。
    ⚠️ 与卡牌键 `xform` **刻意相反**：候选 = 除本列当前地形以外的全部地形（允许与另外两列重复）且**不做上限防御** —— 抽中「上限放不下本区
    已放卡」的地形照常变形（已放卡不动、不增删、不摧毁）；已破碎的列一律跳过。登记点三处：`applyEffect` 的 `case 'xformR'`、
    `revealEffectWillChange` 的 `xformR` 分支、`KIND_LABEL.xformR`。
@@ -1945,7 +1945,7 @@ function uiMoveFly(cardId) {
   if (st.phase !== 'play') return;
   const found = findPlayerCard(cardId);
   if (!found || !found.card.def.fly || !found.card.revealed) return;
-  // 静海「抹除文本」：静海里的牌失去「每回合移动一次」（fly）的能力，不能进入移动模式
+  // 失去卡牌文字（封印 ∪ 静海）：被抹除的牌失去「每回合移动一次」（fly）的能力，不能进入移动模式
   if (cardMuted(found.card)) {
     muteSkipLog(found.card, '「每回合移动一次」（fly）的能力');
     setStatus(`「${found.card.def.n}」在「${locDef(found.j).n}」里失去了卡牌文字，不能用“每回合移动一次”。`);
@@ -1969,7 +1969,7 @@ function tryMoveFlyTo(locIdx) {
   const found = findPlayerCard(st.moveCardId);
   if (!found) { st.moveCardId = null; renderZones(); return true; }
   const card = found.card;
-  // 静海守卫：已进入移动模式后该区才变成静海（开发者「指定地形」）也不放行
+  // 失去文字守卫：已进入移动模式后该区才变成静海（开发者「指定地形」）也不放行
   if (cardMuted(card)) {
     muteSkipLog(card, '「每回合移动一次」（fly）的能力');
     setStatus(`「${card.def.n}」在「${locDef(found.j).n}」里失去了卡牌文字，不能用“每回合移动一次”。`);
@@ -2257,7 +2257,7 @@ async function revealRound(gen) {
       : `「${card.def.n}」翻牌 — 威力 ${cardPowerIn(mv.loc, card)}`);
     let willChange = false;
     if (card.def.k) {
-      // 静海「抹除文本」：带 mute 的区域里翻开的牌文本视为不存在 ⇒ 揭示不发动；四个走分步演出的键也在这里拦下（那里会绕过 applyEffect 守卫）
+      // 失去卡牌文字（封印 ∪ 静海）：被抹除的牌文本视为不存在 ⇒ 揭示不发动；四个走分步演出的键也在这里拦下（那里会绕过 applyEffect 守卫）
       if (cardMuted(card)) {
         muteSkipLog(card, '揭示效果');
       } else {
@@ -2299,8 +2299,10 @@ function revealEffectWillChange(side, locIdx, card) {
   const vis = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
   // 法术没有战力——「落后自增」（bl）与「对方同区落牌自增」（oc）对它没有意义，不产生变化
   if (def.spell && (def.k === 'bl' || def.k === 'oc')) return false;
-  // 静海「抹除文本」——被抹除的牌不会产生任何变化（也不空等结算前的 400ms 停顿）
+  // 失去卡牌文字（封印 ∪ 静海）——被抹除的牌不会产生任何变化（也不空等结算前的 400ms 停顿）
   if (cardMuted(card)) return false;
+  // 区域「封锁揭示」（法界）——揭示被封锁的牌照常不产生任何变化（同样不空等 400ms）
+  if (revealBlocked(card)) return false;
   switch (def.k) {
     case 'bf': return mine.some((c) => c !== card && !c.def.un && c.revealed);
     case 'de': return vis.length > 0 && !locNoDown(locIdx); // 本区「免减攻」→ 不产生变化，跳过结算前停顿
@@ -2345,6 +2347,18 @@ function revealEffectWillChange(side, locIdx, card) {
       return st.players[other].zones.some(
         (z, j) => !locNoDown(j) && z.some((c) => c.revealed && !c.def.un && !c.def.spell)
       );
+    }
+    case 'mute': {
+      // 封印：本区存在“可被封印”的已翻开卡（暗牌、`un` 占位卡与法术都不算；`has:'ongoing'` 时还须带「持续」标记）就一定会有变化
+      // ⇒ 照常走 400ms 停顿与结算后重渲染。
+      // ⚠️ 目标**已被封印**时也照常（口径＝照常再抹一次、不改打下一张），故这里**不**看它是否已被封印。
+      const sp = def.mute || {};
+      const sides = (sp.side === 'both') ? [side, other] : [sp.side === 'own' ? side : other];
+      const onlyOngoing = sp.has === 'ongoing';
+      for (const s of sides) {
+        if (st.players[s].zones[locIdx].some((c) => c.revealed && !c.def.un && !c.def.spell && (!onlyOngoing || cardHasOngoing(c)))) return true;
+      }
+      return false;
     }
     case 'mv': {
       if (vis.length === 0) return false;
@@ -2732,12 +2746,12 @@ function flushPendingDriftFly() {
 // 区域免摧毁（地形字段 def.prot，如「睡鼠神祠」；卡级持续 def.prot，如「蕾蒂」）：本区域一旦免摧毁，该区域**双方**所有在场卡牌都无法
 // 被摧毁（dw / dwh / 回合末 purge 等一律失效），被保护卡不离场、故 surv / phx 也不触发。卡级防护按源卡“当前所在区域”实时判定。
 function locNoDestroy(locIdx) {
-  if (locDef(locIdx).prot) return true; // 地形级免摧毁（如睡鼠神祠）——地形效果，不受静海影响
+  if (locDef(locIdx).prot) return true; // 地形级免摧毁（如睡鼠神祠）——地形效果，不受失去文字影响
   for (const s of ['p', 'a']) {
     for (const c of state.players[s].zones[locIdx]) {
       if (!c.revealed || !c.def.prot) continue;
-      // 静海「抹除文本」——卡级 prot（蕾蒂）的文字也被抹除 ⇒ 不再提供区域免摧毁
-      if (locMuted(locIdx)) { muteSkipLog(c, '「区域免摧毁」（prot）'); continue; }
+      // 失去卡牌文字（封印 ∪ 静海）——卡级 prot（蕾蒂）的文字也被抹除 ⇒ 不再提供区域免摧毁
+      if (cardMuted(c)) { muteSkipLog(c, '「区域免摧毁」（prot）'); continue; }
       return true;
     }
   }
@@ -2758,35 +2772,112 @@ function cardNoDown(card) {
   return j >= 0 && locNoDown(j);
 }
 
-/* ==================== 区域「抹除文本」（地形字段 `mute`，现仅「静海」）====================
-   本区域**所有卡牌**（双方，含暗牌、token 与法术）**失去卡牌文字**：卡面写的效果一律视为不存在、**任何时机都不发动**。判定＝
-   实时读法、零状态（`locMuted` / `cardMuted` 按 `fieldLocOf` 实时查）→ 静海被换掉或卡被移出本区即自动恢复，无需收尾代码。
-   被抹除：`k`（含四个分步演出键）、`og`（只看源卡）、`fx`（错过的时机不补）、`surv`/`phx`/`prot`/`ind`、`fly`；法术揭示不发动但
-   **照常消散**。不受影响：手牌 / 牌库 / 牌池里的同名卡、`costDown`/`gs`/`playReq`、印刷费用与威力、`occ` 占格、区域类效果
-   （`aff`/`cb`/`all`/`fill`/`inv`/`purge`/`gust`/`noDown`/`prot` 等）、摧毁候选与筛选口径（它只是“哑巴”，不是 `un`）。
+/* ==================== 「失去卡牌文字」（地形字段 `mute`「静海」/ 卡牌效果键 `mute`「封印」）====================
+   被抹除的卡**失去卡牌文字**：卡面写的效果一律视为不存在、**任何时机都不发动**。两个来源：
+   ① 区域抹除（地形字段 `mute: true`，现仅「静海」）——**实时、零状态**：卡此刻在带 `mute` 的区域里就失去文字，
+      静海被换掉或卡被移出本区（`mv`/`fly`/`shift`/`roam`/`gust`）即自动恢复，无需收尾代码；
+   ② 卡级抹除（卡牌效果键 `mute`，游戏内叫**「封印」**）——**永久**：标记落在**卡实例**上（`card.muteP`，同 `card.buff` 的永久口径），
+      整局有效——被摧毁后再复活、`phx` 回手再打出、换边、`morph` 变身、`shuffleIn` 洗回牌库全都保持，离开静海也**不**恢复。
+   被抹除：`k`（含四个分步演出键）、`og`（只看源卡）、`fx`（错过的时机不补）、`surv`/`phx`/`prot`/`ind`、`fly`；法术揭示不发动但**照常消散**。
+   不受影响：手牌 / 牌库 / 三池里的**同名**卡（封印除外，它认实例）、`costDown`/`gs`/`playReq`、印刷费用与威力、`occ` 占格与 `tk` 标记、
+   区域类效果（`aff`/`cb`/`all`/`fill`/`inv`/`purge`/`gust`/`noDown`/`prot` 等）、摧毁候选与筛选口径（它只是“哑巴”，不是 `un`）。
    ⚠️ 不追溯：已结算的 `buff` / `powerLog` 不回滚，错过的时机效果不补结算；每张牌**首次**被拦截记一条日志（`card.muteNoted`）。
-   守卫点（读上面两个判定、无一处写状态）：`applyEffect` 入口（覆盖揭示 / 时机 / morph / 集结 / 复活 / retrigger 等连锁路径）、
+   守卫点（读下面两个判定、无一处写状态）：`applyEffect` 入口（覆盖揭示 / 时机 / morph / 集结 / 复活 / retrigger 等连锁路径）、
    `revealRound`、`resolveTimedEffects`、`revealEffectWillChange`、`cardAuraBonus` + `powerHistoryRows`、`locNoDestroy`、`isDestroyable` /
-   `indestructibleBlock` / `surviveDestroy` / `phoenixRevive`、`uiMoveFly` / `tryMoveFlyTo`、`renderZones` 的 canFly、`showFieldCard`。 */
+   `indestructibleBlock` / `surviveDestroy` / `phoenixRevive`、`uiMoveFly` / `tryMoveFlyTo`、`renderZones` 的 canFly、`showFieldCard`。
+   判定分两个函数：**守卫**一律用 `cardMuted()`（区域 ∪ 卡级），**渲染与文案**的感叹号只认 `cardSealed()`（卡级永久）。 */
 function locMuted(locIdx) {
   const L = state.locs[locIdx];
   return !!(L && L.def && L.def.mute);
 }
+/* 此刻是否失去卡牌文字 = 卡级永久标记（封印）∪ 在带 `mute` 的区域里（按 `fieldLocOf` 实时查）。守卫点统一走本函数。 */
 function cardMuted(card) {
   if (!card || !card.def) return false;
+  if (card.muteP) return true;
   const j = fieldLocOf(card);
   return j >= 0 && locMuted(j);
 }
+/* **「封印」**（卡级永久抹除）——只认实例标记、**不看**区域：手牌 / 牌库 / 三池里的卡不在场上、`cardMuted` 在那里恒为 false，
+   而封印随卡整局有效、这些地方也要显示 ❗ 与置灰，故渲染与文案一律走本函数。 */
+function cardSealed(card) {
+  return !!(card && card.muteP);
+}
+/* **「含持续效果」**＝卡面标着「持续」的卡（与 `kindTags` 的三条「持续」标记同口径）：`og`（持续效果）/ 卡级 `prot`（持续 · 区域免摧毁）/
+   卡级 `ind`（持续 · 自身不可摧毁）。⚠️ `fly`（每回合移动一次）/`surv`（防摧毁）/`phx`（凤凰重生）/`fx`（时机效果）/`costDown` 都**不算**。 */
+function cardHasOngoing(card) {
+  const d = card && card.def;
+  return !!(d && (d.og || d.prot || d.ind));
+}
 // 时机名 → 日志里的可读说法（供 resolveTimedEffects / applyEffect 的拦截日志复用）
 const FX_TIMING_TXT = { turnStart: '「回合开始」效果', turnEnd: '「回合结束」效果', gameEnd: '「游戏结束」效果' };
-/* 被静海抹除导致的拦截日志：每张牌**首次**记一条（kindTxt 如「揭示效果」），返回 true = 本次确实记了日志。 */
+/* 失去文字导致的拦截日志：每张牌**首次**记一条（kindTxt 如「揭示效果」），返回 true = 本次确实记了日志。
+   ⚠️ 一张牌同时满足两种来源时**只提示一次**，且优先报「封印」（不可逆的那个更该让玩家知道）。 */
 function muteSkipLog(card, kindTxt) {
   if (!card || !card.def || card.muteNoted) return false;
   card.muteNoted = true;
+  if (card.muteP) {
+    log('sys', `☯️ 「${card.def.n}」已被「封印」——永久失去卡牌文字 → ${kindTxt}不发动（本局首次提示；回手、复活、换边、变身、离开静海都不会恢复）。`);
+    return true;
+  }
   const j = fieldLocOf(card);
   const where = j >= 0 ? `「${locDef(j).n}」` : '场上';
   log('sys', `🌊 「${card.def.n}」在${where}失去了卡牌文字 → ${kindTxt}不发动（本局首次提示；该牌离开静海后文本会恢复）。`);
   return true;
+}
+/* 放大视图的「失去文字」提示条（区分两个来源；返回 '' = 没失去文字）。`locIdx` 传该牌当前所在区域，手牌 / 牌池传 -1。 */
+function muteNoteHTML(card, locIdx) {
+  if (cardSealed(card)) {
+    return '<div class="zm-kind mute-note seal-note">☯️ 此牌已被「封印」：永久失去卡牌文字 —— 揭示 / 持续 / 时机 / 防护效果一律不发动（战力照常计入；回手、复活、换边、变身都不会恢复）</div>';
+  }
+  if (locIdx >= 0 && locMuted(locIdx)) {
+    return `<div class="zm-kind mute-note">🌊 文本已被「${locDef(locIdx).n}」抹除：此牌的揭示 / 持续 / 时机 / 防护效果一律不发动（战力照常计入；离开静海后文本恢复）</div>`;
+  }
+  return '';
+}
+
+/* ==================== 区域「封锁揭示」（地形字段 `noReveal`，现仅「法界」）====================
+   本区域双方所有卡牌的**揭示不发动**（翻开那一刻在本区的牌：揭示视为没写、不产生任何变化）。
+   实时、零状态（同静海 `mute` 的读法）：卡此刻在带 `noReveal` 的区域里就被封锁，法界被换掉
+   （`xform`/`collapse`/`xformTurn`/开发者「🗻 指定地形」）或卡被移出本区（`mv`/`fly`/`shift`/`roam`/`gust`）即不再被拦，无需收尾代码。
+   **只拦揭示**：持续 `og`、时机 `fx`、防护（`surv`/`phx`/`prot`/`ind`）、`fly`、`costDown`/`gs`/`playReq`、
+   印刷费用与威力、`occ` 占格与 `tk` 标记、全部地形类效果（`gamble`/`gust`/`purge`/`grow`/`decay` 等）、
+   摧毁候选与筛选口径都照常；法术揭示不发动但**照常消散**（消散不是卡面文字）。
+   ⚠️ 不追溯、不补结算（同 `dice`/`rally` 的“错过的时机不补”）：被拦下的**那一次**揭示不会在卡离开法界后补发动，
+   “恢复”只指**此后**的揭示——被 `retrigger`（东风谷早苗）再触发、`morph` 变身、复活/回手再打出、守矢神社重复揭示时照常发动；
+   每张牌**首次**被拦截记一条日志（`card.nrNoted` 防刷屏）。
+   守卫点（读下面两个判定、无一处写状态）：① `applyEffect` 入口的**揭示分支**（`spec` 缺省；覆盖 `morph` 重触发 / 落场法术
+   `settleFieldSpell` / `spawn.reveal` / 复活 / 同步版 `retrigger`；`fx` 时机效果走 `spec`、**不**受影响）；
+   ② `resolveRevealInZone`（翻牌主路径 + 守矢神社重复的第 2 次 + `retriggerOneStaged` 的每一条揭示，四个分步演出键也走这里；
+   它内部的重复分支另有一道**实时**判定：卡被自己的揭示挪进法界后，那第 2 次重复同样不发动）；
+   ③ `revealEffectWillChange`（被封锁 → 返回 false，不空等结算前的 400ms 停顿）；④ 显示层（放大视图提示条，见 `revealBlockNoteHTML`）。 */
+function locNoReveal(locIdx) {
+  const L = state.locs[locIdx];
+  return !!(L && L.def && L.def.noReveal);
+}
+/* 此刻的「揭示」是否被区域封锁（按 `fieldLocOf` 实时查；手牌 / 牌库 / 三池里的卡不在场上 ⇒ 恒为 false）。守卫点统一走本函数。 */
+function revealBlocked(card) {
+  if (!card || !card.def) return false;
+  const j = fieldLocOf(card);
+  return j >= 0 && locNoReveal(j);
+}
+/* 封锁揭示导致的拦截日志：每张牌**首次**记一条，返回 true = 本次确实记了日志。 */
+function revealSkipLog(card) {
+  if (!card || !card.def || card.nrNoted) return false;
+  card.nrNoted = true;
+  const j = fieldLocOf(card);
+  const where = j >= 0 ? `「${locDef(j).n}」` : '场上';
+  log('sys', `🌑 「${card.def.n}」在${where}无法触发揭示 → 本次揭示效果不发动（本局首次提示；被拦下的这一次不补结算，离开法界后此后的揭示照常发动）。`);
+  return true;
+}
+/* 放大视图的「揭示被封锁」提示条（返回 '' = 没被封锁）。`locIdx` 传该牌当前所在区域，手牌 / 牌池传 -1。 */
+function revealBlockNoteHTML(card, locIdx) {
+  if (!card || locIdx < 0 || !locNoReveal(locIdx)) return '';
+  if (cardSealed(card) || locMuted(locIdx)) return ''; // 整张文本已被抹除（封印 / 静海）⇒ 已有覆盖面更广的提示条
+  return `<div class="zm-kind noreveal-note">🌑 揭示已被「${locDef(locIdx).n}」封锁：此牌的揭示效果不发动（战力照常计入；持续 / 时机 / 防护效果照常；离开法界后此后的揭示照常发动）</div>`;
+}
+/* 纯揭示牌（只有揭示、没有持续 / 时机 / 防护 / 移动等其它卡面效果）：法界里它的整条卡面文字都不生效，可整体置灰划线。 */
+function revealOnlyCard(def) {
+  return !!(def && def.k && !def.og && !def.fx && !def.surv && !def.phx && !def.prot && !def.ind && !def.fly);
 }
 
 /* ---- 自身不可摧毁（def.ind，现仅「佛体金刚石」）----
@@ -2795,14 +2886,14 @@ function muteSkipLog(card, kindTxt) {
    后者等于白送一次摧毁指向，本卡不采用。与 `prot`（保护本区双方、判定前整条拦掉）的区别：ind 只保护自己；唯一收口 `indestructibleBlock`。 */
 function isDestroyable(card) {
   if (!card || !card.revealed || card.def.un || card.def.spell) return false;
-  // 静海「抹除文本」——在静海里的 `ind` 同样被抹除（不再免疫摧毁）；本函数只作预判、不记日志
+  // 失去卡牌文字（封印 ∪ 静海）——被抹除的 `ind` 不再免疫摧毁；本函数只作预判、不记日志
   return !(card.def.ind && !cardMuted(card));
 }
 
 /* 摧毁判定落在 ind 卡上时的统一处理：记一条日志并返回 true，调用方据此**结束本次摧毁判定**（不离场、不改打其他卡、不触发 surv/phx）；返回 false 按原逻辑继续。 */
 function indestructibleBlock(card, srcName) {
   if (!card || !card.def || !card.def.ind) return false;
-  // 静海里的 `ind` 已被抹除 ⇒ 不拦、照常摧毁（“判定结束、不改打别的”不再适用）
+  // 失去文字 ⇒ `ind` 已被抹除：不拦、照常摧毁（“判定结束、不改打别的”不再适用）
   if (cardMuted(card)) { muteSkipLog(card, '「自身不可摧毁」（ind）'); return false; }
   log('sys', `✦ ${srcName} 的摧毁判定落在「${card.def.n}」上，但它自身不可摧毁（无法被摧毁）→ 本次摧毁失败、判定结束（不改打其他牌）。`);
   return true;
@@ -2812,7 +2903,7 @@ function indestructibleBlock(card, srcName) {
 function surviveDestroy(card) {
   const surv = card && card.def && card.def.surv;
   if (!surv) return false;
-  // 静海里的「防摧毁」一并失效 ⇒ 该卡照常被摧毁（不降战力、不离场替代）
+  // 失去文字 ⇒「防摧毁」一并失效：该卡照常被摧毁（不降战力、不离场替代）
   if (cardMuted(card)) { muteSkipLog(card, '「防摧毁」（surv）'); return false; }
   // 区域「免减攻」（蓬莱药局）——替代降攻被拦下 ⇒ **不离场、也不降攻**（两个防护叠加）
   const j0 = fieldLocOf(card);
@@ -2831,7 +2922,7 @@ function surviveDestroy(card) {
 function phoenixRevive(card, locIdx) {
   const phx = card && card.def && card.def.phx;
   if (!phx) return false;
-  // 静海里的「凤凰重生」一并失效 ⇒ 该卡照常被摧毁（不回手、不 +N）
+  // 失去文字 ⇒「凤凰重生」一并失效：该卡照常被摧毁（不回手、不 +N）
   if (cardMuted(card)) { muteSkipLog(card, '「凤凰重生」（phx）'); return false; }
   const st = state;
   const side = card.side;
@@ -3080,7 +3171,7 @@ async function applyReviveDiscardReveal(side, card) {
    只重跑**揭示键**：**不触发** `fx` 时机效果 / 持续 `og` / `surv`·`phx`·`prot`·`ind`·`fly` 等非揭示机制，
    地形写的 `gamble` / `gust` 也不重跑（那不是卡面文字）；只作用于**结算那一刻已翻开**的卡（同 bf/de/ba 口径，
    暗牌错过且不补）。顺序＝本区 zone 数组顺序，每张结算**前**用 `fieldLocOf` 重读当前区域（被前一张挪走也照常
-   触发一次、按新区域结算；已离场则跳过并记日志）。静海由 `applyEffect` 入口守卫拦下；
+   触发一次、按新区域结算；已离场则跳过并记日志）。失去文字由 `applyEffect` 入口守卫拦下；
    登记点三处：`applyEffect` 的 case 'retrigger'、`revealEffectWillChange` 的 retrigger 分支、
    `revealRound` 的分步演出分支（与 shift/gather/reviveDiscard 并列）。 */
 
@@ -3095,7 +3186,7 @@ function retriggerTargets(side, locIdx, card) {
 
 /** 重触发**单张**卡的揭示（**同步版**，只供 `applyEffect` 的 case 'retrigger' 这条**无法 await** 的非翻牌路径）：
     按它**当前所在区域**（`fieldLocOf` 实时读）结算；已不在场上（被摧毁 / 回手 / 换边离场）则记一条日志并返回 false。
-    ⚠️ 静海由 `applyEffect` 入口守卫处理，本函数不重复判定（避免多记日志）。 */
+    ⚠️ 失去文字由 `applyEffect` 入口守卫处理，本函数不重复判定（避免多记日志）。 */
 function retriggerOne(card) {
   const j = fieldLocOf(card);
   if (j < 0) {
@@ -3249,7 +3340,7 @@ async function applyRetriggerReveal(side, card) {
    任何“在翻牌流程里再次执行某张牌揭示”的新机制都必须走本函数，否则会静默退化成同步版、把间隔全部吞掉。
    调用方（全在可 await 的翻牌流程内）：`revealRound`（暗牌翻面后的首次揭示）、`resolveRevealInZone`（本区一次
    揭示结算，含守矢神社的“执行两次”）、`retriggerOneStaged`（早苗再触发）。
-   ⚠️ 静海守卫由**调用方**负责（`applyEffect` 入口仍有兜底）；⚠️ 非翻牌路径**不要**调用本函数（无法 await）。 */
+   ⚠️ 失去文字守卫由**调用方**负责（`applyEffect` 入口仍有兜底）；⚠️ 非翻牌路径**不要**调用本函数（无法 await）。 */
 async function resolveCardReveal(side, locIdx, card) {
   const k = card.def.k;
   if (k === 'shift') { await applyShiftReveal(side, card.def.t); return; } // 八云紫：逐张 0.3s
@@ -3285,10 +3376,16 @@ function applyEffect(side, locIdx, card, spec) {
   // 效果规格：spec 缺省＝整张卡的 def（揭示）；时机效果＝def.fx[timing] 条目（字段与 def 同构，结算逻辑复用）
   const fx = spec || def;
   const txt = fx.t || (fx === def ? def.t : def.n);
-  // 静海「抹除文本」：文本被抹除的卡其效果一律不发动。守卫放在**结算入口**，因此覆盖所有路径
+  // 失去卡牌文字（封印 ∪ 静海）：被抹除的卡其效果一律不发动。守卫放在**结算入口**，因此覆盖所有路径
   // （翻牌揭示含 morph 重触发、fx 时机效果、落场法术、集结/复活等连锁）；⚠️ 法术的“消散”不受影响。
   if (cardMuted(card)) {
     muteSkipLog(card, spec ? '时机效果' : '揭示效果');
+    return;
+  }
+  // 区域「封锁揭示」（法界）：被封锁的卡其**揭示**不发动。`spec` 缺省＝揭示（含 morph 重触发 / 落场法术 / spawn.reveal / 复活 / 同步 retrigger）；
+  // 时机效果（`spec` 有值）不是揭示 ⇒ 法界不管，照常结算。
+  if (!spec && card.def.k && revealBlocked(card)) {
+    revealSkipLog(card);
     return;
   }
 
@@ -3755,6 +3852,52 @@ function applyEffect(side, locIdx, card, spec) {
       log('danger', `✦ ${def.n} 把对方「${target.def.n}」（威力 ${minP}）移到了「${st.locs[dst].def.n}」。`);
       break;
     }
+    case 'mute': {
+      // 揭示：**封印**——目标**永久**失去卡牌文字（标记落在卡实例 `card.muteP` 上，整局有效，见「失去卡牌文字」段）。
+      // 子句 `mute: { side, pick, n, has }`（缺省 side:'opp' / pick:'lowest' / n:1 / 不筛 `has`）：
+      //   · `side`＝'opp'（缺省，敌方）/ 'own'（己方）/ 'both'（双方都算，可能封到己方自己）；
+      //   · `pick`＝'lowest'（缺省，实时战力最低）/ 'highest'；只对“取 n 张”有意义；
+      //   · `n: 'all'` ＝把候选**全部**封掉（此时 `pick` 不参与，一次性结算、不逐张停顿，同 `dwc`/`deAll`）；
+      //   · `has: 'ongoing'` ＝只筛**卡面带「持续」标记**的卡（`cardHasOngoing`：`og` / 卡级 `prot` / 卡级 `ind`）。
+      // 候选：该侧**已翻开**、排除 `un` 占位卡与法术（暗牌不算，法术马上自行消散），再按 `has` 收窄。
+      // ⚠️ 非摧毁 / 非增减 / 非放置：不改战力、不进 `powerLog`/`fieldQueue`、不触发 `surv`/`phx`/`prot`/`ind`、不 `recordDestroy`、不播碎裂。
+      // ⚠️ 目标**已**被封印时照常再抹一次（不改打下一张、不算落空）；不设任何免疫，目标此刻在静海内也照常结算。
+      const sp = fx.mute || {};
+      const both = sp.side === 'both';
+      const sides = both ? [side, other] : [sp.side === 'own' ? side : other];
+      const whoTxt = both ? '双方' : (sp.side === 'own' ? '己方' : '对方');
+      const onlyOngoing = sp.has === 'ongoing';
+      const all = sp.n === 'all';
+      const pickHigh = sp.pick === 'highest';
+      const cands = [];
+      for (const s of sides) for (const c of st.players[s].zones[locIdx]) {
+        if (!c.revealed || c.def.un || c.def.spell) continue;
+        if (onlyOngoing && !cardHasOngoing(c)) continue;
+        cands.push(c);
+      }
+      const whatTxt = onlyOngoing ? '包含持续效果的' : '';
+      if (!cands.length) { log(side, `✦ ${def.n} 想封印${whoTxt}${whatTxt}卡牌，但本区没有符合条件的已翻开卡牌（暗牌与法术不算）。`); break; }
+      // 取牌：`n:'all'` ＝全部；否则取 n 张，并列随机（先 shuffle 再按实时战力稳定排序取前 n，同 discard 的 maxCost）
+      let targets;
+      if (all) {
+        targets = cands.slice();
+      } else {
+        const n = Math.max(1, Math.floor(sp.n || 1));
+        const sorted = shuffle(cands.slice()).sort((a, b) => {
+          const d = cardPowerIn(locIdx, b) - cardPowerIn(locIdx, a);
+          return pickHigh ? d : -d;
+        });
+        targets = sorted.slice(0, Math.min(n, sorted.length));
+      }
+      const pickTxt = all ? '' : (pickHigh ? '最高' : '最低');
+      for (const t of targets) {
+        const already = cardSealed(t);
+        t.muteP = true; // 永久：写在卡实例上——回手 / 复活 / 换边 / 变身 / 洗回牌库都保持，没有任何收尾代码会清它
+        log('danger', `☯️ ${def.n} 封印了${t.side === side ? '己方' : '对方'}「${t.def.n}」（${pickTxt}威力 ${cardPowerIn(locIdx, t)}）→ 它永久失去卡牌文字：揭示 / 持续 / 时机 / 防护效果一律不发动。${already ? '⚠️ 它本就已被封印，本次再抹一次、无额外变化。' : ''}`);
+      }
+      if (targets.length > 1) log(side, `✦ ${def.n}：本区一次性封印 ${targets.length} 张${whoTxt}${whatTxt}已翻开卡牌（同一时机全封，无逐张停顿）。`);
+      break;
+    }
     case 'give': {
       // 揭示：把 `give` 指定的特殊卡加入**自己手牌**（现「雾雨魔理沙」→ 法术「极限火花」）。每次生成**新卡实例**并打
       // `justHandAdded`（渲染后播“滑入”演出 `.hand-new`）；**手牌满 7 张则失败**（同 phoenixRevive / drawSpell 口径）；衍生物仍需
@@ -4207,14 +4350,22 @@ async function resolveRevealInZone(side, locIdx, card, forceRepeat) {
   const gen = state.gen;
   const locName = locDef(locIdx).n;
   const doRepeat = (forceRepeat === undefined) ? !!locDef(locIdx).repeatReveal : !!forceRepeat;
+  // 区域「封锁揭示」（法界）：本次揭示（连它的重复）都不发动。守卫放在这个**收口**上 ⇒ 翻牌主路径、守矢神社的第 2 次、
+  // 早苗 `retriggerOneStaged` 再触发的每一条揭示、四个分步演出键（`resolveCardReveal` 之前）全部覆盖；实时判定，离开法界即放行。
+  if (revealBlocked(card)) { revealSkipLog(card); return; }
   await resolveCardReveal(side, locIdx, card);
   if (!doRepeat) return;
   renderZones();
   await sleep(400); // 用户口径：重复前停 400ms，让玩家看清“又触发了一次”
   if (gen !== state.gen) return; // 重新开局等中断
   if (cardMuted(card)) {
-    // 此刻在带 mute 的区域里（如它自己的揭示把它挪进了静海）→ 重复不发动
+    // 此刻已失去文字（被封印，或它自己的揭示把它挪进了静海）→ 重复不发动
     muteSkipLog(card, '揭示效果（地形「揭示重复触发」）');
+    return;
+  }
+  if (revealBlocked(card)) {
+    // 此刻揭示已被封锁（它自己的揭示把它挪进了法界）→ 重复不发动（第 2 次是**新**的一次揭示，故按此刻实时判定）
+    revealSkipLog(card);
     return;
   }
   const nowLoc = fieldLocOf(card);
@@ -4671,8 +4822,12 @@ function miniCardEl(card, locIdx, side) {
   if (card.justSpawned) { el.classList.add('spawned-now'); card.justSpawned = false; } // 生成演出
   const grad = card.revealed ? gradOf(card.def) : BACK_GRAD;
   el.style.setProperty('--cgrad', grad);
+  // 「封印」（卡级永久抹除）：卡面叠 ❗ 并置灰 —— 暗牌也标（封印是对局公开信息，标记不属于暗牌内容）
+  const sealed = cardSealed(card);
+  const sealHtml = sealed ? '<span class="mc-seal">❗</span>' : '';
+  if (sealed) el.classList.add('sealed');
   if (!card.revealed) {
-    el.innerHTML = `<span class="mc-q">?</span><span class="mc-tag">暗牌</span>`;
+    el.innerHTML = `<span class="mc-q">?</span><span class="mc-tag">暗牌</span>${sealHtml}`;
   } else {
     // 已翻开：左上角费用、右上角当前战力（含区域加成，升降相对基础威力着色）
     const live = cardPowerIn(locIdx, card);
@@ -4693,15 +4848,15 @@ function miniCardEl(card, locIdx, side) {
         <img class="mini-img" src="assets/cards/${encodeURIComponent(card.def.img)}" alt="${card.def.n}" loading="lazy" draggable="false"/>
         <span class="mc-shade"></span>
         <span class="mc-name">${card.def.n}</span>
-        ${modHtml}`;
+        ${modHtml}${sealHtml}`;
     } else {
       el.innerHTML = `<span class="mc-cost${costCls}">${liveCost}</span>${topRight}
         <span class="mc-icon">${card.def.i}</span>
         <span class="mc-name">${card.def.n}</span>
-        ${modHtml}`;
+        ${modHtml}${sealHtml}`;
     }
     // 己方“每回合可移动一次”的已翻开卡（如射命丸文）：出牌阶段点击进入移动；
-    // ⚠️ 静海「抹除文本」的牌失去该能力，不再提示 / 不进入移动模式
+    // ⚠️ 失去卡牌文字（封印 ∪ 静海）的牌失去该能力，不再提示 / 不进入移动模式
     const canFly = side === 'p' && state.phase === 'play' && card.def.fly && card.revealed && !state.flyMoved.has(card.id) && !cardMuted(card);
     if (canFly) {
       el.classList.add('can-fly');
@@ -4842,6 +4997,7 @@ function renderHand() {
   cards.forEach((card, index) => {
     const el = document.createElement('div');
     el.className = 'hand-card' + (card.def.img ? '' : ' no-img');
+    if (cardSealed(card)) el.classList.add('sealed'); // 封印：效果文字置灰划线 + 艺术区叠 ❗
     const afford = cardCost(card) <= st.players.p.energyLeft;
     if (!afford) el.classList.add('unaffordable');
     // 卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）不满足时同样置灰并给数量提示：
@@ -4860,7 +5016,7 @@ function renderHand() {
     const handSign = handPow > card.def.p ? 'up' : handPow < card.def.p ? 'down' : '';
     const handCost = cardCost(card);
     const handCostSign = handCost > card.def.c ? 'up' : handCost < card.def.c ? 'down' : '';
-    const faceOpts = { power: handPow, sign: handSign, cost: handCost, costSign: handCostSign };
+    const faceOpts = { power: handPow, sign: handSign, cost: handCost, costSign: handCostSign, sealed: cardSealed(card) };
     el.innerHTML = cardFaceHTML(card.def, faceOpts);
     el.addEventListener('click', () => {
       if (st.phase === 'over') showHandCard(card);
@@ -4903,12 +5059,15 @@ function cardFaceHTML(def, opts) {
   // 费用角标支持「本场战斗修正」：opts.cost / opts.costSign 缺省＝印刷费用且不着色
   const cost = opts.cost !== undefined ? opts.cost : def.c;
   const costSign = opts.costSign ? ' ' + opts.costSign : '';
+  // 「封印」：❗ 叠在艺术区（图片 / emoji 兜底块）正中 —— 手牌、三池面板与放大卡面共用本函数
+  const seal = opts.sealed ? '<span class="hc-seal">❗</span>' : '';
   const art = def.img
     ? `<div class="hc-art">
         <span class="hc-icon hc-art-emoji">${def.i}</span>
         <img class="hc-img" src="assets/cards/${encodeURIComponent(def.img)}" alt="${def.n}" loading="lazy" draggable="false"/>
+        ${seal}
       </div>`
-    : `<div class="hc-icon">${def.i}</div>`;
+    : `<div class="hc-icon">${def.i}${seal}</div>`;
   return `<div class="hc-top"><span class="cost-orb${costSign}">${cost}</span>${isSpellDef(def) ? '<span class="hc-spell" title="法术 · 无战力（揭示后消散）">✦</span>' : `<span class="p${sign}">${power}</span>`}</div>
     ${art}
     <div class="hc-name">${def.n}</div>
@@ -5374,21 +5533,24 @@ function showHandCard(card) {
   const costSign = costDiff > 0 ? 'up' : costDiff < 0 ? 'down' : '';
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
+  // 封印的牌在放大视图里同样置灰划线（复用 .text-muted 的既有观感）+ 艺术区叠 ❗
+  const sealed = cardSealed(card);
   const el = document.createElement('div');
-  el.className = 'zoom-card hand-card';
+  el.className = 'zoom-card hand-card' + (sealed ? ' sealed text-muted' : '');
   el.style.setProperty('--cgrad', gradOf(def));
-  el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign });
+  el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign, sealed });
   slot.appendChild(el);
 
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${liveCost}</span>${isSpellDef(def) ? '<span class="zm-pow">法术 · 无战力</span>' : `<span class="zm-pow">当前威力 ${live}</span>`}</div>
+    ${muteNoteHTML(card, -1)}
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
     ${costDownNote(def)}
     ${isSpellDef(def)
       ? '<div class="zm-kind">法术：只有能量花费与「揭示」效果 —— 无战力，任何增减都不影响它；揭示结算完后自行消散</div>'
       : (diff !== 0 ? `<div class="zm-kind">基础威力 ${def.p} · 永久增益 ${diff > 0 ? '+' : ''}${diff}</div>` : `<div class="zm-kind">基础威力 ${def.p}</div>`)}
     <div class="zm-kind">${kindTags(def)}</div>
-    <div class="zm-desc">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
+    <div class="zm-desc${sealed ? ' text-muted' : ''}">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
   renderDeriv(def);
   zoomStageBtn('关闭 ✕');
   $('zoomMask').classList.remove('hidden');
@@ -5418,7 +5580,7 @@ function powerHistoryRows(card, locIdx) {
     for (const c of state.players[card.side].zones[j]) {
       const og = c.def.og;
       if (!og || !c.revealed || c.def.un) continue;
-      if (locMuted(j)) continue; // 静海「抹除文本」：与 cardAuraBonus 同口径（源卡被抹除则不计）
+      if (cardMuted(c)) continue; // 失去卡牌文字（封印 ∪ 静海）：与 cardAuraBonus 同口径（源卡被抹除则不计）
       const hit = (def.tk && og.tk === def.tk) || (og.cost != null && og.cost === def.c);
       if (hit) {
         const dv = (locNoDown(locIdx) && og.add < 0) ? 0 : og.add;
@@ -5472,26 +5634,31 @@ function showFieldCard(card, locIdx) {
   const live = cardPowerIn(locIdx, card);
   const diff = live - def.p;
   const sign = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
+  // 失去卡牌文字：封印（永久）∪ 静海（实时）；感叹号只标封印（静海靠地形配色 + 本行提示）
+  const sealed = cardSealed(card);
   const muted = cardMuted(card);
+  // 区域「封锁揭示」（法界）：只封揭示 ⇒ 纯揭示牌的整条卡面文字都不生效，可整体置灰划线（混着持续 / 时机 / 防护的牌只多一行提示条）
+  const strike = muted || (locNoReveal(locIdx) && revealOnlyCard(def));
   const liveCost = cardCost(card);
   const costDiff = liveCost - def.c;
   const costSign = costDiff > 0 ? 'up' : costDiff < 0 ? 'down' : '';
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
   const el = document.createElement('div');
-  el.className = 'zoom-card hand-card' + (muted ? ' text-muted' : '');
+  el.className = 'zoom-card hand-card' + (strike ? ' text-muted' : '') + (sealed ? ' sealed' : '');
   el.style.setProperty('--cgrad', gradOf(def));
-  el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign });
+  el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign, sealed });
   slot.appendChild(el);
 
   $('zoomInfo').innerHTML = `
     <div class="zoom-meta"><span class="zm-cost">费用 ${liveCost}</span>${isSpellDef(def) ? '<span class="zm-pow">法术 · 无战力</span>' : `<span class="zm-pow">场上威力 ${live}</span>`}</div>
-    ${muted ? `<div class="zm-kind mute-note">🌊 文本已被「${locDef(locIdx).n}」抹除：此牌的揭示 / 持续 / 时机 / 防护效果一律不发动（战力照常计入；离开静海后文本恢复）</div>` : ''}
+    ${muteNoteHTML(card, locIdx)}
+    ${revealBlockNoteHTML(card, locIdx)}
     ${costDiff !== 0 ? `<div class="zm-kind cost-mod-note">印刷费用 ${def.c} · 本场战斗费用修正 ${costDiff > 0 ? '+' : ''}${costDiff}（仅此一份卡有效）</div>` : ''}
     ${costDownNote(def)}
     <div class="zm-kind">${isSpellDef(def) ? '法术 · 无战力（揭示结算完后即自行消散）' : `基础威力 ${def.p}`}</div>
     <div class="zm-kind">${kindTags(def)}</div>
-    <div class="zm-desc${muted ? ' text-muted' : ''}">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
+    <div class="zm-desc${strike ? ' text-muted' : ''}">${def.t || (isSpellDef(def) ? '法术：只有能量花费与揭示效果，揭示结算完后自行消散。' : '平平无奇的白板卡，纯靠身材作战。')}</div>`;
   renderDeriv(def);
   renderPowerHistory(card, locIdx);
   zoomStageBtn('关闭 ✕');
@@ -5685,9 +5852,9 @@ function pileCardEl(card, ord) {
   cell.className = 'pile-cell';
   cell.title = `${def.n}（${meta}）· 点击放大查看`;
   const face = document.createElement('div');
-  face.className = 'codex-card hand-card pile-item' + (def.img ? '' : ' no-img');
+  face.className = 'codex-card hand-card pile-item' + (def.img ? '' : ' no-img') + (cardSealed(card) ? ' sealed' : '');
   face.style.setProperty('--cgrad', gradOf(def));
-  face.innerHTML = cardFaceHTML(def, { power, sign, cost: liveCost, costSign });
+  face.innerHTML = cardFaceHTML(def, { power, sign, cost: liveCost, costSign, sealed: cardSealed(card) });
   face.addEventListener('click', () => showHandCard(card)); // 复用放大查看（关掉放大层仍回到牌池弹窗）
   const cap = document.createElement('div');
   cap.className = 'pile-cap';
