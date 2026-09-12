@@ -9,7 +9,7 @@
    所以对局界面与全部文案都不需要改。
 
    谁在什么时候说话：
-   - **进场**：`hello`（卡牌数据哈希 + 页面引擎指纹 + 卡组码）→ `ready` → 房主的 `start`（种子）。
+   - **进场**：`hello`（卡牌数据哈希 + 页面引擎指纹 + 卡组码）→ `ready`（可反复切换的准备开关，双方都准备后）→ 房主的 `start`（种子）。
    - **每回合**：`turn`（提交包）→ `hash`（对账指纹，双方动作都灌完、翻牌之前各报一次）；
      `status`（我这一手已经交了）让对手不必干等，也让他知道该轮到自己交了。
    - **当场**：`snap` / `retreat` —— 对手要来得及决定要不要撤退；随后的提交包带同一个标记，两端幂等。
@@ -42,6 +42,7 @@
   var peerOnline = false;
   var started = false;    // 是否已开局（开局后 active() 为真；本局打完仍为真，直到退出房间或重开）
   var closed = false;     // 主动退出 / 中止后不再提示重连
+  var selfGone = false;   // 本机这根连接已经断了（不是主动退出）—— 与"对手掉线"要分开：状态条与提示不能把两件事说成一件
   var myHello = null;     // { t, name, dataHash, engineHash, codes }
   var peerHello = null;
   var seed = null;
@@ -121,7 +122,8 @@
     el.classList.remove('hidden');
     seg('nbRoom', room, '');
     seg('nbRole', role === 'host' ? '房主' : '加入者', '');
-    seg('nbPeer', peerOnline ? '对手在线' : '对手已掉线', peerOnline ? '' : 'bad');
+    // ⚠️ 本机自己断了要说"连接已断开"，不能说成"对手已掉线"（对手可能好好地坐在房间里等你回去）
+    seg('nbPeer', selfGone ? '连接已断开' : (peerOnline ? '对手在线' : '对手已掉线'), (selfGone || !peerOnline) ? 'bad' : '');
     seg('nbPhase', barInfo.phase, barInfo.tone);
     // 倒计时：只有"等对手的提交包"才有秒数可数，进度条按 TURN_TIMEOUT 的比例缩短
     var time = $('nbTime');
@@ -141,8 +143,44 @@
       : '', lastCompare && !lastCompare.ok ? 'bad' : 'ok');
   }
 
+  /* ---------------- 玩家资料（昵称 / 头像）在联机里的用法 ----------------
+     本机：昵称与头像取自「设置 → 玩家资料」（js/home.js 的 profile，存在本机 localStorage）；昵称没设置就沿用随机「玩家XXXX」。
+     对手：`hello` 带来的昵称与头像**先清洗再落地** —— 昵称会进结算弹窗的 HTML（js/game.js 的 showModal 走 innerHTML），
+     头像则只认本机卡池里真有的那张卡图（对不上就退回 👤；既防注入，也防两端卡图不一致时的裂图）。 */
+  function myAvatar() {
+    var h = window.Home;
+    return (h && h.playerAvatar) ? (h.playerAvatar() || '') : '';
+  }
+  function cleanPeerName(n) {
+    var h = window.Home;
+    var s = (h && h.cleanName) ? h.cleanName(n) : String(n == null ? '' : n).replace(/[<>&"']/g, '').slice(0, 12);
+    return s || '匿名';
+  }
+  function cleanPeerAvatar(v) {
+    var h = window.Home;
+    return (h && h.knownAvatar) ? h.knownAvatar(v) : '';
+  }
+  // 头像格：有卡图就放 <img>，没有就用 emoji 兜底（卡图文件名已过白名单核对，不会是指向别处的 URL）；
+  // 值没变就不重写 —— syncMask() / renderAll() 调得很勤，每次重建 <img> 会让头像闪一下。
+  // ⚠️ 但**只看标记不够**：单机口径（js/game.js 的 renderSide）会把侧栏那个格子直接写成 🤖，
+  //    那时标记还是上一次的、内容却已经被改掉了 ⇒ 必须连内容一起核对，否则头像会永远停在 🤖。
+  function setAv(id, img, ico) {
+    var el = $(id);
+    if (!el) return;
+    var key = img || ('ico:' + ico);
+    if (el.getAttribute('data-av') === key) {
+      var first = el.firstChild;
+      var intact = img ? !!(first && first.nodeName === 'IMG') : (el.textContent === ico);
+      if (intact) return;
+    }
+    el.setAttribute('data-av', key);
+    if (img) el.innerHTML = '<img src="assets/cards/' + encodeURIComponent(img) + '" alt="">';
+    else el.textContent = ico;
+  }
+
   /* ---------------- 对手信息区（侧栏） ----------------
-     单机显示「对手（AI）」+ 🤖；联机换成对手昵称 + 👤，并多一行"他这一手交了没有"。 */
+     单机显示「对手（AI）」+ 🤖；联机换成对手昵称 + 他自己在设置里选的头像（没选/对不上本机卡图就 👤），
+     并多一行"他这一手交了没有"。单机时这个头像格由 js/game.js 的 renderSide 写，联机时它不再碰（免得跟 setAv 打架）。 */
   function peerName() { return (peerHello && peerHello.name) || ''; }
   function syncOpponent() {
     var title = $('oppTitle');
@@ -150,7 +188,12 @@
     var net = started;
     title.textContent = net ? ('对手（' + (peerName() || '联机') + '）') : '对手（AI）';
     var av = $('oppAvatar');
-    if (av) { av.textContent = net ? '👤' : '🤖'; av.classList.toggle('av-net', net); }
+    if (av) {
+      if (net) setAv('oppAvatar', peerHello && peerHello.avatar, '👤'); // 对手在设置里选的那张卡图（没选就 👤）
+      // 单机：game.js 的 renderSide 已经写成 🤖，这里只清掉标记（否则下次进联机会被"值没变"跳过一次刷新）
+      else { av.textContent = '🤖'; av.removeAttribute('data-av'); }
+      av.classList.toggle('av-net', net);
+    }
     var tag = $('oppTurnTag');
     if (!tag) return;
     tag.classList.toggle('hidden', !net);
@@ -160,8 +203,18 @@
     tag.classList.toggle('sent', wait);
   }
 
+  /* 对方发来任何一条消息 ⇒ 他一定在线：状态条/侧栏上的"已掉线"若是别处（某根过期连接的迟到事件）留下的，到这里就地纠正。
+     不能只等 worker 再发一条 `peer: online:true` —— 对方一直没断线的话那条永远不会来，错误的"已掉线"会一直挂到本局结束。 */
+  function peerHeard() {
+    if (peerOnline) return;
+    peerOnline = true;
+    renderBar();
+    syncOpponent();
+    syncMask();
+  }
+
   /* ---------------- 房间弹窗 ----------------
-     按状态显隐：未进房间 → 创建 / 加入 / 关闭；已进房间未开局 → 我已准备 / 复制房间码 / 退出房间；
+     按状态显隐：未进房间 → 创建 / 加入 / 关闭；已进房间未开局 → 我已准备（可再点一次撤销）/ 复制房间码 / 退出房间；
      对局进行中 → 只留房间信息与退出（开局时弹窗已自动关上，这里兜住"对局中又点开入口"的情况）。 */
   function npState(id, text, tone) {
     var el = $(id);
@@ -187,20 +240,26 @@
 
     show('npSelfWho', '你（' + (role === 'host' ? '房主' : '加入者') + '）' + (myName ? ' ' + myName : ''));
     show('npPeerWho', '对手' + (peerName() ? '（' + peerName() + '）' : '（还没进来）'));
+    setAv('npSelfAv', myAvatar(), '🙋');                      // 自己在设置里选的头像
+    setAv('npPeerAv', peerHello && peerHello.avatar, '👤');   // 对手随 hello 带来的头像（已核对过本机有没有这张卡图）
     npState('npSelfState',
       started ? '对局进行中' : (readySelf ? '✓ 已准备' : '… 等你点「我已准备」'),
       !started && readySelf ? 'ok' : '');
     npState('npPeerState',
       started ? '对局进行中'
         : (versionBad ? '⚠️ 版本不一致'
-          : (!peerHello ? '… 还没进来' : (!peerOnline ? '⚠️ 已掉线' : (readyPeer ? '✓ 已准备' : '… 等待中')))),
-      (started || readyPeer) && !versionBad ? 'ok' : (versionBad || (peerHello && !peerOnline) ? 'warn' : ''));
+          : (selfGone ? '⚠️ 你已断开'
+            : (!peerHello ? '… 还没进来' : (!peerOnline ? '⚠️ 已掉线' : (readyPeer ? '✓ 已准备' : '… 等待中'))))),
+      (started || readyPeer) && !versionBad ? 'ok' : (versionBad || selfGone || (peerHello && !peerOnline) ? 'warn' : ''));
 
     toggle('netVersion', versionBad);
     if (versionBad) {
       show('nvData', '本机 ' + ((myHello && myHello.dataHash) || '—') + ' / 对方 ' + ((peerHello && peerHello.dataHash) || '—'));
       show('nvEngine', '本机 ' + ((myHello && myHello.engineHash) || '—') + ' / 对方 ' + ((peerHello && peerHello.engineHash) || '—'));
     }
+    // 准备按钮的文案跟着状态走：已准备时它就是"撤销"入口（两端都能撤销，只有双方都准备才开局）
+    var readyBtn = $('netReady');
+    if (readyBtn) readyBtn.textContent = readySelf ? '↩️ 取消准备' : '✅ 我已准备';
     syncAgainBtn();
   }
 
@@ -212,6 +271,33 @@
     if (!started) { b.disabled = false; b.textContent = '再来一局'; return; }
     b.disabled = rematchSelf;
     b.textContent = rematchSelf ? '等对手也点一下…' : (rematchPeer ? '🔁 对手想再来一局' : '🔁 再来一局');
+  }
+
+  /* ---------------- 一局打完、对手已经不在房间里 ----------------
+     玩家最容易被卡住的一步：点了「🔁 再来一局」之后按钮一直写"等对手也点一下…"，而他分不清对手是掉线了还是在线只是没点
+     （状态条在结算弹窗后面，很容易没看见）。所以**一局结束之后**一旦发现对手不在房间里：
+     ① 弹一层**最靠前**的提示说明原因；② 本机直接退出房间（房间已经不完整了，留着也没用）。
+     ⚠️ **对局进行中不这么做**：那时掉线仍按"等对方的提交包超过 TURN_TIMEOUT 就判他认输"处理（口径见 docs/联机对战.md §5），
+        抢先退房会把这个判负也一起丢掉。 */
+  function matchOver() {
+    return !!(window.Game && window.Game.net && window.Game.net.matchOver && window.Game.net.matchOver());
+  }
+  function showPeerGone() {
+    var m = $('peerGoneMask');
+    if (!m || !m.classList.contains('hidden')) return false; // 已经弹着就别重复弹
+    show('peerGoneTip', '他已经离开房间 —— 本机已退出房间，这一局之后不能再和他「再来一局」。'
+      + '点「知道了」看本局结果；想再开一局就点顶部「← 主页」，从「🌐 联机对战」重新进。');
+    m.classList.remove('hidden');
+    return true;
+  }
+  // 返回 true ＝ 本次真的处理了（提示已弹出、房间已退）
+  function peerGoneAfterMatch() {
+    if (!started || !room || peerOnline) return false; // 还在房间 / 对手还在线：什么都不做
+    if (selfGone) return false;                        // 是**本机**断了，不是对手走了（那种情况不该怪对手）
+    if (!matchOver()) return false;                    // 对局进行中：交给超时判负
+    if (!showPeerGone()) return false;
+    ui.leave(); // 退出房间（提示里已写明）
+    return true;
   }
 
   var ui = {
@@ -229,20 +315,33 @@
       renderBar();
     },
     syncOpponent: syncOpponent,
-    // 本局打完（js/game.js 的 finishMatch）把"再来一局"的按局标记清零并刷新按钮
+    // 一局结束（js/game.js 的 finishMatch 与 doRetreat）都走这里：清掉"再来一局"的按局标记、刷新按钮，再看对手还在不在
     onMatchEnd: function () {
       rematchSelf = false;
       rematchPeer = false;
       syncAgainBtn();
+      peerGoneAfterMatch();
     },
     rematch: function () {
-      if (!started || !room || rematchSelf) return;
+      if (!started || !room || rematchSelf) {
+        // 房间已经退了（典型：上一局打完对手掉线，本机已自动退房并提示过）：这个按钮不能再重开一局，告诉他该往哪走
+        if (!room) show('statusText', '房间已经退出（对手已离开房间）—— 想再开一局请点顶部「← 主页」，从「🌐 联机对战」重新进。');
+        return;
+      }
+      if (peerGoneAfterMatch()) return; // 对手已经不在房间里：不进"等对手也点一下…"，直接提示 + 退房
       rematchSelf = true;
       send({ t: 'rematch' });
       ui.tip(rematchPeer ? '对手也在等 —— 房主正在定新种子重开…' : '已请求再来一局 —— 等对手也点「🔁 再来一局」。');
       syncAgainBtn();
       maybeRematch();
     },
+    // 上面那层提示的「知道了」：只关掉这层提示 —— 本局结果（结算弹窗）留在后面给玩家看，房间在那之前就已经退了
+    closePeerGone: function () {
+      var m = $('peerGoneMask');
+      if (m) m.classList.add('hidden');
+    },
+    // 设置里改了昵称 / 头像时由 js/home.js 调：在房间里就把 hello 重报一次，对手当场看到新的（见 refreshHello）
+    refreshHello: refreshHello,
     // 主页面「🌐 联机对战」入口：**先选一套出战卡组**（与「开始对战」同一条流程：选完才进下一步），
     // 选完才打开房间弹窗；已经在房间里 / 对局进行中就只把弹窗放出来 —— 那时卡组已随握手发出去，换不得了。
     open: function () {
@@ -272,14 +371,17 @@
       if (code.length !== 6) { ui.tip('房间码是 6 位字母或数字，请再确认一下。', true); return; }
       connect(code);
     },
+    // 准备是**可撤销的开关**：点一下＝已准备、再点一下＝撤销（两端都能撤销；撤销必须发一条，否则对方一直以为你已准备）。
+    // 两端**都处于已准备**时才由房主开局；开局令（`start`）一旦发出，这一下就作废 —— 见 onPeer 的 ready 分支。
     ready: function () {
-      readySelf = true;
-      send({ t: 'ready' });
-      var b = $('netReady');
-      if (b) b.disabled = true;
-      ui.tip('已准备 —— 等对手也点「我已准备」就开局。');
+      if (started) return;
+      readySelf = !readySelf;
+      send({ t: 'ready', ok: readySelf ? 1 : 0 });
+      ui.tip(readySelf
+        ? '已准备 —— 等对手也点「我已准备」就开局（点错了可以再点一次取消）。'
+        : '已取消准备 —— 想开局就再点一次「我已准备」。');
       syncMask();
-      maybeStart();
+      if (readySelf) maybeStart();
     },
     // 复制房间码（与挑战码那边的「📋 复制」同一个写法：不允许自动复制时提示手抄）
     copy: function () {
@@ -346,12 +448,15 @@
 
   /* ---------------- 连接 ---------------- */
   function connect(code) {
+    // 上一根连接（重试 / 退出房间再进来留下的）：**先摘掉 `ws` 再关它**，这样它迟到的 close 会被下面的身份守卫丢掉，
+    // 不会把当前房间的在线状态写成"对手已掉线"（那根连接还可能占着房间里的一个角色）。
+    var prev = ws;
     resetRoom();
+    if (prev) { try { prev.close(); } catch (e) { /* ignore */ } }
     closed = false;
+    selfGone = false;
     room = code;
-    myName = '玩家' + randStr(4);
-    var readyBtn = $('netReady');
-    if (readyBtn) readyBtn.disabled = false;
+    myName = (window.Home && window.Home.playerName && window.Home.playerName()) || ('玩家' + randStr(4));
     ui.tip('正在连接房间 ' + room + ' …');
     syncMask();
     var url = SERVER.replace(/\/+$/, '').replace(/^http/, 'ws') + '/ws/' + room
@@ -363,13 +468,19 @@
       ui.tip('连不上房间（地址不对，或被浏览器拦了）—— 详情见控制台。', true);
       return;
     }
-    ws.onmessage = function (ev) {
+    // 本次连接的身份：三个处理器**只认它** —— 过期连接（已被新连接顶替 / 已被 connect 主动关掉）的迟到事件一律丢弃。
+    // 不判身份的话，那种连接的一句 `onclose` 就能把 `peerOnline` 写成 false，而对方没断线 ⇒ 没有任何事件能把它纠正回来。
+    var sock = ws;
+    sock.onmessage = function (ev) {
+      if (sock !== ws) return;
       var data = null;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       onServer(data);
     };
-    ws.onclose = function () {
+    sock.onclose = function () {
+      if (sock !== ws) return;
       if (closed) return;
+      selfGone = true; // 是**本机**断了（不是主动退出）：状态条与提示都不能把这说成"对手掉线"
       peerOnline = false;
       if (started) ui.tip('连接断了 —— 这一局到此为止：对面会在超时后判你认输（刷新页面等于离开房间）。', true);
       else if (!role) ui.tip('没能进这个房间 —— 多半是里面已经有两个人了，换一个房间码或让对方退出后重试。', true);
@@ -377,7 +488,8 @@
       renderBar();
       syncMask();
     };
-    ws.onerror = function () {
+    sock.onerror = function () {
+      if (sock !== ws) return;
       ui.tip('连接出错 —— 若地址是 *.workers.dev，国内网络经常连不上（见 worker/README.md）。', true);
     };
   }
@@ -408,12 +520,19 @@
       peerOnline = !!data.online;
       renderBar();
       syncMask();
-      if (started) ui.tip(data.online ? '对手已回到房间。' : '对手的连接断了 —— 轮到他交牌时会在超时后判他认输。', !data.online);
+      if (started) {
+        if (data.online) ui.tip('对手已回到房间。');
+        // 对局进行中掉线：仍按"等他的提交包超时判负"（这条提示只在那时说）；一局打完他还没回来则由下面那步收摊
+        else if (!matchOver()) ui.tip('对手的连接断了 —— 轮到他交牌时会在超时后判他认输。', true);
+      }
+      peerGoneAfterMatch(); // 一局已结束 + 对手不在房间 ⇒ 弹最靠前的提示并退出房间
       // 对手刚进来：把在场时发过、但当时房间里没人的消息**再报一次** —— 房间只转发、不保存，
       // 先到的人在自己连上时发的 hello / ready 都是"发给空气"的。不补这一下，后进来的一方会缺对手的卡组与版本。
+      // 他刚连上 ⇒ 他那边是全新的（点过准备也清空），本机记的"他已准备"跟着清掉，免得上一次的准备顶掉这一次的确认。
       if (data.online && !started) {
+        readyPeer = false;
         sendHello();
-        if (readySelf) send({ t: 'ready' });
+        if (readySelf) send({ t: 'ready', ok: 1 });
       }
       return;
     }
@@ -426,13 +545,25 @@
       if (!chosenCodes) { ui.tip('还没有可出战的卡组 —— 关掉这个弹窗，重新点「🌐 联机对战」并选一套满 12 张的卡组。', true); return; }
       var g = window.Game;
       myHello = {
-        t: 'hello', name: myName,
+        t: 'hello', name: myName, avatar: myAvatar(),
         dataHash: (g && g.dataHash) ? g.dataHash() : 'none',
         engineHash: engineHash, codes: chosenCodes,
       };
       send(myHello);
       maybeStart();
     });
+  }
+
+  /* 玩家资料在房间里被改过（设置里换了昵称 / 头像）⇒ 把 hello 就地重报一次，对手那边会立刻更新显示（`onPeer` 的 hello 分支）。
+     ⚠️ 与"卡组已随握手发出去、换不得了"不同：昵称与头像只是显示信息、不进任何状态指纹，随时可以改、改了当场生效。 */
+  function refreshHello() {
+    if (!room || !myHello || !ws || ws.readyState !== 1) return;
+    myName = (window.Home && window.Home.playerName && window.Home.playerName()) || myName;
+    myHello.name = myName;
+    myHello.avatar = myAvatar();
+    send(myHello);
+    syncMask();       // 房间弹窗里"你"那一行的名字/头像跟着变
+    syncOpponent();   // 状态条与侧栏也重绘一次
   }
 
   function checkHello() {
@@ -455,8 +586,11 @@
   }
 
   function onPeer(from, msg) {
+    peerHeard(); // 能收到对手的消息＝他在线（见 peerHeard）
     switch (msg.t) {
       case 'hello':
+        msg.name = cleanPeerName(msg.name);       // 对手昵称：清洗后再落地（它会被写进结算弹窗的 HTML）
+        msg.avatar = cleanPeerAvatar(msg.avatar); // 对手头像：只认本机真有的那张卡图
         peerHello = msg;
         if (started) return;
         if (!checkHello()) { abort('双方版本不一致，未开局。'); return; }
@@ -467,8 +601,15 @@
         if (seed !== null) beginGame(); // 种子（房主的 start）先到、对方的 hello 后到：立刻补开局，不再干等
         return;
       case 'ready':
-        readyPeer = true;
-        ui.tip('对手已准备 —— ' + (readySelf ? '你已准备，正在开局…' : '轮到你了。'));
+        // 已开局：这一下晚了（房主的开局令已经发出、两端都在这一局里），忽略它两端才不会拆开
+        if (started) return;
+        var wasReady = readyPeer;
+        readyPeer = !!msg.ok; // ok:1 ＝对手点了「我已准备」，ok:0 ＝他撤销了
+        if (readyPeer !== wasReady) {
+          ui.tip(readyPeer
+            ? '对手已准备 —— ' + (readySelf ? '你已准备，正在开局…' : '轮到你了。')
+            : '对手取消了准备 —— 想开局要等他再点一次「我已准备」。');
+        }
         syncMask();
         maybeStart();
         return;
@@ -586,6 +727,7 @@
     role = null;
     started = false;
     peerOnline = false;
+    selfGone = false;
     myHello = null;
     peerHello = null;
     seed = null;
@@ -593,8 +735,6 @@
     rematchSelf = false;
     rematchPeer = false;
     resetRound();
-    var readyBtn = $('netReady');
-    if (readyBtn) readyBtn.disabled = false;
   }
 
   /* ---------------- 引擎侧接口 ---------------- */

@@ -89,15 +89,15 @@
           <span class="hb-arrow">›</span>
         </button>
         <!-- 设置入口 —— 紧接「开发调试」下方（主入口的第 6 项）。
-             打开 #settingsMask：用于切换**对手 AI 强度**（四档：简单 / 普通 / 困难 / 月狂，
-             默认「简单」），选项与文案统一来自 js/ai.js 的 window.AI.LEVELS（本页不另写一份），
-             交互见 js/home.js（openSettings / closeSettings / setAiLevel）。
-             按钮副标题由 home.js 同步成「对手 AI 强度：<当前档位>」。 -->
+             打开 #settingsMask，里面两节：**玩家资料**（联机时显示给对手的昵称 + 头像，只存本机）与
+             **对手 AI 强度**（四档：简单 / 普通 / 困难 / 月狂，默认「简单」；选项与文案统一来自 js/ai.js 的 window.AI.LEVELS）。
+             交互见 js/home.js（openSettings / closeSettings / setAiLevel / setPlayerName / setPlayerAvatar）。
+             按钮副标题由 home.js 同步成「昵称 / 头像 · 对手 AI 强度：<当前档位>」。 -->
         <button type="button" class="home-btn" id="homeBtnSettings">
           <span class="hb-icon">⚙️</span>
           <span class="hb-text">
             <span class="hb-main">设置</span>
-            <span class="hb-sub" id="homeSettingsSub">对手 AI 强度 · 简单 / 普通 / 困难 / 月狂</span>
+            <span class="hb-sub" id="homeSettingsSub">昵称 / 头像 · 对手 AI 强度</span>
           </span>
           <span class="hb-arrow">›</span>
         </button>
@@ -221,6 +221,24 @@
         <button type="button" class="btn btn-ghost codex-close" id="settingsCloseBtn">关闭 ✕</button>
       </div>
       <div class="settings-body">
+        <!-- 玩家资料：联机时显示给对手的昵称与头像（只存本机 localStorage，不需要账号）
+             - 昵称走 js/home.js 的 cleanName（去 <>&"' 与控制字符、最多 12 字）：对手那边会把它写进结算弹窗的 HTML。
+             - 头像＝**已有卡图**里挑一张（js/home.js 的 avatarDefs 从卡池现算，按卡图去重），
+               联机握手时把文件名随 hello 发出去，对手那边再核对一遍本地是否真有这张图（对不上退回 👤）。 -->
+        <div class="settings-sec">
+          <h3><span class="ss-ico">🙋</span>玩家资料（联机用）</h3>
+          <p class="settings-note">联机对战时，<b>昵称与头像会显示在对手那一侧</b>（房间弹窗的双方名单、侧栏对手信息区），
+            昵称还会出现在结算弹窗的「你 vs 对手」。只记在这台设备的浏览器里，不需要账号。<br>
+            ⚠️ 存在浏览器里 ⇒ <b>同一台电脑的同一个浏览器开两个窗口＝同一个人</b>（两边会看到同一个昵称与同一张头像）；
+            想在一台机器上试"两个人"，请用一个普通窗口 + 一个<b>无痕窗口</b>，或直接用两台设备。</p>
+          <div class="player-row">
+            <label class="player-label" for="playerNameInput">昵称</label>
+            <input type="text" class="player-name-input" id="playerNameInput" maxlength="12"
+                   spellcheck="false" autocomplete="off" placeholder="留空则用「玩家XXXX」">
+          </div>
+          <div class="player-av-head"><span>头像</span><span class="player-av-tip" id="playerAvTip"></span></div>
+          <div class="avatar-pick" id="avatarPick" role="radiogroup" aria-label="联机头像"></div>
+        </div>
         <div class="settings-sec">
           <h3><span class="ss-ico">🤖</span>对手 AI 强度</h3>
           <p class="settings-note">四档只影响对手的<b>出牌水平</b>，不影响规则、卡牌与你自己的操作。点选即生效，并记住在你的浏览器里（之后开战也沿用）。</p>
@@ -421,7 +439,8 @@
        - 进本弹窗之前**先选一套满 12 张的出战卡组**（复用 #battleDeckMask，与「开始对战」同一条流程），
          选完才由 js/net.js 的 Net.ui.open() 把本弹窗放出来；选定的卡组码随握手交换出去。
        - 创建房间：本机生成 6 位房间码并当房主；加入房间：填对方的码（两者都由云上的房间转发消息）。
-       - 双方都点「我已准备」后由房主定种子开局；数据版本（卡牌数据哈希 + 页面引擎指纹）不一致会拒绝开局。
+       - 准备按钮是**可撤销的开关**（已准备 ⇄ 取消准备，房主与加入者各自都能撤销）：**双方都处于已准备**时
+         由房主定种子开局；数据版本（卡牌数据哈希 + 页面引擎指纹）不一致会拒绝开局。
        - 按钮与面板都按状态显隐（未进房间 / 已进房间未开局 / 对局进行中），由 js/net.js 的 syncMask() 刷新。
        - 主页面态下由 style.css 的 `body.in-home #netMask:not(.hidden)` 放开显示（同 #challengeMask）。 -->
   <div class="modal-mask hidden" id="netMask">
@@ -430,8 +449,8 @@
       <h2>联机对战</h2>
       <div class="net-room-info" id="netRoomInfo">还没有进入房间</div>
       <div class="net-players hidden" id="netPlayers">
-        <div class="np-row"><span class="np-who" id="npSelfWho">你</span><span class="np-state" id="npSelfState">…</span></div>
-        <div class="np-row"><span class="np-who" id="npPeerWho">对手</span><span class="np-state" id="npPeerState">…</span></div>
+        <div class="np-row"><span class="np-av" id="npSelfAv">🙋</span><span class="np-who" id="npSelfWho">你</span><span class="np-state" id="npSelfState">…</span></div>
+        <div class="np-row"><span class="np-av" id="npPeerAv">👤</span><span class="np-who" id="npPeerWho">对手</span><span class="np-state" id="npPeerState">…</span></div>
       </div>
       <div class="net-version hidden" id="netVersion">
         <div class="nv-row"><span>卡牌数据</span><b id="nvData">—</b></div>
@@ -451,6 +470,21 @@
         <button type="button" class="btn" id="netClose" onclick="Net.ui.close()">关闭</button>
       </div>
       <div class="net-server">服务器：<span id="netServer">（未配置）</span></div>
+    </div>
+  </div>
+
+  <!-- 联机：一局打完、对手已经离开房间时的提示（js/net.js 的 peerGoneAfterMatch 打开）。
+       - 是**这一屏最靠前**的一层：压在结算弹窗（.modal-mask 50）与放大层（.zoom-mask 60）之上（style.css 里给 9700）。
+       - 主页面态下也要能显示（玩家可能正在主页面等对手点「再来一局」），故 style.css 另有 body.in-home 那条放开。
+       - 「知道了」＝只关掉这层提示：房间在那之前已经退了，本局结果（结算弹窗）留在后面给玩家看。 -->
+  <div class="modal-mask peer-gone-mask hidden" id="peerGoneMask">
+    <div class="modal undo-modal peer-gone-modal">
+      <div class="modal-emblem">🚪</div>
+      <h2>对手已掉线，将退出房间</h2>
+      <div class="net-tip" id="peerGoneTip"></div>
+      <div class="undo-btns">
+        <button type="button" class="btn btn-primary" id="peerGoneOk" onclick="Net.ui.closePeerGone()">知道了</button>
+      </div>
     </div>
   </div>
 
@@ -527,7 +561,8 @@
         </div>
       </section>
       <div class="opponent">
-        <!-- 标题与头像：单机＝「对手（AI）」+ 🤖，联机时由 js/net.js 的 ui.syncOpponent() 换成对手昵称 + 👤 -->
+        <!-- 标题与头像：单机＝「对手（AI）」+ 🤖，联机时由 js/net.js 的 ui.syncOpponent() 换成
+             对手昵称 + 他自己在设置里选的头像（没选/对不上本机卡图就退回 👤） -->
         <div class="side-title" id="oppTitle">对手（AI）</div>
         <div class="avatar-row">
           <div class="avatar av-ai" id="oppAvatar">🤖</div>

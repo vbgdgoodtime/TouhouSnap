@@ -286,7 +286,7 @@
     var api = aiApi();
     var key = currentAiKey();
     var info = (api && key && api.LEVELS) ? api.LEVELS[key] : null;
-    el.textContent = info ? ('对手 AI 强度：' + info.name) : '对手 AI 强度 · 简单 / 普通 / 困难 / 月狂';
+    el.textContent = '昵称 / 头像 · 对手 AI 强度：' + (info ? info.name : '简单 / 普通 / 困难 / 月狂');
   }
   // 渲染四档选项（当前档加 .on 与「当前」徽标；默认档在非当前时加灰色「默认」徽标）
   function renderAiLevels() {
@@ -370,6 +370,8 @@
     closeGuide();
     closeCodex();
     hideToast();
+    loadProfile();      // 每次打开都从存储里重读一遍玩家资料（别的标签页改过也跟得上）
+    syncPlayerInputs();
     renderAiLevels();
     syncSettingsSub();
     m.classList.remove('hidden');
@@ -377,6 +379,146 @@
   function closeSettings() {
     var m = settingsMask();
     if (m) m.classList.add('hidden');
+  }
+
+  /* ---------- 玩家资料（联机时显示给对手的昵称 + 头像） ----------
+     只记在本机（`localStorage: touhou2.player.v1`），联机握手时随 `hello` 发给对手（见 js/net.js）；不需要账号。
+     ① 昵称必须清洗：**对手那边会把它写进结算弹窗的 HTML**（js/game.js 的 showModal 走 innerHTML），所以两端都过 `cleanName`；
+     ② 头像只认「本机也真有这张卡图」的文件名：选项本身就是从卡池里现算的带图卡（`avatarDefs`），
+        对手发来的文件名在 js/net.js 里再用 `knownAvatar` 核对一遍 —— 对不上一律退回 👤（防注入，也防两端卡图不一致时的裂图）。 */
+  var PLAYER_KEY = 'touhou2.player.v1';
+  var NAME_MAX = 12;
+  var profile = { name: '', avatar: '' };
+  var avatarDefsCache = null;
+
+  function cleanName(v) {
+    return String(v == null ? '' : v)
+      .replace(/[<>&"']/g, '')                 // 会被写进 HTML 的字符一律不要
+      .replace(/[\u0000-\u001f\u007f]/g, '')   // 控制字符
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, NAME_MAX);
+  }
+  // 可当头像的卡图：普通卡池 + 衍生卡池里**带 `img` 的卡**，按卡图文件名去重（同一张图被两张卡共用时只留一个）；
+  // 顺序沿用图鉴的卡池排序（费用↑ → 战力↑ → 卡名，复用 window.CardBrowser.orderDefs）。
+  function avatarDefs() {
+    if (avatarDefsCache) return avatarDefsCache;
+    var seen = {}, out = [];
+    function push(d) {
+      if (!d || !d.img || seen[d.img]) return;
+      seen[d.img] = 1;
+      out.push({ img: d.img, n: d.n || d.img, i: d.i || '🖼️' });
+    }
+    for (var i = 0; i < POOL_COST_KEYS.length; i++) {
+      var arr = POOL[POOL_COST_KEYS[i]] || [];
+      for (var j = 0; j < arr.length; j++) push(arr[j]);
+    }
+    if (TOKENS && typeof TOKENS === 'object') {
+      for (var k in TOKENS) if (Object.prototype.hasOwnProperty.call(TOKENS, k)) push(TOKENS[k]);
+    }
+    var cb = window.CardBrowser;
+    if (cb && typeof cb.orderDefs === 'function') out.sort(cb.orderDefs);
+    avatarDefsCache = out;
+    return out;
+  }
+  function avatarImgs() {
+    var list = avatarDefs(), out = [];
+    for (var i = 0; i < list.length; i++) out.push(list[i].img);
+    return out;
+  }
+  // 存档里 / 对手发来的头像文件名：只认本机真有的那张卡图，其余一律当"没选"
+  function knownAvatar(v) {
+    if (!v || typeof v !== 'string') return '';
+    var imgs = avatarImgs();
+    for (var i = 0; i < imgs.length; i++) if (imgs[i] === v) return v;
+    return '';
+  }
+  function avatarNameOf(img) {
+    var list = avatarDefs();
+    for (var i = 0; i < list.length; i++) if (list[i].img === img) return list[i].n;
+    return '';
+  }
+  function loadProfile() {
+    profile = { name: '', avatar: '' };
+    try {
+      var raw = window.localStorage ? window.localStorage.getItem(PLAYER_KEY) : null;
+      var obj = raw ? JSON.parse(raw) : null;
+      if (obj && typeof obj === 'object') {
+        profile.name = cleanName(obj.name);
+        profile.avatar = knownAvatar(obj.avatar);
+      }
+    } catch (e) { /* 读不出来就按"没设置过"来 */ }
+    return profile;
+  }
+  function saveProfile() {
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(PLAYER_KEY, JSON.stringify({ name: profile.name, avatar: profile.avatar }));
+      }
+    } catch (e) { /* 存不了就只在本次会话里生效 */ }
+  }
+  function playerName() { return profile.name; }
+  function playerAvatar() { return profile.avatar; }
+  function syncPlayerTip() {
+    var el = $('playerAvTip');
+    if (!el) return;
+    el.textContent = profile.avatar
+      ? ('已选：' + avatarNameOf(profile.avatar))
+      : '未选头像 —— 联机时对手看到的是 👤';
+  }
+  function setPlayerName(v) {
+    profile.name = cleanName(v);
+    saveProfile();
+  }
+  function setPlayerAvatar(img) {
+    profile.avatar = knownAvatar(img);
+    saveProfile();
+    renderAvatarPick();
+    notifyProfile();
+  }
+  // 资料变了就告诉联机层：在房间里会重报一次 hello，对手当场看到新昵称 / 新头像（不在房间或没连上就什么也不做）。
+  // ⚠️ 昵称只在**失焦**时调它（见 bind）—— 每敲一个字都重报一次会刷一串消息。
+  function notifyProfile() {
+    if (window.Net && window.Net.ui && window.Net.ui.refreshHello) window.Net.ui.refreshHello();
+  }
+  function renderAvatarPick() {
+    var box = $('avatarPick');
+    if (!box) return;
+    box.innerHTML = '';
+    var list = avatarDefs();
+    for (var i = 0; i < list.length; i++) {
+      (function (def) {
+        var on = (profile.avatar === def.img);
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'avatar-opt' + (on ? ' on' : '');
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', on ? 'true' : 'false');
+        btn.title = def.i + ' ' + def.n;
+        var img = document.createElement('img');
+        img.src = 'assets/cards/' + encodeURIComponent(def.img);
+        img.alt = def.n;
+        img.loading = 'lazy';
+        // 卡图缺失时退回该卡的 emoji（不裂图、不静默留空）
+        img.addEventListener('error', function () {
+          if (img.parentNode) img.parentNode.removeChild(img);
+          var ico = document.createElement('span');
+          ico.className = 'avatar-opt-ico';
+          ico.textContent = def.i;
+          btn.appendChild(ico);
+        });
+        btn.appendChild(img);
+        btn.addEventListener('click', function () { setPlayerAvatar(def.img); });
+        box.appendChild(btn);
+      })(list[i]);
+    }
+    syncPlayerTip();
+  }
+  // 打开设置时把当前资料回填进输入框（值不同才写，免得打断正在打字的光标）
+  function syncPlayerInputs() {
+    var inp = $('playerNameInput');
+    if (inp && inp.value !== profile.name) inp.value = profile.name;
+    renderAvatarPick();
   }
 
   /* ---------- 主页面「📚 图鉴」入口（#homeBtnCodex） ----------
@@ -469,6 +611,13 @@
     // 联机对战（房间弹窗在 js/net.js；这里只负责开门，通道逻辑不落在主页面脚本里）
     if (net) net.addEventListener('click', function () { if (window.Net) window.Net.ui.open(); });
     syncSettingsSub();
+    loadProfile(); // 玩家资料：联机握手时就要用，开局前先读好（不能等打开设置才读）
+    var nameInput = $('playerNameInput');
+    if (nameInput) {
+      nameInput.addEventListener('input', function () { setPlayerName(nameInput.value); });
+      // 失焦时才把输入框回写成清洗后的值（打字过程中改会打断光标），并把新昵称报给对手
+      nameInput.addEventListener('blur', function () { nameInput.value = profile.name; notifyProfile(); });
+    }
 
     var sClose = $('settingsCloseBtn');
     var sOk = $('settingsOkBtn');
@@ -535,6 +684,12 @@
     isSettingsOpen: isSettingsOpen,
     setAiLevel: setAiLevel,
     currentAiLevel: currentAiKey,
+    // 玩家资料（联机时显示给对手的昵称 + 头像，见本文件「玩家资料」段）：
+    // js/net.js 握手时读 playerName / playerAvatar；对手发来的昵称与头像文件名先过 cleanName / knownAvatar 再落地
+    playerName: playerName,
+    playerAvatar: playerAvatar,
+    cleanName: cleanName,
+    knownAvatar: knownAvatar,
     openCodex: openCodex,
     closeCodex: closeCodex,
     isCodexOpen: isCodexOpen,

@@ -10,6 +10,9 @@
 2. `cd worker` 后 `npx wrangler deploy`
 3. 把输出里的地址填进 `js/net.js` 顶部的 `SERVER` 常量
 
+**线上现状**：`pvp.2houvv.xyz`（自定义域名，**国内直连、不需要梯子**）。`*.workers.dev` 那个地址在国内常不稳，
+只作备用 —— 别拿它做验收，也别把它写回 `SERVER`。
+
 零依赖、无构建步骤，改完 `worker/src/index.js` 直接重新 deploy。
 这个目录跟着主仓库一起版本管理；GitHub Pages 会把它当静态文件一并发布（无害，里面没有任何密钥）。
 
@@ -34,11 +37,12 @@
 `msg.t === "start"` / `"rematch"` 到达时**清空去重表**：新一局的回合号从 1 重新数，不清会把它当成重复包静默丢掉
 （症状：两端都卡在"等对手出牌"）。
 
-除上面两条外，服务端不看消息内容、一律原样转发。客户端用到的类型：`hello` / `ready` / `start` / `turn` /
+除上面两条外，服务端不看消息内容、一律原样转发。客户端用到的类型：`hello`（昵称 + 头像卡图文件名 + 数据哈希 + 引擎指纹 + 卡组码）/ `ready`（准备 / 撤销，带 `ok: 1|0`）/ `start` / `turn` /
 `hash`（对账指纹）/ `snap`（加倍）/ `retreat`（认输）/ `status`（我这一手交了）/ `timeout`（超时判负）/ `rematch`（再来一局）。
 各条的口径见 `docs/联机对战.md` §5。
 
 ## 网络与额度
 
 - 免费额度大致够用：官方「实时多人游戏」的用例就是 Durable Objects + WebSocket。
-- 国内直连 `*.workers.dev` 常不稳，连不上不是代码坏了；退路见 `docs/联机对战.md`。
+- 国内直连 `*.workers.dev` 常不稳（DNS 污染），所以线上绑了自定义域名 `pvp.2houvv.xyz` —— 玩家直连它即可，不需要梯子。
+  换账号 / 换域名时记得同步 `js/net.js` 顶部的 `SERVER`。

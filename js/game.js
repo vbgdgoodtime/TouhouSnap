@@ -1681,9 +1681,6 @@ async function restart(opts) {
   // 两副牌此刻都是完整 12 张 —— 记下本局输入（必须在下面抽牌之前）
   startRecord(pDeckMode);
 
-  // 对手初始 3 张先在数据层发放（无动画）；玩家 3 张由 playOpening 逐张滑入；第 1 回合开始双方再各抓 1 张（起手共 4 张）
-  for (let i = 0; i < 3; i++) drawOne('a');
-
   // 选 3 块区域：按抽选权重（pick，默认 1）不放回抽 3 块保证互不相同；不足 3 种时退回兜底（允许重复）；开发调试固定三块「无名之丘」
   let picks;
   if (isDevMode()) {
@@ -1735,6 +1732,12 @@ async function restart(opts) {
   }
   // 地形「出现时」效果不在开局结算——真实地形在揭晓那一刻才「出现」，由 locationRevealStage 结算
   const gsHits = runGameStartEffects(); // ⓪ 游戏开始效果挂点（现注册者：7 费哆来咪的 `gs`）
+  // ⚠️ 双方初始 3 张都必须在 ⓪ **之后**发放（对手的在数据层发、玩家的由 playOpening 逐张滑入；第 1 回合开始双方再各抓 1 张，起手共 4 张）。
+  //    理由：⓪ 的 `gs.shuffleN`（哆来咪）会把**持有者那副牌库**整个重洗一次，而洗牌消耗的随机数个数 = 牌库张数 − 1。
+  //    联机两端各自把本地玩家当 'p'，若先把"对手"的 3 张抽掉，一端那副牌库是 9 张、另一端同一副还是 12 张
+  //    ⇒ 同一次洗牌吃掉的随机数个数不同、洗出来的顺序也不同 ⇒ 第 1 回合对账必不一致（症状：第 1 回合报"盘面不一致"）。
+  //    等 ⓪ 结算完再抽，两端的两副牌都是完整的 12 张，才算得出同一副牌。
+  for (let i = 0; i < 3; i++) drawOne('a');
   renderAll();
   // 开局触发了 `gs`（卡组里带哆来咪）时先播「登场」演出，演完再抽卡；没触发则本函数立即 resolve
   await playGameStartReveal(gen, gsHits);
@@ -2012,7 +2015,7 @@ function runGameStartEffects() {
   const hits = [];
   for (const side of state.seatOrder) {
     const pl = state.players[side];
-    // 开局“拥有”的判定：牌库 ∪ 起手（对手的 3 张起手在 ⓪ 之前已发）∪ 场上（防御：现无落场来源）
+    // 开局“拥有”的判定：牌库 ∪ 起手 ∪ 场上（防御：现无落场来源）——⓪ 跑在双方初始 3 张发放之前，故实际都在牌库里（见 restart 里那段顺序注释）
     const owned = pl.deck.concat(pl.hand);
     for (let j = 0; j < 3; j++) for (const c of pl.zones[j]) owned.push(c);
     for (const card of owned) {
@@ -3009,6 +3012,9 @@ function doRetreat(side) {
   const amt = retreatStakes();
   st.phase = 'over';
   renderAll();
+  // 联机局：认输（含对手认输、等不到提交包的**超时判负**）同样是"一局结束" —— 与 finishMatch 走同一条通知：
+  // 清掉「再来一局」的按局标记 + 检查对手还在不在房间里（不在就弹提示并退出房间，js/net.js 的 onMatchEnd）
+  if (state.netRole && window.Net && window.Net.ui && window.Net.ui.onMatchEnd) window.Net.ui.onMatchEnd();
   if (side === 'a') {
     log('sys', `🏳️ 对手认输了，你赢得 ${amt} 立方。`);
     showModal('🏆', '对手认输', '你获得本局胜利。', amt);
@@ -6804,11 +6810,12 @@ function renderSide() {
   $('aiDeck').textContent = st.players.a.deck.length;
   updateDeckCount();
   // 对手信息区：先写单机口径（AI / 🤖 / 无提交状态行），联机时由 js/net.js 的 ui.syncOpponent() 覆盖成
-  // 对手昵称 + 👤 + 「他这一手交了没有」（单机没有这条状态，恒隐藏）
+  // 对手昵称 + 他自己选的头像 + 「他这一手交了没有」（单机没有这条状态，恒隐藏）
   const oppTitle = $('oppTitle');
   if (oppTitle) oppTitle.textContent = '对手（AI）';
+  // ⚠️ 联机时这个头像格归 js/net.js 管（放对手选的卡图）：这里别去写 🤖 —— 写了会把它的"值没变就不重写"骗过去，头像会停在 🤖
   const oppAvatar = $('oppAvatar');
-  if (oppAvatar) { oppAvatar.textContent = '🤖'; oppAvatar.classList.remove('av-net'); }
+  if (oppAvatar && !netOn()) { oppAvatar.textContent = '🤖'; oppAvatar.classList.remove('av-net'); }
   const oppTurn = $('oppTurnTag');
   if (oppTurn) oppTurn.classList.add('hidden');
   if (netOn() && window.Net && window.Net.ui && window.Net.ui.syncOpponent) window.Net.ui.syncOpponent();
@@ -7188,6 +7195,9 @@ window.Game = {
       resolvePlayer({ type: 'peerRetreat' });
     },
     fingerprint: stateFingerprint,
+    // 一局是否已经结束（＝`state.phase === 'over'`）：`js/net.js` 用它区分「对局进行中掉线（按超时判负，不能抢先把房间退了）」
+    // 与「一局打完、对手已经离开房间（弹最靠前的提示并退房）」
+    matchOver: () => state.phase === 'over',
     // 对手在等「再来一局」时，结算弹窗若已被「确认」关掉就重新打开 —— 那个按钮在弹窗里，
     // 不打开的话这个请求没有地方能看见。只在终局后才打开（避免对局中被误触）。
     netReopenResult: () => { if (state.phase === 'over') $('modalMask').classList.remove('hidden'); },
