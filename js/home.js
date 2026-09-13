@@ -522,6 +522,8 @@
   }
 
   /* ---------- 主页面「📚 图鉴」入口（#homeBtnCodex） ----------
+     ⚠️ 该按钮**当前带 `hidden` 类不显示**（index.html），故本段在主页面上暂时走不到；
+        标记与接线都保留着，删掉那个类即可恢复。对局顶栏的「📖 图鉴」走 game.js → CardBrowser，与本段无关。
      只打开**既有**的图鉴弹窗 window.CardBrowser.openCodex()（与对局顶栏「📖 图鉴」同一个 #codexMask），
      故本文件不复制任何卡池 / 卡牌渲染逻辑，日后图鉴改版只改 js/card-browser.js。
      ⚠️ Esc 由 game.js 全局**逐层**关（先 #zoomMask 再 #codexMask），故这里不再往本文件的 Esc 链里加图鉴，

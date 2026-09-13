@@ -124,17 +124,12 @@ body {
   border-bottom: 1px solid rgba(104, 140, 96, .3);
   flex-wrap: wrap;
 }
-/* 「⚡ 东方逆转」＝返回主页面的入口（原来那格「← 主页」按钮已去掉，顶栏省一格） */
-.brand { display: flex; align-items: center; gap: 10px; cursor: pointer; transition: opacity .15s, transform .12s; }
-.brand:hover { opacity: .82; }
-.brand:active { transform: scale(.98); }
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand .logo { font-size: 30px; filter: drop-shadow(0 0 8px rgba(214, 166, 20, .55)); }
 .brand h1 { font-size: 20px; letter-spacing: 2px; color: var(--txt); }
 .brand .sub { font-size: 11px; color: var(--dim); }
 
 .hud { display: flex; gap: 10px; margin-left: auto; align-items: center; }
-/* 顶栏右侧一组：赌注 + 加倍（手机端整组贴第一行最右，桌面端仍与 HUD 同排） */
-.hud-right { display: flex; align-items: center; gap: 10px; }
 .hud-item {
   background: var(--surf-66);
   border: 1px solid var(--border);
@@ -144,11 +139,26 @@ body {
   align-items: baseline;
   gap: 6px;
 }
+/* v140：能量行左侧「返回主页」——外观跟 hud 一致，可点击 */
+.hud-home {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  align-items: center;
+  color: var(--txt);
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.hud-home:hover {
+  border-color: rgba(124, 168, 110, .85);
+  background: #f2f9ea;
+  box-shadow: 0 0 0 2px rgba(124, 168, 110, .2);
+}
+.hud-home:active { transform: scale(.97); }
+.hud-home-ico { font-size: 14px; font-weight: 800; line-height: 1; color: #3d5a33; }
+.hud-home .hud-label { font-size: 12px; font-weight: 800; color: var(--txt); }
 .hud-label { font-size: 11px; color: var(--dim); }
 .hud-value { font-size: 20px; font-weight: 700; }
 .hud-unit { font-size: 11px; color: var(--dim); }
-/* 回合数带标签显示（「回合：1/6」）：其他 HUD 标签在手机上会隐藏，只有它保留文字 */
-.hud-turn-label { font-size: 12px; font-weight: 800; color: var(--txt); letter-spacing: .5px; }
 .hud-item.cubes .cube {
   font-size: 20px; font-weight: 800; color: #a97e00;
   text-shadow: 0 0 8px rgba(255, 200, 0, .35);
@@ -158,9 +168,6 @@ body {
 .cube-pips span.on { background: #c99400; box-shadow: 0 0 6px rgba(201, 148, 0, .55); }
 
 .top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-/* 按钮文案＝图标(.bt-ico) + 文字(.bt-txt) 两段：≤700px 只显示图标，两者之间的空隙由这里的
-   margin 给出（与 .deck-top-actions 同款做法） */
-.top-actions .bt-ico { margin-right: 4px; }
 /* v144：开发调试「切换立场」激活态（落牌进敌方） */
 .top-actions #btnSwitchSide.side-enemy {
   background: #5a2a2a;
@@ -635,7 +642,7 @@ body {
 /* ==================== 「封印」（卡牌效果键 mute，卡级**永久**抹除文本）====================
    被封印的牌在**场上 / 手牌 / 三池面板 / 放大视图**四处都叠一个 ❗ 并把艺术区置灰：
    ❗ 只标封印（静海那类区域抹除靠地形配色 + 放大视图里那一行状态提示区分）；卡面效果文本照常显示
-   （它写的是这张牌原本有什么），失效由提示行说明 —— 卡面窄，文字另按 .card-face.sealed 置灰划线。
+   （它写的是这张牌原本有什么），失效由提示行说明 —— 手牌卡面窄，文字另按 .hand-card.sealed 置灰划线。
    ⚠️ 只作用于**实例**渲染 —— 图鉴（card-browser）与卡组页（deck-page）按 def 渲染，不显示。 */
 .mini-card .mc-seal {
   position: absolute;
@@ -653,17 +660,18 @@ body {
 .hc-seal {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: var(--seal-fs, 30px);
+  font-size: 30px;
   line-height: 1;
   z-index: 4; /* 压在 .hc-img(2) 之上 */
   pointer-events: none;
   text-shadow: 0 2px 10px var(--ink-9), 0 0 18px rgba(255, 96, 96, .55);
 }
-.card-face .hc-icon { position: relative; } /* 无图卡的艺术区＝emoji 块，❗ 也要能定位到它正中 */
-.card-face.sealed .hc-img,
-.card-face.sealed .hc-art .hc-icon,
-.card-face.sealed.no-img .hc-icon { filter: grayscale(1) brightness(.78); }
-.card-face.sealed .hc-text { opacity: .42; text-decoration: line-through; }
+.zoom-card .hc-seal { font-size: 64px; }
+.hand-card .hc-icon { position: relative; } /* 无图卡的艺术区＝emoji 块，❗ 也要能定位到它正中 */
+.hand-card.sealed .hc-img,
+.hand-card.sealed .hc-art .hc-icon,
+.hand-card.sealed.no-img .hc-icon { filter: grayscale(1) brightness(.78); }
+.hand-card.sealed .hc-text { opacity: .42; text-decoration: line-through; }
 .zoom-info .seal-note { color: #a3541f; }
 
 /* ==================== v203：虚假之月（🌕）+ 区域「延长回合」（地形字段 extraRound） ====================
@@ -1154,13 +1162,8 @@ body {
 }
 .zone.player-zone { background: linear-gradient(180deg, rgba(255, 218, 120, .16), transparent 70%); }
 
-/* ---------- 卡牌（桌面上，放大到撑满各自的 1/4 格位） ----------
-   ⚠️ 这是**另一套 DOM**（不是 cardFaceHTML 的 .card-face）：满铺立绘 + 暗牌 + 永久加成角标 +
-   移动徽标等只在场上出现的东西。角标尺寸走下面这组 --mc-* 变量，断点里只改变量。 */
+/* ---------- 卡牌（桌面上，放大到撑满各自的 1/4 格位） ---------- */
 .mini-card {
-  --mc-cost-fs: 14px; --mc-cost-min: 22px;
-  --mc-p-fs: 15px; --mc-p-min: 24px;
-  --mc-spell-fs: 14px;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -1192,8 +1195,8 @@ body {
 /* 费用（左上角，白色） */
 .mini-card .mc-cost {
   position: absolute; top: 4px; left: 5px;
-  min-width: var(--mc-cost-min); text-align: center;
-  font-size: var(--mc-cost-fs); font-weight: 800; color: #fff;
+  min-width: 22px; text-align: center;
+  font-size: 14px; font-weight: 800; color: #fff;
   background: var(--ink-5);
   border: 1px solid var(--surf-6);
   border-radius: 6px;
@@ -1204,8 +1207,8 @@ body {
 /* 当前战力（右上角）：与基础威力相同=白，更高=绿，更低=红 */
 .mini-card .p {
   position: absolute; top: 4px; right: 5px; left: auto;
-  min-width: var(--mc-p-min); padding: 1px 5px; text-align: center;
-  font-size: var(--mc-p-fs); border-radius: 6px;
+  min-width: 24px; padding: 1px 5px; text-align: center;
+  font-size: 15px; border-radius: 6px;
   background: #10131c; border: 1px solid var(--surf-6); color: #fff;
   box-shadow: 0 1px 3px var(--ink-5);
   z-index: 2;
@@ -1216,8 +1219,8 @@ body {
    （v178：星标**不写「法术」二字**；尺寸/位置与战力数字 `.mini-card .p` 对齐，用淡紫配色区分） */
 .mini-card .mc-spell {
   position: absolute; top: 4px; right: 5px; left: auto;
-  min-width: var(--mc-p-min); padding: 1px 5px; text-align: center;
-  font-size: var(--mc-spell-fs); line-height: 1.15; border-radius: 6px;
+  min-width: 24px; padding: 1px 5px; text-align: center;
+  font-size: 14px; line-height: 1.15; border-radius: 6px;
   color: #d9c9ff; background: rgba(38, 26, 72, .82);
   border: 1px solid rgba(168, 140, 255, .65);
   box-shadow: 0 1px 3px var(--ink-5), 0 0 8px rgba(140, 110, 255, .35);
@@ -1477,7 +1480,8 @@ body {
                  ├ .gs-reveal-tag（顶部来源标签）
                  ├ .gs-reveal-cardwrap → .zoom-card.gs-reveal-card（大卡面）
                  └ .gs-reveal-note（底部效果摘要）
-   卡面复用 .card-face.zoom-card.hand-card + cardFaceHTML()，故配色/比例与手牌与图鉴完全一致。 */
+   卡面复用 .zoom-card.hand-card + cardFaceHTML()，故配色/比例与手牌与图鉴完全一致
+   （含 v185 新增的 7 费底色）。 */
 .gs-reveal {
   position: fixed;
   inset: 0;
@@ -1552,7 +1556,7 @@ body {
   80%  { box-shadow: 0 0 0 8px rgba(201, 166, 255, .35), 0 0 26px 12px rgba(255, 214, 120, .3); }
   100% { box-shadow: 0 0 0 4px rgba(201, 166, 255, .18), 0 0 20px 10px rgba(255, 214, 120, .12); }
 }
-/* 提高一级特异度（.gs-reveal .gs-reveal-card）以压过 .card-face 自身的 box-shadow */
+/* 提高一级特异度（.gs-reveal .gs-reveal-card）以压过 .hand-card 自身的 box-shadow */
 .gs-reveal .gs-reveal-card {
   box-shadow: 0 22px 54px var(--ink-62), 0 0 0 3px rgba(201, 166, 255, .35), 0 0 44px rgba(150, 110, 255, .4);
 }
@@ -1569,15 +1573,11 @@ body {
 /* 星光粒子：复用 .energy-star 的飞行关键帧，换成紫金辉光并提到遮幕之上 */
 .energy-star.gs-star { z-index: var(--z-fx-gs-note); text-shadow: 0 0 10px rgba(198, 160, 255, .95), 0 2px 5px var(--ink-55); }
 @media (max-width: 700px) {
-  /* 登场卡面（.gs-reveal-card 带 .zoom-card）：小屏只改这一行变量 + 卡宽/内边距 */
-  .gs-reveal .zoom-card {
-    --badge: 34px; --badge-fs: 16px; --spell-fs: 16px;
-    --art-w: 100%; --art-m: 6px auto 4px;
-    --name-fs: 17px; --text-fs: 12.5px; --text-lh: 1.5;
-    width: 186px;
-    padding: 9px 10px 13px;
-  }
-  .gs-reveal .zoom-card .hc-text { margin-top: 8px; }
+  .gs-reveal .zoom-card { width: 186px; padding: 9px 10px 13px; }
+  .gs-reveal .zoom-card .hc-art { width: 100%; margin: 6px auto 4px; }
+  .gs-reveal .zoom-card .hc-name { font-size: 17px; }
+  .gs-reveal .zoom-card .hc-text { font-size: 12.5px; line-height: 1.5; margin-top: 8px; }
+  .gs-reveal .zoom-card .cost-orb, .gs-reveal .zoom-card .p, .gs-reveal .zoom-card .hc-spell { width: 34px; height: 34px; font-size: 16px; }
   .gs-reveal-tag { font-size: 11px; padding: 3px 10px; }
   .gs-reveal-note { font-size: 10.5px; padding: 3px 10px; }
 }
@@ -1665,8 +1665,8 @@ body {
   .energy-pop .ep-sub { font-size: 11px; }
 }
 
-/* 洗入卡组（`shuffleIn`）的轻量演出 —— 锚点＝**计数块**
-   （玩家侧＝底部「手牌：N/7」#handCountVal；对手侧＝侧栏「牌库 N 张」#aiDeck）：
+/* v184：洗入卡组（`shuffleIn`）的轻量演出 —— 锚点＝**牌库计数**
+   （玩家侧＝手牌区「牌库 N」#deckCountVal；对手侧＝侧栏「牌库 N 张」#aiDeck）：
    计数闪光 + 外扩光环（合并在同一条动画里，避免两条 animation 互相覆盖，同 .energy-box-flash
    与 .energy-ring 并存时的老问题）+ 星光迸发（复用 .energy-star 的飞行关键帧）+ 「洗入卡组」气泡
    （复用 .energy-pop 的结构与关键帧，只把主行改成青蓝色）。全部在 body 悬浮层、不挡操作。 */
@@ -1764,33 +1764,9 @@ body {
 }
 .hand-empty { color: #6f8b66; font-size: 13px; display: flex; align-items: center; justify-content: center; width: 100%; border: 1px dashed rgba(108, 146, 100, .45); border-radius: var(--r-2); padding: 20px; text-align: center; }
 
-/* ==================== 卡面（.card-face）====================
-   手牌 / 对手手牌情报 / 图鉴 / 指定卡牌 / 三池 / 卡组编辑槽 / 卡组池 / 放大弹窗 / 衍生卡 /
-   登场演出 / 弃牌演出 —— 这些都是 js/game.js 的 cardFaceHTML() 产出的**同一套 DOM**：
-     角标行(.hc-top：.cost-orb 与 .p 或 .hc-spell) → 立绘区(.hc-art > .hc-img，缺图时 emoji 兜底)
-     → 卡名(.hc-name) → 效果文案(.hc-text)；封印时艺术区叠 ❗(.hc-seal)。
-   根元素由 game.js 的 cardFaceEl() 统一挂上 `.card-face` 与该上下文自己的类
-   （.hand-card / .zoom-card / .codex-card / .deck-pool-card / .deck-card-slot …），
-   并注入 `--cgrad`（费用档渐变）。
-
-   ★ 尺寸只走下面这组变量：新增界面或调尺寸时**只在该上下文（或其断点）里改变量**，
-   不要再分别重写 .cost-orb / .p / .hc-spell（那三个必须同进同退，漏一个就错位）；
-   上下文没声明的档位自动继承基准值。`.mini-card`（场上缩略卡）是另一套 DOM，用它自己的 --mc-* 变量。 */
-.card-face {
-  --badge: 26px;        /* 角标直径：费用宝珠 / 战力 / ✦ 三枚同一尺寸 */
-  --badge-fs: 13px;     /* 角标数字字号 */
-  --badge-bw: 2px;      /* 角标圆环描边 */
-  --spell-fs: 14px;     /* ✦ 的字号（比数字略大） */
-  --seal-fs: 30px;      /* 封印 ❗ */
-  --icon-fs: 30px;      /* 缺图卡的艺术区＝emoji 块 */
-  --art-icon-fs: 32px;  /* 立绘区内垫底的 emoji */
-  --art-w: calc(100% - 4px);
-  --art-m: 4px auto 2px;
-  --art-r: var(--r-1);
-  --name-fs: 12.5px;
-  --text-fs: 8.8px;
-  --text-lh: 1.3;
-
+.hand-card {
+  flex: 0 0 auto;
+  width: 86px;
   border-radius: var(--r-3);
   padding: 6px 6px 8px;
   background: var(--cgrad);
@@ -1803,8 +1779,6 @@ body {
   display: flex;
   flex-direction: column;
 }
-/* 手牌条里的排布（其余卡面在网格 / 弹窗里，不吃这两条） */
-.hand-card { flex: 0 0 auto; width: 86px; }
 .hand-card:hover:not(.unaffordable) { transform: translateY(-8px); box-shadow: 0 14px 22px rgba(46, 78, 40, .4); }
 .hand-card.selected {
   border-color: #f2c94c;
@@ -1812,31 +1786,30 @@ body {
   box-shadow: 0 0 0 3px rgba(242, 201, 76, .8), 0 16px 26px rgba(46, 78, 40, .45);
 }
 .hand-card.unaffordable { opacity: .55; filter: grayscale(.5); cursor: not-allowed; }
-.card-face .hc-top { display: flex; justify-content: space-between; align-items: center; }
-/* 费用宝珠 / 战力 / ✦：外观各自的取色规则保持原有特异度（.up/.down 着色靠它压过本行） */
-.cost-orb { width: var(--badge); height: var(--badge); border-radius: 50%; background: #12244a; border: var(--badge-bw) solid #6aa8ff; color: #bcd9ff; font-size: var(--badge-fs); font-weight: 800; display: flex; align-items: center; justify-content: center; }
-.card-face .p {
-  width: var(--badge); height: var(--badge); border-radius: 50%;
-  background: #1c0f08; border: var(--badge-bw) solid var(--accent);
-  color: #ffd23f; font-size: var(--badge-fs); font-weight: 800;
+.hand-card .hc-top { display: flex; justify-content: space-between; align-items: center; }
+.cost-orb { width: 26px; height: 26px; border-radius: 50%; background: #12244a; border: 2px solid #6aa8ff; color: #bcd9ff; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.hand-card .p {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: #1c0f08; border: 2px solid var(--accent);
+  color: #ffd23f; font-size: 13px; font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   text-shadow: 0 0 4px rgba(255, 210, 63, .5);
 }
-.card-face .hc-icon { font-size: var(--icon-fs); text-align: center; margin: 4px 0 2px; filter: drop-shadow(0 2px 3px var(--ink-5)); }
-/* 法术卡（def.spell）：卡框不显示战力，右上角战力位改画一个「✦」（不写「法术」二字） */
-.card-face .hc-spell {
-  width: var(--badge); height: var(--badge); flex: 0 0 auto;
+.hand-card .hc-icon { font-size: 30px; text-align: center; margin: 4px 0 2px; filter: drop-shadow(0 2px 3px var(--ink-5)); }
+/* v170：法术卡（def.spell）——卡框不显示战力，右上角战力位改为一个「✦」星标
+   （v178：**只画星、不写「法术」二字**；尺寸与费用宝珠 / 战力角标一致（26×26 圆形），
+    下面各处响应式规则里与 `.p` 一起同步收放） */
+.hand-card .hc-spell {
+  width: 26px; height: 26px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  font-size: var(--spell-fs); border-radius: 50%;
+  font-size: 14px; border-radius: 50%;
   color: #d9c9ff; background: rgba(38, 26, 72, .85);
-  border: var(--badge-bw) solid rgba(168, 140, 255, .65);
+  border: 2px solid rgba(168, 140, 255, .65);
   text-shadow: 0 0 6px rgba(160, 130, 255, .5);
 }
-/* 缺图卡的艺术区＝emoji 块：与有图卡的 .hc-art 同尺寸（正方形），手牌各卡高度才不会参差。
-   ⚠️ 宽度恒为 calc(100% - 4px)：它**不跟** --art-w —— 放大 / 衍生 / 弃牌那几个上下文里，
-   有图卡的立绘区是按 px 收窄的（240 / min(136px,36vw) 等），而缺图块一直吃卡宽的百分比，
-   两者本来就不一样（现状如此，未在本轮改动）。 */
-.card-face.no-img .hc-icon {
+/* v103：手牌尺寸统一——无图（emoji 兜底）的卡也占一块与图片卡同款的正方形艺术区，
+   白板/短文案的卡预留两行效果文字高度，使手牌各卡高度一致、入场不再互相撑高 */
+.hand-card.no-img .hc-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1847,8 +1820,8 @@ body {
   background: rgba(120, 150, 110, .14);
   filter: none;
 }
-.card-face .hc-name { font-size: var(--name-fs); font-weight: 800; text-align: center; text-shadow: 0 1px 2px var(--ink-8); }
-.card-face .hc-text { font-size: var(--text-fs); line-height: var(--text-lh); color: var(--surf-88); margin-top: 4px; flex: 1; text-shadow: 0 1px 2px var(--ink-8); }
+.hand-card .hc-name { font-size: 12.5px; font-weight: 800; text-align: center; text-shadow: 0 1px 2px var(--ink-8); }
+.hand-card .hc-text { font-size: 8.8px; line-height: 1.3; color: var(--surf-88); margin-top: 4px; flex: 1; text-shadow: 0 1px 2px var(--ink-8); }
 /* 手牌区的效果文字：最多两行，超长省略号截断（完整文案可右键手牌或点击放大查看） */
 #hand .hand-card .hc-text {
   display: -webkit-box;
@@ -2009,7 +1982,18 @@ body {
 @media (max-width: 640px) {
 }
 
-/* 底部能量块上的「↺」——提示它可点（重置本回合暗出的牌） */
+/* ============ 可点击的能量框（重置本回合暗牌） ============ */
+.hud-item.clickable {
+  cursor: pointer;
+  border-color: rgba(201, 148, 0, .4);
+  transition: border-color .2s, box-shadow .2s, background .2s;
+}
+.hud-item.clickable:hover {
+  border-color: #c99400;
+  box-shadow: 0 0 12px rgba(224, 163, 22, .35);
+  background: rgba(255, 240, 190, .7);
+}
+.hud-item.clickable:active { transform: scale(.97); }
 .reset-mark {
   margin-left: 6px;
   color: #b57708;
@@ -2281,21 +2265,16 @@ body {
   overflow-y: auto;
   max-width: 96vw;
 }
-/* 放大卡面：桌面的尺寸档（衍生卡 / 登场 / 弃牌都带 .zoom-card，只在自己的上下文里改这几行） */
 .zoom-card {
-  --badge: 46px; --badge-fs: 21px; --badge-bw: 2.5px; --spell-fs: 21px;
-  --seal-fs: 64px;
-  --icon-fs: 64px; --art-icon-fs: 76px;
-  --art-w: 240px; --art-m: 8px auto 6px; --art-r: var(--r-4);
-  --name-fs: 22px; --text-fs: 15px; --text-lh: 1.6;
   width: 250px;
   padding: 12px 14px 18px;
   border-radius: var(--r-6);
   animation: rise .28s ease;
 }
-.zoom-card .hc-icon { margin: 10px 0 4px; }
-.zoom-card .hc-name { margin-top: 4px; }
-.zoom-card .hc-text { margin-top: 12px; }
+.zoom-card .hc-icon { font-size: 64px; margin: 10px 0 4px; }
+.zoom-card .hc-name { font-size: 22px; margin-top: 4px; }
+.zoom-card .hc-text { font-size: 15px; line-height: 1.6; margin-top: 12px; }
+.zoom-card .cost-orb, .zoom-card .p, .zoom-card .hc-spell { width: 46px; height: 46px; font-size: 21px; border-width: 2.5px; }
 
 /* 放大查看的详情区（卡图**下方**那一块）：**只写卡面说不了的当前状态** —— 卡图 / 卡名 / 费用与威力角标 /
    效果文本都在卡面上，这里不再复述（数值条与效果分类标签已取消）。从上到下：状态行（费用递减计数）→
@@ -2339,30 +2318,28 @@ body {
   justify-content: flex-start;
 }
 .zoom-deriv .deriv-head { font-size: 13px; font-weight: 800; color: var(--dim); letter-spacing: 2px; white-space: nowrap; }
-/* 放大视图里的衍生小卡（.zoom-card + .deriv-card）：
-   · 角标固定小一号 —— 用 `.zoom-card.deriv-card` 这条规避开「≤700 的手牌档」把它一起收小；
-   · 卡宽与文字则与放大主卡同档：≤700 吃手牌档、≤640 吃放大手机档（现状如此，未在本轮改动）。 */
-.zoom-card.deriv-card { --badge: 34px; --badge-fs: 16px; --spell-fs: 16px; }
-.deriv-card {
-  --icon-fs: 46px;
-  --name-fs: 17px; --text-fs: 11px; --text-lh: 1.5;
-  width: 260px;
-}
-.deriv-card .hc-icon { margin: 6px 0 2px; }
-.deriv-card .hc-text { margin-top: 8px; overflow-wrap: anywhere; }
+.deriv-card { width: 180px; }
+.deriv-card .hc-icon { font-size: 46px; margin: 6px 0 2px; }
+.deriv-card .hc-name { font-size: 16px; }
+.deriv-card .hc-text { font-size: 11px; line-height: 1.4; margin-top: 8px; }
 @media (max-width: 760px) {
   .zoom-row { flex-direction: column; align-items: center; }
   .zoom-deriv { width: min(320px, 92vw); }
 }
 
-/* 衍生卡牌区（桌面）：把详情弹窗放宽，保证「本体卡 + 衍生卡」两列都能完整展示 */
+/* ===== 衍生卡牌区显示修复（v62）：桌面加宽详情弹窗 + 衍生卡自适配尺寸 ===== */
+/* 衍生小卡不能沿用放大主卡 240px 艺术区（会超出 180px 卡宽被裁/溢出），单独收窄； */
+/* 详情弹窗整体放宽，保证“本体卡 + 衍生卡”两列都能完整展示。 */
 .zoom-stage { width: min(880px, 96vw); }
 .zoom-row { justify-content: center; }
 .zoom-main-col { flex: 1 1 auto; }
 .zoom-deriv { flex-shrink: 0; min-width: 300px; align-self: stretch; }
-/* ⚠️ 衍生卡的立绘区沿用 .zoom-card 的 --art-w（240px）：卡宽 260px − 内边距 28px ＝ 232px，
-   立绘区比内容宽度大 8px。这是**现状**（下面那条 224px 的历史覆写被 .zoom-card 的规则压住，
-   从未生效），本轮不动它，留给阶段 3 一起收。 */
+.deriv-card { width: 260px; }
+.deriv-card .hc-art { width: 224px; margin: 6px auto 4px; }
+.deriv-card .hc-art .hc-icon { font-size: 46px; }
+.deriv-card .hc-top .cost-orb, .deriv-card .hc-top .p, .deriv-card .hc-top .hc-spell { width: 34px; height: 34px; font-size: 16px; }
+.deriv-card .hc-name { font-size: 17px; }
+.deriv-card .hc-text { font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 
 /* v102：没有衍生卡的卡牌详情弹窗整体收窄（renderDeriv 加 .no-deriv） */
 .zoom-stage.no-deriv {
@@ -2436,10 +2413,10 @@ body {
 /* 手牌/图鉴/放大卡面：图片占方形艺术区；缺图时垫底 emoji 透出 */
 .hc-art {
   position: relative;
-  width: var(--art-w, calc(100% - 4px));
+  width: calc(100% - 6px);
   aspect-ratio: 1 / 1;
-  margin: var(--art-m, 4px auto 2px);
-  border-radius: var(--art-r, var(--r-1));
+  margin: 4px auto 2px;
+  border-radius: var(--r-2);
   overflow: hidden;
   background: rgba(120, 150, 110, .12);
   flex: 0 0 auto;
@@ -2447,7 +2424,7 @@ body {
 .hc-art .hc-icon {
   position: absolute; inset: 0; margin: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: var(--art-icon-fs, 32px);
+  font-size: 32px;
 }
 .hc-img {
   position: absolute; inset: 0;
@@ -2456,8 +2433,9 @@ body {
   z-index: 2;
   border-radius: inherit;
 }
-/* 立绘区宽度 / 圆角 / 外边距全部由 .card-face 的 --art-w / --art-r / --art-m 给出，
-   手牌与图鉴等上下文不吃额外覆写（原来是这里的 .hand-card .hc-art 与 .zoom-card .hc-art 两条） */
+.hand-card .hc-art { width: calc(100% - 4px); border-radius: var(--r-1); }
+.zoom-card .hc-art { width: 240px; margin: 8px auto 6px; border-radius: var(--r-4); }
+.zoom-card .hc-art .hc-icon { font-size: 76px; }
 
 /* 场上缩略卡（2×2 格位）：有图时，图片保持正方形，
    边长 = 卡位高度（横向居中），完整显示不裁切；
@@ -2588,7 +2566,7 @@ body { -webkit-tap-highlight-color: transparent; }
 .codex-card,
 .location.hoverable,
 .mini-card.can-inspect,
-.energy-chip {
+.hud-item.clickable {
   touch-action: manipulation;
 }
 
@@ -2603,18 +2581,19 @@ body { -webkit-tap-highlight-color: transparent; }
     body { height: 100dvh; min-height: 0; }
   }
 
-  /* 顶栏：可换行 + 避开刘海/圆角（「加倍」现在**在手机上也显示**，见 ≤700px 的两行排布） */
+  /* v105：手机端隐藏“双倍下注”按钮（AI 仍可自行加倍） */
+  .top-actions #btnSnap { display: none; }
+
+  /* 顶栏：可换行 + 避开刘海/圆角 */
   .topbar {
     flex-wrap: wrap;
     row-gap: 6px;
     padding: calc(8px + var(--sa-top)) calc(10px + var(--sa-right)) 8px calc(10px + var(--sa-left));
   }
 
-  /* 状态条常驻：**默认只占 1 行**（长提示点一下展开看全文），同步更新见 js/game.js 的 setStatus() */
+  /* 状态条常驻：同步更新见 js/game.js setStatus() */
   .mob-status {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
+    display: block;
     flex: 0 0 auto;
     padding: 6px 12px;
     font-size: 12.5px;
@@ -2624,19 +2603,6 @@ body { -webkit-tap-highlight-color: transparent; }
     border-top: 1px solid rgba(108, 148, 100, .18);
     border-bottom: 1px solid rgba(108, 148, 100, .3);
   }
-  .mob-status .status-text {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .mob-status.open .status-text { -webkit-line-clamp: 6; }
-  /* 文案被截断时才给「展开」提示（.clamped 由 setStatus() 量出来挂上） */
-  .mob-status.clamped { cursor: pointer; }
-  .mob-status.clamped::after { content: '▾'; flex: 0 0 auto; color: var(--dim); font-size: 11px; line-height: 1.7; }
-  .mob-status.clamped.open::after { content: '▴'; }
   .mob-status.busy .status-text { color: var(--green); }
 
   /* 中间主区：唯一滚动区域（覆盖桌面 grid 为纵向 flex） */
@@ -2662,11 +2628,10 @@ body { -webkit-tap-highlight-color: transparent; }
   .hand { scrollbar-width: none; }
   .hand::-webkit-scrollbar { display: none; }
 
-  /* 底部三块（认输 / 能量+手牌 / 结束回合）整体贴到最下沿 —— 只留 4px + 安全区
-     （安全区在刘海屏上自动让开 Home 条；手牌区的下内边距仍是 42/48px，不会盖住手牌） */
-  .corner-actions { bottom: calc(4px + var(--sa-bottom)); }
+  /* 左下/右下常驻按钮：贴安全区、收小，避免遮住主内容 */
   .corner-left { left: calc(12px + var(--sa-left)); }
   .corner-right { right: calc(12px + var(--sa-right)); }
+  .corner-left, .corner-right { bottom: calc(12px + var(--sa-bottom)); }
   .corner-actions .btn { padding: 9px 13px; font-size: 13px; }
 
   .foot { display: none; }
@@ -2674,42 +2639,32 @@ body { -webkit-tap-highlight-color: transparent; }
 
 /* ========== 断点二：≤700px —— 紧凑排版 ========== */
 @media (max-width: 700px) {
-  /* 顶栏改成**两行网格**（手机上按钮不再挤成一排图标）：
-       第一行：品牌（左，点它回主页面）· 「回合：x/N」居中 · 右侧一组＝赌注 + 加倍（加倍在最右端）
-       第二行：图鉴 / 重新开始（**带文字**；开发调试按钮也在这一行，联机时「重新开始」被 JS 收掉）
-     `display: contents` 让 .hud 的两个子块直接成为网格项，省掉一层容器。 */
   .topbar {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    column-gap: 8px;
-    row-gap: 6px;
+    gap: 6px 10px;
     padding: calc(6px + var(--sa-top)) calc(8px + var(--sa-right)) 6px calc(8px + var(--sa-left));
   }
-  .brand { grid-area: 1 / 1; justify-self: start; min-width: 0; }
   .brand .logo { font-size: 23px; }
   .brand h1 { font-size: 16px; letter-spacing: 1px; }
   .brand .sub { display: none; }
 
-  .hud { display: contents; }
-  #turnBox { grid-area: 1 / 2; justify-self: center; }
-  .hud-right { grid-area: 1 / 3; justify-self: end; gap: 6px; }
+  .hud { gap: 6px; margin-left: auto; order: 2; }
   .hud-item { padding: 3px 9px; gap: 4px; }
   .hud-label { display: none; }
   .hud-value, .hud-item.cubes .cube { font-size: 16px; }
   .cube-pips span { width: 6px; height: 6px; }
-  /* 第二行＝图鉴 / 重新开始（**带文字**）+ 开发调试按钮：整行**靠右对齐** */
-  .top-actions { grid-area: 2 / 1 / 3 / 4; gap: 6px; justify-content: flex-end; }
+  .top-actions { gap: 6px; order: 3; flex: 1 1 100%; justify-content: flex-end; }
   .btn { padding: 6px 10px; font-size: 12px; }
 
   .layout { gap: 10px; padding: 8px 10px 6px; }
   .board { gap: 10px; min-height: 0; }
 
-  /* 底部手牌：卡片收小；v109 底部再抬高避开按钮 */
+  /* 底部手牌：卡片收小、两侧让位给常驻按钮（84px 足够容纳）；v109 底部再抬高避开按钮 */
   .hand-wrap { padding-top: 4px; padding-bottom: calc(48px + var(--sa-bottom)); }
-  /* 能量点并入顶栏能量框（顶栏已显示「剩余 / 上限 ↺」，点它就能重置暗牌）：
-     手机上不再让这条单独占一行 —— 高度直接让给场地 */
-  .energy-pips { display: none; }
+  .energy-pips {
+    margin-bottom: 4px;
+    padding-left: 84px;
+    padding-right: 84px;
+  }
   .hand {
     min-height: 118px;
     gap: 8px;
@@ -2718,19 +2673,17 @@ body { -webkit-tap-highlight-color: transparent; }
     padding-left: 84px;
     padding-right: 84px;
   }
-  /* 手牌卡面（≤700px 的尺寸档）：只改变量；其余带 .hand-card 的卡面
-     （图鉴 / 卡组页 / 放大弹窗等）会在各自断点里再覆盖自己那几档 */
   .hand-card {
-    --badge: 21px; --badge-fs: 11px; --badge-bw: 1.5px; --spell-fs: 11px;
-    --icon-fs: 25px; --art-icon-fs: 25px;
-    --art-m: 3px auto 1px;
-    --name-fs: 11px; --text-fs: 7.6px; --text-lh: 1.25;
     width: 72px;
     padding: 4px 4px 6px;
     border-radius: var(--r-2);
   }
-  .hand-card .hc-icon { margin: 2px 0 0; }
-  .hand-card .hc-text { margin-top: 2px; }
+  .hand-card .cost-orb, .hand-card .p, .hand-card .hc-spell { width: 21px; height: 21px; font-size: 11px; border-width: 1.5px; }
+  .hand-card .hc-icon { font-size: 25px; margin: 2px 0 0; }
+  .hand-card .hc-art { margin: 3px auto 1px; }
+  .hand-card .hc-art .hc-icon { font-size: 25px; }
+  .hand-card .hc-name { font-size: 11px; }
+  .hand-card .hc-text { font-size: 7.6px; line-height: 1.25; margin-top: 2px; }
 }
 
 /* ========== 断点三：≤640px —— 三区域横向并列（手机竖屏） ==========
@@ -2759,14 +2712,9 @@ body { -webkit-tap-highlight-color: transparent; }
   .zone { min-height: 112px; gap: 3px; padding: 4px 4px; }
   .zone .slot-row { gap: 3px; padding: 0; }
   .slot-count { font-size: 8.5px; bottom: 3px; left: 5px; }
-  .mini-card {
-    --mc-cost-fs: 11px; --mc-cost-min: 16px;
-    --mc-p-fs: 12px; --mc-p-min: 17px; --mc-spell-fs: 12px;
-    padding: 4px 2px 3px;
-    border-radius: var(--r-1);
-  }
-  .mini-card .mc-cost { top: 2px; left: 2px; padding: 0 3px; border-radius: 5px; }
-  .mini-card .p, .mini-card .mc-spell { top: 2px; right: 2px; padding: 0 3px; border-radius: 5px; }
+  .mini-card { padding: 4px 2px 3px; border-radius: var(--r-1); }
+  .mini-card .mc-cost { font-size: 11px; min-width: 16px; top: 2px; left: 2px; padding: 0 3px; border-radius: 5px; }
+  .mini-card .p, .mini-card .mc-spell { font-size: 12px; min-width: 17px; top: 2px; right: 2px; padding: 0 3px; border-radius: 5px; }
   .slot-gap { border-radius: var(--r-1); }
   .slot-gap .gap-glyph { font-size: 12px; }
   .slot-gap .gap-name { font-size: 8px; }
@@ -2794,7 +2742,8 @@ body { -webkit-tap-highlight-color: transparent; }
    场地高度优先：压缩顶部与手牌、隐藏能量小点；同时对局开始的卡面揭示也收小。
    ⚠️ 阈值 620px（原 640/620/560 三档合并而来）：521~620px 高度区间现在也吃这一套收小规则。 */
 @media (max-height: 620px) {
-  .gs-reveal .zoom-card { --text-fs: 11.5px; width: 168px; }
+  .gs-reveal .zoom-card { width: 168px; }
+  .gs-reveal .zoom-card .hc-text { font-size: 11.5px; }
   .brand .sub { display: none; }
   .brand h1 { font-size: 15px; }
   .brand .logo { font-size: 22px; }
@@ -2889,19 +2838,23 @@ body { -webkit-tap-highlight-color: transparent; }
   #pickGrid .codex-card .hc-text { display: none; }
   #codexGrid .codex-card,
   #pickGrid .codex-card {
-    --badge: 20px; --badge-fs: 10px; --spell-fs: 10px;
-    --icon-fs: 30px; --art-icon-fs: 30px;
     padding: 5px 3px 7px;
   }
-  /* ⚠️ 立绘区的上下边距在这里**只能用带 #id 的选择器**：≤700px 那条 `.hand-card .hc-art { margin-top: 6px }`
-     特异度高于 `.hc-art`，只有 ID 级选择器能把它按回 3px（与改动前的取值一致）。 */
-  #codexGrid .codex-card .hc-art,
-  #pickGrid .codex-card .hc-art { margin: 3px auto 2px; }
   #codexGrid,
   #pickGrid {
     grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
     gap: 8px;
   }
+  #codexGrid .codex-card .hc-icon,
+  #pickGrid .codex-card .hc-icon { font-size: 30px; }
+  #codexGrid .codex-card .hc-art,
+  #pickGrid .codex-card .hc-art { margin: 3px auto 2px; }
+  #codexGrid .codex-card .cost-orb,
+  #codexGrid .codex-card .p,
+  #codexGrid .codex-card .hc-spell,
+  #pickGrid .codex-card .cost-orb,
+  #pickGrid .codex-card .p,
+  #pickGrid .codex-card .hc-spell { width: 20px; height: 20px; font-size: 10px; }
 }
 
 /* v112：手机端（≤640px）卡牌详情弹窗收小 —— 缩小卡牌本体与立绘，
@@ -2913,15 +2866,22 @@ body { -webkit-tap-highlight-color: transparent; }
     gap: 12px;
   }
   .zoom-card {
-    --badge: 30px; --badge-fs: 14px; --badge-bw: 2px; --spell-fs: 14px;
-    --icon-fs: 34px; --art-icon-fs: 34px;
-    --art-w: min(140px, 46vw); --art-m: 4px auto 3px; --art-r: var(--r-2);
-    --name-fs: 15px; --text-fs: 12px; --text-lh: 1.45;
     width: min(176px, 58vw);
     padding: 8px 8px 12px;
     border-radius: var(--r-4);
   }
-  .zoom-card .hc-text { margin-top: 8px; }
+  .zoom-card .hc-art {
+    width: min(140px, 46vw);
+    margin: 4px auto 3px;
+    border-radius: var(--r-2);
+  }
+  .zoom-card .hc-icon,
+  .zoom-card .hc-art .hc-icon { font-size: 34px; }
+  .zoom-card .hc-name { font-size: 15px; }
+  .zoom-card .hc-text { font-size: 12px; line-height: 1.45; margin-top: 8px; }
+  .zoom-card .cost-orb,
+  .zoom-card .p,
+  .zoom-card .hc-spell { width: 30px; height: 30px; font-size: 14px; border-width: 2px; }
   .zoom-info { max-width: 330px; font-size: 12.5px; line-height: 1.7; }
   .power-panel { padding: 8px 10px 10px; }
   .pp-chip { width: 44px; min-height: 44px; }
@@ -2953,7 +2913,7 @@ body { -webkit-tap-highlight-color: transparent; }
   .hand { padding-left: 14px; padding-right: 14px; }
 }
 
-/* 认输 与 结束回合 中间：能量块 + 手牌计数（两块居中并排） */
+/* v118：认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7） */
 .corner-center {
   left: 50%;
   transform: translateX(-50%);
@@ -2973,56 +2933,21 @@ body { -webkit-tap-highlight-color: transparent; }
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-/* 底部两块计数都可点（.corner-center 整体是 pointer-events:none，只有它们各自放开）：
-   .energy-chip ＝ 重置本回合暗出的牌；.hand-chip ＝ 在「手牌：N/7」与「牌库：N」之间切换 */
-.energy-chip,
-.hand-chip { pointer-events: auto; cursor: pointer; transition: border-color .2s, box-shadow .2s, background .2s; }
-.hand-chip:hover {
-  border-color: rgba(124, 168, 110, .85);
-  box-shadow: 0 0 12px rgba(124, 168, 110, .3);
-  background: #f2f9ea;
-}
-.hand-chip:active { transform: scale(.97); }
 @media (max-width: 700px) {
-  /* 底部三块（认输 / 两块计数 / 跳过回合）要挤在同一行：内边距与间距收紧，
-     否则 360px 宽的机器上中间两块会与两侧按钮叠在一起 */
-  .corner-center { gap: 5px; }
-  .hand-count-chip { font-size: 12px; padding: 4px 10px; }
-}
-/* 极窄屏（≤350px）兜底：只留数字，避免与两侧按钮重叠（能量块上的 ↺ 仍在，仍可点） */
-@media (max-width: 350px) {
-  .chip-label { display: none; }
+  .hand-count-chip { font-size: 12px; padding: 5px 12px; }
 }
 
-/* 底部能量块：**重置本回合暗出牌的唯一入口**（顶栏不再有能量框）。
-   文字用金黄色，与计数块区分。 */
-.energy-chip {
-  color: #9c6a00;   /* 金黄色（白底约 4.7:1，再亮就看不清了 —— 与全站其它金色 #c99400 / #b57708 同一族） */
-  border-color: rgba(201, 148, 0, .45);
+/* v184：与手牌计数并排的「牌库 N」计数（玩家牌库张数）—— 冷色调以区别于手牌计数，
+   同时是「洗入卡组」玩家侧演出的锚点（.deck-shuffle-flash 会落在它上面）。
+   位置沿用 .corner-center（认输 / 结束回合 之间，flex 横排、居中）；窄屏缩小避免与两侧按钮挤到一起。 */
+.deck-count-chip {
+  color: #1f3d55;
+  border-color: rgba(96, 150, 190, .5);
+  padding: 6px 12px;
+  font-variant-numeric: tabular-nums;
 }
-.energy-chip #energyChipVal { color: #8a5d00; }
-.energy-chip:hover {
-  border-color: #c99400;
-  box-shadow: 0 0 12px rgba(224, 163, 22, .35);
-  background: rgba(255, 240, 190, .9);
-}
-.energy-chip:active { transform: scale(.97); }
 @media (max-width: 700px) {
-  .energy-chip { font-size: 12px; padding: 4px 9px; }
-}
-
-/* ===== 底部三块**同高对齐** =====
-   认输 / 结束回合（.corner-actions .btn）与中央的「能量 / 手牌」计数块用一个显式高度：
-   改前计数块的字号与内边距都比按钮小，矮了约 10px。这里统一 height + 居中排布，
-   不再依赖各自的字体度量（放最后，压过上面按断点写的内边距）。 */
-.corner-actions .btn,
-.hand-count-chip {
-  height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding-top: 0;
-  padding-bottom: 0;
+  .deck-count-chip { font-size: 12px; padding: 5px 9px; }
 }
 
 /* ============================================================
@@ -3146,33 +3071,21 @@ body.in-home #challengeMask:not(.hidden) {
   box-shadow: 0 12px 26px rgba(201, 148, 0, .34);
 }
 .home-btn.primary:hover { background: linear-gradient(135deg, #eab022, #ffd85e); }
-/* 联机入口（.home-btn.net）：写法与「开始对战」(.home-btn.primary) 完全同款 —— 无边款、渐变底、
-   同强度的光晕投影，只是把金色换成淡蓝（深蓝字）；一眼与其余入口分开 ——
-   它是唯一会连自己的房间服务（worker/）的入口，其余都是本地功能。
-   ⚠️ 同 .home-btn.dev：必须写在 .home-btn:hover 之后（同为 (0,2,0)，靠顺序压过白底 hover）。 */
+/* 联机入口（.home-btn.net）：淡蓝底 + 蓝色描边，与单机入口一眼分开 ——
+   它是唯一会连自己的房间服务（worker/）的入口，其余都是本地功能 */
 .home-btn.net {
-  border: none;
   color: #1f3f5c;
-  background: linear-gradient(135deg, #7cc4ec, #b6e2fb);
-  box-shadow: 0 12px 26px rgba(46, 130, 190, .34);
+  border-color: rgba(96, 150, 200, .55);
+  background: linear-gradient(135deg, rgba(228, 243, 253, .95), rgba(203, 230, 250, .92));
+  box-shadow: 0 8px 20px rgba(70, 120, 170, .14);
 }
-.home-btn.net:hover { background: linear-gradient(135deg, #8fcdf0, #cbe9fd); }
-.home-btn.net .hb-sub { color: rgba(31, 63, 92, .78); }
-.home-btn.net .hb-arrow { color: rgba(31, 63, 92, .55); }
-/* 开发调试入口（.home-btn.dev）：淡绿渐变底 + 黑字，与旁边淡蓝的联机入口、金色主入口一眼分开。
-   ⚠️ 必须写在 .home-btn:hover 之后：两者同为 (0,2,0)，靠顺序压过白底 hover。 */
-.home-btn.dev {
-  color: #000;
-  border: none;
-  background: linear-gradient(135deg, #45b47f, #7ad6a8);
-  box-shadow: 0 10px 24px rgba(69, 180, 127, .34);
+.home-btn.net:hover {
+  border-color: rgba(80, 140, 195, .8);
+  background: linear-gradient(135deg, #ecf6fd, #d7ecfb);
+  box-shadow: 0 12px 26px rgba(70, 120, 170, .24);
 }
-.home-btn.dev:hover {
-  background: linear-gradient(135deg, #57c490, #93e2bd);
-  box-shadow: 0 12px 28px rgba(69, 180, 127, .44);
-}
-.home-btn.dev .hb-sub { color: rgba(0, 0, 0, .72); }
-.home-btn.dev .hb-arrow { color: rgba(0, 0, 0, .5); }
+.home-btn.net .hb-sub { color: #4a7292; }
+.home-btn.net .hb-arrow { color: rgba(58, 100, 138, .5); }
 .hb-icon { flex: 0 0 auto; width: 34px; font-size: 26px; text-align: center; filter: drop-shadow(0 2px 6px var(--ink-12)); }
 .hb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .hb-main { font-size: 17px; font-weight: 800; letter-spacing: 1px; }
@@ -3223,7 +3136,7 @@ body.in-home #challengeMask:not(.hidden) {
      （≈ 1/3 : 2/3，与参考图一致）；
    - 层级：.deck-screen z-index 45（游戏弹窗 modal-mask 50 / zoom-mask 60 之上仍可见，
      所以点卡牌可复用 showZoom() 放大查看）；进入本页时 body.in-deck 隐藏游戏区；
-   - 卡面复用游戏手牌样式（.card-face.hand-card + cardFaceHTML），仅覆盖宽度以适配网格。
+   - 卡面复用游戏手牌样式（.hand-card + cardFaceHTML），仅覆盖宽度以适配网格。
    ============================================================ */
 .deck-screen {
   position: fixed;
@@ -3402,14 +3315,14 @@ body.in-home #challengeMask:not(.hidden) {
    省下的高度全部让给下方卡池；极端矮屏（横屏手机）才用 max-height 兜底、
    由 .deck-slots 纵向滚动。 */
 .deck-screen.edit-mode .deck-bar { flex: 0 0 auto; max-height: 62%; }
-/* 已放卡槽 = 卡面（.card-face 提供卡面外观与尺寸变量，这里只覆盖宽度 / 悬停位移 / 卡名截断） */
+/* 已放卡槽 = 卡面（.hand-card 提供卡面外观，这里覆盖宽度 / 悬停位移 / 卡名截断） */
 .deck-card-slot { width: 100%; }
 .deck-card-slot .hc-text { display: none; } /* 卡槽紧凑：只留 费用 / 战力 / 立绘 / 卡名 */
 .deck-card-slot .hc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deck-card-slot:hover:not(.unaffordable) { transform: translateY(-2px); }
 /* 空卡槽 = 与卡面同构的“幽灵卡”（尺寸与已放卡槽完全一致，见 js/deck-page.js 注释）：
    角标行(.dcs-top) / 正方形立绘区(.dcs-art) / 卡名行(.dcs-hint)，三段的尺寸与边距
-   分别读 .deck-card-slot 上的 --badge / --name-fs（角标行与卡名），立绘区与已放卡槽同宽。 */
+   均与 .cost-orb、.hand-card .hc-art、.hc-name 对齐。 */
 .deck-card-slot.empty {
   width: 100%;
   display: flex;
@@ -3418,14 +3331,14 @@ body.in-home #challengeMask:not(.hidden) {
   justify-content: flex-start;
   padding: 6px 6px 8px;
   color: #7d947a;
-  border: 2px dashed rgba(108, 148, 100, .5); /* 与 .card-face 的 2px 实线边框同宽 */
+  border: 2px dashed rgba(108, 148, 100, .5); /* 与 .hand-card 的 2px 实线边框同宽 */
   border-radius: var(--r-3);
   background: var(--surf-34);
 }
-.dcs-top { flex: 0 0 auto; height: var(--badge, 26px); } /* = 角标高度：跟着 .deck-card-slot 的 --badge 走 */
+.dcs-top { flex: 0 0 auto; height: 26px; } /* = .cost-orb / .p 高度 */
 .dcs-art {
   flex: 0 0 auto;
-  width: calc(100% - 4px); /* = 手牌卡面的立绘区宽度 */
+  width: calc(100% - 4px); /* = .hand-card .hc-art 宽度 */
   aspect-ratio: 1 / 1;
   margin: 4px auto 2px;    /* = .hc-art 边距 */
   display: flex;
@@ -3435,7 +3348,7 @@ body.in-home #challengeMask:not(.hidden) {
   background: rgba(120, 150, 110, .13);
 }
 .dcs-idx { font-size: 22px; font-weight: 800; opacity: .75; }
-.dcs-hint { font-size: var(--name-fs, 12.5px); font-weight: 800; } /* = 卡名字号/字重，行高一致 */
+.dcs-hint { font-size: 12.5px; font-weight: 800; } /* = .hc-name 字号/字重，行高一致 */
 
 /* v126：编辑态下“已在卡组里”的卡牌 = 灰色遮罩 + 不可点击（移出请点上方卡槽） */
 .deck-pool-card.in-deck { cursor: default; }
@@ -3464,17 +3377,17 @@ body.in-home #challengeMask:not(.hidden) {
    v134：编辑态把「卡组名 N/12」与一排操作按钮收进同一行（隐藏「卡组设置」页标题腾位）。 */
 @media (max-width: 700px) {
   .deck-slots.edit-mode { gap: 5px; }
-  /* 卡槽（已放卡面与空位幽灵卡共用这一档：变量声明在 .deck-card-slot 上，两者自动一致） */
-  .deck-card-slot {
-    --badge: 16px; --badge-fs: 8.5px; --badge-bw: 1px; --spell-fs: 8.5px;
-    --name-fs: 8.5px;
-    padding: 3px 3px 4px;
-    border-radius: var(--r-1);
-  }
+  .deck-card-slot { padding: 3px 3px 4px; border-radius: var(--r-1); }
   .deck-card-slot .hc-art { margin: 2px auto 1px; }
+  .deck-card-slot .hc-name { font-size: 8.5px; }
+  .deck-card-slot .cost-orb,
+  .deck-card-slot .p,
+  .deck-card-slot .hc-spell { width: 16px; height: 16px; font-size: 8.5px; border-width: 1px; }
   .deck-card-slot.empty { padding: 3px 3px 4px; border-radius: var(--r-1); }
+  .dcs-top { height: 16px; }
   .dcs-art { margin: 2px auto 1px; border-radius: var(--r-1); }
   .dcs-idx { font-size: 15px; }
+  .dcs-hint { font-size: 8.5px; }
   .deck-top-actions .bt-txt { display: none; }        /* 顶部按钮只留图标（title 仍可悬停查看） */
   .deck-top-actions .bt-ico { margin-right: 0; }
   .deck-top-actions .btn { padding: 6px 10px; font-size: 14px; }
@@ -3745,12 +3658,11 @@ body.in-home #challengeMask:not(.hidden) {
   .deck-grid { grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
   /* 手机端卡片简略显示：隐藏效果文字（同图鉴 #codexGrid 的 ≤640px 口径） */
   .deck-grid .deck-pool-card .hc-text { display: none; }
-  .deck-grid .deck-pool-card {
-    --badge: 19px; --badge-fs: 9.5px; --spell-fs: 9.5px;
-    --name-fs: 10.5px;
-  }
+  .deck-grid .deck-pool-card .cost-orb,
+  .deck-grid .deck-pool-card .p,
+  .deck-grid .deck-pool-card .hc-spell { width: 19px; height: 19px; font-size: 9.5px; }
   /* 小卡下长卡名（如「帕秋莉·诺蕾姬」）改为省略号，避免溢出到相邻卡上 */
-  .deck-grid .deck-pool-card .hc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-grid .deck-pool-card .hc-name { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 @media (max-height: 620px) and (min-width: 641px) {
   .deck-bar { min-height: 150px; }
@@ -4309,16 +4221,15 @@ body.in-home #zoomMask:not(.hidden) {
 @media (max-width: 700px) {
   .discard-reveal { top: 40%; gap: 7px; }
   .discard-reveal-inner { gap: 10px; }
-  .discard-reveal .zoom-card {
-    --badge: 30px; --badge-fs: 14px; --badge-bw: 2px; --spell-fs: 14px;
-    --icon-fs: 40px; --art-icon-fs: 40px;
-    --art-w: min(136px, 36vw); --art-m: 6px auto 4px; --art-r: var(--r-2);
-    --name-fs: 15px; --text-fs: 11.5px; --text-lh: 1.45;
-    width: min(150px, 40vw);
-    padding: 8px 9px 12px;
-    border-radius: var(--r-4);
-  }
-  .discard-reveal .zoom-card .hc-text { margin-top: 8px; }
+  .discard-reveal .zoom-card { width: min(150px, 40vw); padding: 8px 9px 12px; border-radius: var(--r-4); }
+  .discard-reveal .zoom-card .hc-art { width: min(136px, 36vw); margin: 6px auto 4px; border-radius: var(--r-2); }
+  .discard-reveal .zoom-card .hc-icon,
+  .discard-reveal .zoom-card .hc-art .hc-icon { font-size: 40px; }
+  .discard-reveal .zoom-card .hc-name { font-size: 15px; }
+  .discard-reveal .zoom-card .hc-text { font-size: 11.5px; line-height: 1.45; margin-top: 8px; }
+  .discard-reveal .zoom-card .cost-orb,
+  .discard-reveal .zoom-card .p,
+  .discard-reveal .zoom-card .hc-spell { width: 30px; height: 30px; font-size: 14px; border-width: 2px; }
   .discard-reveal-tag { font-size: 11px; padding: 2px 9px; }
   .discard-reveal-note { font-size: 10.5px; }
   .discard-slash-layer { border-radius: var(--r-4); }

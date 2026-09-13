@@ -159,6 +159,26 @@ export class Room {
       }
       return;
     }
+
+    // 房主把对手移出房间（客户端按钮「🚪 踢出对手」）：这件事必须由服务端关连接、不能只转发一条消息 ——
+    // 典型场景是对手那根连接已经半死（他掉线了但服务端还没察觉），只有关掉它才会触发 gone、把位置腾出来。
+    // 只认房主发的；被踢的一方会先收到 {t:'kicked'}（好让他的界面对玩家说清是被移出，而不是"连接断了"）。
+    if (data.t === "kick") {
+      if (role !== "host") return;
+      const other = this.sockets.guest;
+      if (!other) return;
+      try {
+        other.send(JSON.stringify({ t: "kicked" }));
+      } catch {
+        // 连接已经坏了：下面的 close 会让 gone 收尾
+      }
+      try {
+        other.close(1000, "kicked");
+      } catch {
+        this.gone("guest", other);
+      }
+      return;
+    }
     if (data.t !== "msg") return;
 
     const msg = data.msg;

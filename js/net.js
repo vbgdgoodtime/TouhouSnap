@@ -32,6 +32,9 @@
   var TURN_TIMEOUT = 90; // 等对手提交包的秒数；到点直接判他认输
   var HURRY_AT = 30;     // 倒计时剩这么多秒时状态条转告警色（只是提示，判负仍按 TURN_TIMEOUT）
   var CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 房间码字符集：去掉容易看错的 I O 0 1
+  /* 房主专用「🚫 踢出对手」按钮：**当前关着**（`false`）—— 它不是纯客户端功能，房间服务得重新部署才认 `{"t":"kick"}`，
+     没部署时点了不会发生任何事，索性先不露出来。要用：① 把这里改成 `true`；② `cd worker && npx wrangler deploy`。 */
+  var KICK_ENABLED = false;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -230,6 +233,10 @@
     toggle('netReady', !noRoom && !started);
     toggle('netCopy', !noRoom && !started);
     toggle('netLeave', !noRoom);
+    // 「🚫 踢出对手」：只有房主能看见，而且只在"没开局"或"一局已打完"时出现（对局进行中踢人＝替自己判对手负，容易误触）；
+    // 对手已经断开时也不出现 —— 那时房间已经把他那个位置腾出来了，没东西可踢。留在房间里的"半死连接"才是它的用武之地。
+    // KICK_ENABLED 当前是 false ⇒ 这个按钮不露出来（原因见文件顶部那个常量的注释）。
+    toggle('netKick', KICK_ENABLED && !noRoom && role === 'host' && peerOnline && (!started || matchOver()));
     toggle('netClose', noRoom || started);
     toggle('netPlayers', !noRoom);
 
@@ -238,8 +245,9 @@
       : ('房间码 ' + room + '（你是' + (role === 'host' ? '房主' : '加入者') + '）'
         + (started ? ' · 对局进行中' : (peerOnline ? ' · 对手已进入' : ' · 等对手进来'))));
 
-    show('npSelfWho', '你（' + (role === 'host' ? '房主' : '加入者') + '）' + (myName ? ' ' + myName : ''));
-    show('npPeerWho', '对手' + (peerName() ? '（' + peerName() + '）' : '（还没进来）'));
+    // 双方名单：括号里统一放"身份"（你 · 房主 / 对手），括号后面才是昵称 —— 不要用括号去装昵称，两种用法混在一起很难读
+    show('npSelfWho', '（你 · ' + (role === 'host' ? '房主' : '加入者') + '）' + (myName || ''));
+    show('npPeerWho', '（对手）' + (peerName() || '还没进来'));
     setAv('npSelfAv', myAvatar(), '🙋');                      // 自己在设置里选的头像
     setAv('npPeerAv', peerHello && peerHello.avatar, '👤');   // 对手随 hello 带来的头像（已核对过本机有没有这张卡图）
     npState('npSelfState',
@@ -273,29 +281,47 @@
     b.textContent = rematchSelf ? '等对手也点一下…' : (rematchPeer ? '🔁 对手想再来一局' : '🔁 再来一局');
   }
 
-  /* ---------------- 一局打完、对手已经不在房间里 ----------------
-     玩家最容易被卡住的一步：点了「🔁 再来一局」之后按钮一直写"等对手也点一下…"，而他分不清对手是掉线了还是在线只是没点
-     （状态条在结算弹窗后面，很容易没看见）。所以**一局结束之后**一旦发现对手不在房间里：
-     ① 弹一层**最靠前**的提示说明原因；② 本机直接退出房间（房间已经不完整了，留着也没用）。
-     ⚠️ **对局进行中不这么做**：那时掉线仍按"等对方的提交包超过 TURN_TIMEOUT 就判他认输"处理（口径见 docs/联机对战.md §5），
-        抢先退房会把这个判负也一起丢掉。 */
+  /* ---------------- 对手不在房间里 / 房主掉线 / 被房主移出 ----------------
+     三种"房间没法继续"的情形，共用最靠前的那层提示（`#peerGoneMask`）与同一套收摊动作（退出房间）：
+     ① **对手（加入者）不在房间**：只有"一局已经打完"才收摊 —— 玩家最容易被卡住的一步就是点了「🔁 再来一局」之后
+        按钮一直写"等对手也点一下…"，而他分不清对手是掉线了还是在线只是没点（状态条在结算弹窗后面，很容易没看见）；
+        ⚠️ 准备阶段加入者掉线**不散房**：房主留在房间里，可以等他自己回来，也可以用「🚪 踢出对手」把位置腾给下一个人。
+     ② **房主掉线**（加入者这边看）：房间已经没法继续了 ⇒ 当场提示 + 退出房间 + 回主页面。
+     ③ **被房主移出**：同上（区别只是原因文案）。
+     ⚠️ **对局进行中一律不这么做**：那时掉线仍按"等对方的提交包超过 TURN_TIMEOUT 就判他认输"处理（口径见 docs/联机对战.md §5），
+        抢先退房会把这个判负也一起丢掉 —— 等那一局判完（`onMatchEnd`）自然走到这里。 */
   function matchOver() {
     return !!(window.Game && window.Game.net && window.Game.net.matchOver && window.Game.net.matchOver());
   }
-  function showPeerGone() {
+  // 提示的三副文案：`host` ＝ 房主掉线（加入者看）、`kicked` ＝ 被房主移出、其余 ＝ 对手（加入者）掉线
+  var PEER_GONE_TXT = {
+    peer: ['对手已掉线，将退出房间',
+      '他已经离开房间 —— 本机已退出房间，这一局之后不能再和他「再来一局」。'
+      + '点「知道了」看本局结果；想再开一局就点顶部「← 主页」，从「🌐 联机对战」重新进。'],
+    host: ['房主已掉线，房间已解散',
+      '房主离开了房间 —— 房间没人管了，本机已退出。点「知道了」回到主页面；'
+      + '想再打一局就点「🌐 联机对战」，这次由你建房、把房间码发给朋友。'],
+    kicked: ['你已被房主移出房间',
+      '房主把你请出了这个房间（多半是位置要腾给别人）—— 想再打就点「🌐 联机对战」重新加入，或自己建一间。'],
+  };
+  var goHomeAfterGone = false; // 上面那层提示的「知道了」要不要顺带回主页面（房主掉线 / 被移出：要）
+  function showPeerGone(kind) {
     var m = $('peerGoneMask');
     if (!m || !m.classList.contains('hidden')) return false; // 已经弹着就别重复弹
-    show('peerGoneTip', '他已经离开房间 —— 本机已退出房间，这一局之后不能再和他「再来一局」。'
-      + '点「知道了」看本局结果；想再开一局就点顶部「← 主页」，从「🌐 联机对战」重新进。');
+    var t = PEER_GONE_TXT[kind] || PEER_GONE_TXT.peer;
+    show('peerGoneTitle', t[0]);
+    show('peerGoneTip', t[1]);
+    goHomeAfterGone = (kind === 'host' || kind === 'kicked');
     m.classList.remove('hidden');
     return true;
   }
   // 返回 true ＝ 本次真的处理了（提示已弹出、房间已退）
-  function peerGoneAfterMatch() {
-    if (!started || !room || peerOnline) return false; // 还在房间 / 对手还在线：什么都不做
-    if (selfGone) return false;                        // 是**本机**断了，不是对手走了（那种情况不该怪对手）
-    if (!matchOver()) return false;                    // 对局进行中：交给超时判负
-    if (!showPeerGone()) return false;
+  function peerGoneCheck() {
+    if (!room || peerOnline || selfGone) return false; // 不在房间 / 对手还在线 / 是本机自己断了：什么都不做
+    var hostGone = (role === 'guest');                 // 对手是房主 ⇒ 房间没人管了
+    if (started && !matchOver()) return false;         // 对局进行中：交给超时判负（判完由 onMatchEnd 再走到这里）
+    if (!hostGone && !matchOver()) return false;        // 房主这边：准备阶段对手掉线只提示、不散房（可用「踢出对手」腾位置）
+    if (!showPeerGone(hostGone ? 'host' : 'peer')) return false;
     ui.leave(); // 退出房间（提示里已写明）
     return true;
   }
@@ -320,7 +346,7 @@
       rematchSelf = false;
       rematchPeer = false;
       syncAgainBtn();
-      peerGoneAfterMatch();
+      peerGoneCheck();
     },
     rematch: function () {
       if (!started || !room || rematchSelf) {
@@ -328,17 +354,37 @@
         if (!room) show('statusText', '房间已经退出（对手已离开房间）—— 想再开一局请点顶部「← 主页」，从「🌐 联机对战」重新进。');
         return;
       }
-      if (peerGoneAfterMatch()) return; // 对手已经不在房间里：不进"等对手也点一下…"，直接提示 + 退房
+      if (peerGoneCheck()) return; // 对手已经不在房间里：不进"等对手也点一下…"，直接提示 + 退房
       rematchSelf = true;
       send({ t: 'rematch' });
       ui.tip(rematchPeer ? '对手也在等 —— 房主正在定新种子重开…' : '已请求再来一局 —— 等对手也点「🔁 再来一局」。');
       syncAgainBtn();
       maybeRematch();
     },
-    // 上面那层提示的「知道了」：只关掉这层提示 —— 本局结果（结算弹窗）留在后面给玩家看，房间在那之前就已经退了
+    // 上面那层提示的「知道了」：关掉这层提示；房主掉线 / 被移出这两种还要顺带回主页面（房间已经散了）
     closePeerGone: function () {
       var m = $('peerGoneMask');
       if (m) m.classList.add('hidden');
+      if (goHomeAfterGone) {
+        goHomeAfterGone = false;
+        if (window.Game && window.Game.ui && window.Game.ui.closeResult) window.Game.ui.closeResult();
+        if (window.Home && window.Home.show) window.Home.show();
+      }
+    },
+    /* 房主专用「🚫 踢出对手」：请服务端把对手那根连接关掉（`{t:'kick'}`，房间收到后先给他一条 `kicked` 再 close）。
+       只在"没开局"或"一局已打完"时可用：对局进行中踢人等于替自己判对手负，容易误触，那种情况让超时判负去收（见 docs/联机对战.md §5）。
+       ⚠️ 当前 `KICK_ENABLED = false` ⇒ 按钮不露出来、这里也直接返回（房间服务要重新部署才认这条指令）。 */
+    kick: function () {
+      if (!KICK_ENABLED) return;
+      if (role !== 'host' || !room) return;
+      if (started && !matchOver()) {
+        ui.tip('对局进行中不能踢人 —— 他要是真掉线了，等提交包超时就会判他认输；这一局打完了再踢。', true);
+        return;
+      }
+      if (!peerOnline) { ui.tip('对手已经断开、位置也空出来了 —— 直接把房间码发给下一个人就行（他进来时会显示"对手已进入"）。'); return; }
+      sendRaw({ t: 'kick' });
+      ui.tip('已请房间把对手移出 —— 他的连接会被关掉，位置随即空出来，你可以把房间码发给下一个人。');
+      syncMask();
     },
     // 设置里改了昵称 / 头像时由 js/home.js 调：在房间里就把 hello 重报一次，对手当场看到新的（见 refreshHello）
     refreshHello: refreshHello,
@@ -397,7 +443,7 @@
     },
     leave: function () {
       closed = true;
-      send({ t: 'bye' });
+      sendRaw({ t: 'bye' }); // 告别语是**说给房间**的（让房间马上把位置腾出来），不是转发给对手的消息
       try { if (ws) ws.close(); } catch (e) { /* ignore */ }
       resetRoom();
       syncMask();
@@ -494,9 +540,16 @@
     };
   }
 
+  // 转发给对手的消息（房间原样转给对面那一个人）
   function send(msg) {
     if (!ws || ws.readyState !== 1) return;
     try { ws.send(JSON.stringify({ t: 'msg', msg: msg })); } catch (e) { console.error('[net] 发送失败：', e); }
+  }
+  // 直接说给**房间**听的话（bye ＝ 我要走了；kick ＝ 请把对手移出）：这些不是"转发给对手的消息"，而是让服务端做事的指令，
+  // 所以不能套 `{t:'msg'}` 那层壳（房间只认顶层的 `t`，套壳会被当成普通消息转给对方、什么也不会发生）。
+  function sendRaw(obj) {
+    if (!ws || ws.readyState !== 1) return;
+    try { ws.send(JSON.stringify(obj)); } catch (e) { console.error('[net] 发送失败：', e); }
   }
 
   function onServer(data) {
@@ -516,6 +569,13 @@
       sendHello();
       return;
     }
+    if (data.t === 'kicked') {
+      // 房主把本机移出了房间（房间那边已经先发了这条、再关连接）：说清原因、退出房间、回主页面
+      closed = true; // 别再把这次断开当成"网络断了"来提示
+      showPeerGone('kicked');
+      ui.leave();    // 退出房间（提示里已写明）；点「知道了」会回主页面
+      return;
+    }
     if (data.t === 'peer') {
       peerOnline = !!data.online;
       renderBar();
@@ -525,7 +585,7 @@
         // 对局进行中掉线：仍按"等他的提交包超时判负"（这条提示只在那时说）；一局打完他还没回来则由下面那步收摊
         else if (!matchOver()) ui.tip('对手的连接断了 —— 轮到他交牌时会在超时后判他认输。', true);
       }
-      peerGoneAfterMatch(); // 一局已结束 + 对手不在房间 ⇒ 弹最靠前的提示并退出房间
+      peerGoneCheck(); // 房主掉线（加入者）/ 一局打完对手不在 ⇒ 弹最靠前的提示并退出房间；准备阶段加入者掉线只提示、不散房
       // 对手刚进来：把在场时发过、但当时房间里没人的消息**再报一次** —— 房间只转发、不保存，
       // 先到的人在自己连上时发的 hello / ready 都是"发给空气"的。不补这一下，后进来的一方会缺对手的卡组与版本。
       // 他刚连上 ⇒ 他那边是全新的（点过准备也清空），本机记的"他已准备"跟着清掉，免得上一次的准备顶掉这一次的确认。
@@ -816,7 +876,7 @@
     ui.bar('⚠️ 已中止', 'bad', null);
     show('statusText', reason);
     console.error('[net] ' + reason);
-    send({ t: 'bye' });
+    sendRaw({ t: 'bye' }); // 同 ui.leave：告别语说给房间听（顶层 `t`，不套 msg 壳）
     try { if (ws) ws.close(); } catch (e) { /* ignore */ }
     syncMask();
     syncOpponent();

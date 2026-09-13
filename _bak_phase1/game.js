@@ -1,5 +1,5 @@
 /* 东方逆转 · Marvel Snap 玩法 · 东方 Project 换皮：3 区域 / 6 回合 / 能量预算多张出牌 /
-   暗牌翻面 / 揭示效果 / 区域特效 / 加倍(snap) / 认输 / 重置暗牌。
+   暗牌翻面 / 揭示效果 / 区域特效 / 双倍下注(snap) / 认输 / 重置暗牌。
    阶段管线：游戏开始 → 每回合(回合开始效果/能量抽牌/放置移动/翻牌揭示结算/
    全场回合结束/区域回合末/手牌回合末) → 游戏结束效果 → 结算胜负 */
 'use strict';
@@ -310,8 +310,7 @@ function playEnergyBookFx(side, n, card) {
 }
 function playEnergyGainFx(side, n, srcCards) {
   const isPlayer = side === 'p';
-  // 玩家侧锚点＝底部「能量：x/N」块（顶栏那一格已去掉；它也是「额外能量 +N」角标所在处）
-  const box = isPlayer ? $('energyChip') : document.querySelector('#sidePanel .opponent .mini-stats');
+  const box = isPlayer ? $('energyBox') : document.querySelector('#sidePanel .opponent .mini-stats');
   const names = (srcCards || []).map((c) => c && c.def && c.def.n).filter(Boolean);
   const sub = isPlayer ? `本回合能量上限 +${n}` : `对手本回合能量 +${n}`;
   let subTxt = sub;
@@ -415,11 +414,10 @@ function shuffleCardsIntoDeck(side, def, n) {
   if (added > 0) shuffle(pl.deck); // 整副牌库重新随机洗一次（把新牌混进去）
   return added;
 }
-/** 洗入卡组的轻量演出：计数闪光 + 星光迸发 + 「洗入卡组」气泡。锚点＝对手侧 = 侧栏「牌库 N 张」/
-    玩家侧 = 底部「手牌：N/7」方块（玩家侧的牌库张数不再单独显示）；取不到锚点或尺寸为 0
-    （页面隐藏 / 主页面态）时静默跳过、只留日志。 */
+/** 洗入卡组的轻量演出：牌库计数闪光 + 星光迸发 + 「洗入卡组」气泡。锚点＝对手侧 = 侧栏「牌库 N 张」/
+    玩家侧 = 手牌区「牌库 N」；取不到锚点或尺寸为 0（页面隐藏 / 主页面态）时静默跳过、只留日志。 */
 function playShuffleInFx(side, n, cardName, srcName) {
-  const anchor = side === 'p' ? $('handCountVal') : document.querySelector('#sidePanel .opponent .mini-stats');
+  const anchor = side === 'p' ? $('deckCountVal') : document.querySelector('#sidePanel .opponent .mini-stats');
   if (!anchor) return;
   const rect = anchor.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;
@@ -468,10 +466,10 @@ function playShuffleInFx(side, n, cardName, srcName) {
   setTimeout(() => { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1700);
 }
 
-/** 牌库费用战力互换（`swapDeck`／稀神探女）的轻量演出：计数闪光 + 星光迸发 + 「⇄ 交换 ×N」气泡。
-    锚点与跳过条件同 playShuffleInFx（玩家侧＝底部「手牌：N/7」方块，对手侧＝侧栏「牌库 N 张」；取不到锚点或尺寸为 0 时静默跳过、只留日志）。 */
+/** 牌库费用战力互换（`swapDeck`／稀神探女）的轻量演出：牌库计数闪光 + 星光迸发 + 「⇄ 交换 ×N」气泡。
+    锚点与跳过条件同 playShuffleInFx（玩家侧＝手牌区「牌库 N」，对手侧＝侧栏「牌库 N 张」；取不到锚点或尺寸为 0 时静默跳过、只留日志）。 */
 function playDeckSwapFx(side, n) {
-  const anchor = side === 'p' ? $('handCountVal') : document.querySelector('#sidePanel .opponent .mini-stats');
+  const anchor = side === 'p' ? $('deckCountVal') : document.querySelector('#sidePanel .opponent .mini-stats');
   if (!anchor) return;
   const rect = anchor.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;
@@ -806,12 +804,18 @@ function playDiscardFx(cards, side, by) {
     const sign = live > def.p ? 'up' : live < def.p ? 'down' : '';
     const liveCost = cardCost(card);
     const costSign = liveCost > def.c ? 'up' : liveCost < def.c ? 'down' : '';
-    const faceOpts = { power: live, sign, cost: liveCost, costSign, sealed: cardSealed(card) };
+    const faceHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign, sealed: cardSealed(card) });
+    const grad = gradOf(def);
     const box = document.createElement('div');
     box.className = 'discard-card-wrap';
     box.style.setProperty('--discard-stagger', Math.min(i, 4) * 80 + 'ms');
-    // 三份同样的卡面（基准整卡 + 斜切的两半）：都走 cardFaceEl，切口才能像素级重合
-    const mkFace = () => cardFaceEl(def, 'discard-face zoom-card hand-card', faceOpts);
+    const mkFace = () => {
+      const f = document.createElement('div');
+      f.className = 'discard-face zoom-card hand-card';
+      f.style.setProperty('--cgrad', grad);
+      f.innerHTML = faceHTML;
+      return f;
+    };
     box.appendChild(mkFace()); // ① 基准整卡（切开那一瞬隐去）
     for (const half of ['a', 'b']) { // ② 斜切的两半（各含一份同样的卡面拷贝）
       const h = document.createElement('div');
@@ -1090,7 +1094,7 @@ let pendingSwitchFly = null; // 换边演出待播 {card, srcRect}（由 switch/
 let pendingDriftFly = [];
 // pickDef（开发者“指定卡牌”选中）已随页面实现拆到 card-browser.js
 
-/* ---------------- 赌注（加倍） ----------------
+/* ---------------- 赌注（双倍下注） ----------------
    结算值 = **2 × 2^(本局加倍人数)**：无人加倍 2 立方、一人 4、两人 8。双方**各有一次**加倍权、整局限用（AI 永不使用）。
    加倍**在宣布的下一回合开始才生效**，但宣布当回合侧栏就抬到新值（＝预告）；
    从宣布到生效回合结束之前，撤退一律按**加倍前的值**结算 —— 留给对手一个完整回合考虑要不要撤退。
@@ -1350,7 +1354,7 @@ function replayApply(side, rec) {
   if (!rec) return true;
   if (rec.snap && !state.snapUsed[side]) {
     announceSnap(side);
-    log('snap', `⟲ 重放：${side === 'p' ? '我方' : '对手'}本回合宣布加倍（本局结算 ${state.stakes} 立方）。`);
+    log('snap', `⟲ 重放：${side === 'p' ? '我方' : '对手'}本回合宣布双倍下注（本局结算 ${state.stakes} 立方）。`);
   }
   const ok = applyRecordedMoves(side, rec.moves, rec.fly);
   if (!ok && replayMode) replayMode.aborted = true;
@@ -2053,7 +2057,10 @@ function playGameStartReveal(gen, items) {
       box.appendChild(tag);
       const holder = document.createElement('div');
       holder.className = 'gs-reveal-cardwrap';
-      const face = cardFaceEl(def, 'zoom-card hand-card gs-reveal-card');
+      const face = document.createElement('div');
+      face.className = 'zoom-card hand-card gs-reveal-card';
+      face.style.setProperty('--cgrad', gradOf(def));
+      face.innerHTML = cardFaceHTML(def);
       holder.appendChild(face);
       box.appendChild(holder);
       const note = document.createElement('div');
@@ -2555,7 +2562,7 @@ async function roundStartStage(gen) {
   const st = state;
   // ①-0 之前：上一回合宣布的加倍在这里正式生效（结算值当场抬到新值；本回合结束前撤退仍按加倍前的值）
   if (beginRoundStakes() > 0) {
-    log('snap', `⚡ 加倍生效：本局结算 ${st.stakes} 立方 —— 本回合结束前撤退仍按 ${retreatStakes()} 立方结算。`);
+    log('snap', `⚡ 双倍下注生效：本局结算 ${st.stakes} 立方 —— 本回合结束前撤退仍按 ${retreatStakes()} 立方结算。`);
     renderHud();
   }
   await locationRevealStage(); // ①-0 地形揭晓：第 t 回合揭晓第 t 列（t=1..3）
@@ -2585,9 +2592,7 @@ async function roundStartStage(gen) {
   flushPendingDriftFly(); // 回合开始自动移动（幽灵 roam 等）的「滑行+缩放」演出
   log('sys', `—— 第 ${st.turn} 回合 · 双方各抓 1 张 ——`);
   const stanceTip = (isDevMode() && st.playAsSide === 'a') ? '【敌方立场】' : '';
-  // 状态条只报"现在该你做什么"；**规则说明不再每回合复述一遍**（它本来就在侧栏「玩法速览」、
-  // 也在上面的日志里）——手机上那条说明要占两行，把场地压矮。
-  setStatus(`第 ${st.turn} 回合${stanceTip}：选择手牌，点击区域打出。`);
+  setStatus(`第 ${st.turn} 回合 · 能量 ${st.players.p.energyTotal}${stanceTip}：可一次暗出多张牌（总费用不超过能量），出完点「结束回合」；点能量框可重置本回合暗牌。`);
 }
 
 async function playRound(gen) {
@@ -2886,8 +2891,8 @@ function uiSnap() {
   if (st.phase !== 'play' && st.phase !== 'busy') return;
   if (st.snapUsed.p) { setStatus('本局你已经加倍过了 —— 整局只能加倍一次。'); return; }
   announceSnap('p');
-  log('snap', `⚡ 你加倍！本局结算升至 ${st.stakes} 立方（下回合生效；本回合与下回合内谁撤退都按 ${retreatStakes()} 立方结算）。`);
-  setStatus(`你加倍！本局结算 ${st.stakes} 立方（下回合生效）。`);
+  log('snap', `⚡ 你双倍下注！本局结算升至 ${st.stakes} 立方（下回合生效；本回合与下回合内谁撤退都按 ${retreatStakes()} 立方结算）。`);
+  setStatus(`你双倍下注！本局结算 ${st.stakes} 立方（下回合生效）。`);
   renderAll();
   // 联机：加倍**当场**告诉对手（对手要在本回合内决定要不要撤退，等到回合末的提交包就晚了）
   if (netOn()) window.Net.sendSnap();
@@ -4997,8 +5002,8 @@ function applyEffect(side, locIdx, card, spec) {
         log('sys', `✦ ${def.n} 想把「${inDef.n}」洗入${tgtWho}的牌库，但本次没有牌被加入。`);
         break;
       }
-      // 先刷新对手侧计数再播演出（玩家侧的牌库张数不再单独显示，洗入演出落在「手牌」方块上）
-      if (tgtSide !== 'p') renderSide();
+      // 先刷新牌库计数再播演出 ⇒ 玩家看到“洗入后”的张数
+      if (tgtSide === 'p') updateDeckCount(); else renderSide();
       log(toOpp ? 'danger' : side,
         `🃏 ${def.n}：把 ${got} 张「${inDef.n}」洗入了${tgtWho}的牌库，并重新洗了一次牌（现牌库 ${state.players[tgtSide].deck.length} 张）。`);
       playShuffleInFx(tgtSide, got, inDef.n, def.n);
@@ -5712,22 +5717,7 @@ function setStatus(text, busy) {
   const mEl = $('mobStatus');
   if (mEl) mEl.textContent = text;
   const mCard = $('mobStatusCard');
-  if (mCard) {
-    mCard.classList.toggle('busy', !!busy);
-    mCard.classList.remove('open'); // 新提示一律先收起，避免上一条的展开态留在屏幕上
-    syncMobStatusClamp();
-  }
-}
-
-/* 手机状态条默认只显示 1 行（.mob-status .status-text 的 line-clamp）：
-   文案被截断时才挂 .clamped（右侧出现 ▾），点一下加 .open 看全文。
-   桌面端这条是 display:none，量出来恒为 0 ⇒ 不会被误标。 */
-function syncMobStatusClamp() {
-  const card = $('mobStatusCard');
-  const el = $('mobStatus');
-  if (!card || !el) return;
-  const truncated = el.scrollHeight > el.clientHeight + 1;
-  card.classList.toggle('clamped', truncated && !card.classList.contains('open'));
+  if (mCard) mCard.classList.toggle('busy', !!busy);
 }
 
 function renderAll() {
@@ -5742,12 +5732,9 @@ function renderControls() {
   const inPlay = state.phase === 'play';
   const snapBtn = $('btnSnap');
   snapBtn.disabled = !inPlay || state.snapUsed.p;
-  snapBtn.textContent = state.snapUsed.p ? '已加倍' : '加倍';
+  snapBtn.textContent = state.snapUsed.p ? (state.snapPending.p ? '已加倍（下回合生效）' : '已加倍') : '双倍下注';
   $('btnRetreat').disabled = !inPlay;
   $('btnPass').disabled = !inPlay;
-  // 「重新开始」只在单人局出现：联机对局不许就地重开（uiOnRestart 也会挡，这里直接把入口收掉）
-  const restartBtn = $('btnRestart');
-  if (restartBtn) restartBtn.classList.toggle('hidden', !!state.netRole);
 
   $('btnPass').textContent = state.playerMoves.length > 0 ? '结束回合' : '跳过回合';
   // 开发调试显示「指定地形 / 指定卡牌 / 切换立场 / 查看对手」并隐藏图鉴；正常对局反之
@@ -5768,10 +5755,7 @@ function renderControls() {
   if (switchBtn) {
     switchBtn.classList.toggle('hidden', !dev);
     const asEnemy = state.playAsSide === 'a';
-    // 顶栏按钮的文案＝图标 + 文字两段（≤700px 只显示图标）：只改文字那段，别把整个按钮的 innerHTML 冲掉
-    const swTxt = switchBtn.querySelector('.bt-txt');
-    if (swTxt) swTxt.textContent = asEnemy ? '立场：敌方' : '切换立场';
-    else switchBtn.textContent = asEnemy ? '⇄ 立场：敌方' : '⇄ 切换立场';
+    switchBtn.textContent = asEnemy ? '⇄ 立场：敌方' : '⇄ 切换立场';
     switchBtn.classList.toggle('side-enemy', asEnemy);
     switchBtn.title = asEnemy
       ? '当前：落牌进敌方区域（再点恢复我方）'
@@ -5783,12 +5767,11 @@ function renderControls() {
 function renderHud() {
   const en = state.players.p;
   $('turnVal').textContent = state.turn;
-  // 顶栏「回合：N / 总数」的总数读本局总回合数：「虚假之月」在场 → /7（被换掉则回 /6，第 7 回合锁定为 7）
+  // 顶栏「回合 N / 总数」的总数读本局总回合数：「虚假之月」在场 → /7（被换掉则回 /6，第 7 回合锁定为 7）
   const turnMaxEl = $('turnMax');
-  if (turnMaxEl) turnMaxEl.textContent = '/' + roundsTotal();
-  // 能量只在底部的「能量：x/N」块上显示（顶栏那一格已去掉）；它同时是重置本回合暗牌的入口
-  const chipEl = $('energyChipVal');
-  if (chipEl) chipEl.textContent = `${en.energyLeft}/${en.energyTotal}`;
+  if (turnMaxEl) turnMaxEl.textContent = '/ ' + roundsTotal();
+  $('energyVal').textContent = en.energyLeft;
+  $('energyUnit').textContent = `/ ${en.energyTotal}`;
   // 本回合能量里由「额外能量」多出来的部分（如斯塔萨菲雅 → 下回合 +1）
   const gainEl = $('energyBonus');
   if (gainEl) {
@@ -6119,12 +6102,9 @@ function renderHand() {
     return;
   }
   cards.forEach((card, index) => {
-    const handPow = cardPower(card);
-    const handSign = handPow > card.def.p ? 'up' : handPow < card.def.p ? 'down' : '';
-    const handCost = cardCost(card);
-    const handCostSign = handCost > card.def.c ? 'up' : handCost < card.def.c ? 'down' : '';
-    const faceOpts = { power: handPow, sign: handSign, cost: handCost, costSign: handCostSign, sealed: cardSealed(card) };
-    const el = cardFaceEl(card.def, 'hand-card' + (card.def.img ? '' : ' no-img') + (cardSealed(card) ? ' sealed' : ''), faceOpts);
+    const el = document.createElement('div');
+    el.className = 'hand-card' + (card.def.img ? '' : ' no-img');
+    if (cardSealed(card)) el.classList.add('sealed'); // 封印：效果文字置灰划线 + 艺术区叠 ❗
     const afford = cardCost(card) <= st.players.p.energyLeft;
     if (!afford) el.classList.add('unaffordable');
     // 卡级放置条件（`playReq`，现仅 6 费「大鲶鱼」）不满足时同样置灰并给数量提示：
@@ -6138,6 +6118,13 @@ function renderHand() {
     if (card.justHandAdded) { el.classList.add('hand-new'); card.justHandAdded = false; }
     if (card.justDrawn) { el.classList.add('hand-drawn'); card.justDrawn = false; drewEntry = true; }
     if (st.phase !== 'play' && st.phase !== 'over') el.classList.add('unaffordable');
+    el.style.setProperty('--cgrad', gradOf(card.def));
+    const handPow = cardPower(card);
+    const handSign = handPow > card.def.p ? 'up' : handPow < card.def.p ? 'down' : '';
+    const handCost = cardCost(card);
+    const handCostSign = handCost > card.def.c ? 'up' : handCost < card.def.c ? 'down' : '';
+    const faceOpts = { power: handPow, sign: handSign, cost: handCost, costSign: handCostSign, sealed: cardSealed(card) };
+    el.innerHTML = cardFaceHTML(card.def, faceOpts);
     el.addEventListener('click', () => {
       if (st.phase === 'over') showHandCard(card);
       else selectHand(index);
@@ -6152,27 +6139,14 @@ function renderHand() {
   if (drewEntry) lockDrawAnimScroll(hand);
 }
 
-/* 底部中央的计数块：**点一下在「手牌：N/7」与「牌库：N」之间切换**（省掉单独一格牌库计数）。
-   牌库张数会随「洗入卡组 / 互换」变化，所以 renderSide() 里也刷一次。 */
-let countChipDeck = false;
-function updateHandCount() { renderCountChip(); }
-function renderCountChip() {
-  const box = $('handCountVal');
-  if (!box) return;
-  const label = box.querySelector('.chip-label');
-  const num = $('handCountNum');
-  if (!label || !num) return;
-  if (countChipDeck) {
-    label.textContent = '牌库：';
-    num.textContent = state.players.p.deck.length;
-  } else {
-    label.textContent = '手牌：';
-    num.textContent = state.players.p.hand.length + '/7';
-  }
+function updateHandCount() {
+  const el = $('handCountVal');
+  if (el) el.textContent = state.players.p.hand.length + '/7';
 }
-function toggleCountChip() {
-  countChipDeck = !countChipDeck;
-  renderCountChip();
+
+function updateDeckCount() {
+  const el = $('deckCountVal');
+  if (el) el.textContent = '牌库 ' + state.players.p.deck.length;
 }
 
 let drawAnimTimer = null;
@@ -6205,18 +6179,6 @@ function cardFaceHTML(def, opts) {
     ${art}
     <div class="hc-name">${def.n}</div>
     <div class="hc-text">${def.t || '—'}</div>`;
-}
-
-/* ---- 卡面外壳：**纸牌面唯一的出口** ----
-   类名一律经这里拼，保证每个调用点都挂上 `.card-face`（基准：外观 + 全部尺寸变量）与
-   `--cgrad`（费用档渐变）；`cls` 只写该上下文自己的类（hand-card / zoom-card / codex-card …）。
-   尺寸档的变量声明在 style.css 的 `.card-face` 段与各上下文的断点块里，这里不管尺寸。 */
-function cardFaceEl(def, cls, opts, tag) {
-  const el = document.createElement(tag || 'div');
-  el.className = 'card-face ' + cls;
-  el.style.setProperty('--cgrad', gradOf(def));
-  el.innerHTML = cardFaceHTML(def, opts);
-  return el;
 }
 
 function uiOnCodex() { if (window.CardBrowser) window.CardBrowser.toggleCodex(); }
@@ -6601,7 +6563,10 @@ function renderDeriv(def) {
   for (const d of list) {
     const item = document.createElement('div');
     item.className = 'deriv-item';
-    const card = cardFaceEl(d, 'zoom-card hand-card deriv-card');
+    const card = document.createElement('div');
+    card.className = 'zoom-card hand-card deriv-card';
+    card.style.setProperty('--cgrad', gradOf(d));
+    card.innerHTML = cardFaceHTML(d);
     item.appendChild(card);
     box.appendChild(item);
   }
@@ -6618,7 +6583,11 @@ function showZoom(def, standalone) {
   hidePowerPanel(); // 战力影响历史仅场上已翻开卡查看时展示
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
-  slot.appendChild(cardFaceEl(def, 'zoom-card hand-card'));
+  const el = document.createElement('div');
+  el.className = 'zoom-card hand-card';
+  el.style.setProperty('--cgrad', gradOf(def));
+  el.innerHTML = cardFaceHTML(def);
+  slot.appendChild(el);
 
   // 图鉴 / 卡组页按 def 渲染：卡面即是全部信息 —— 详情区没有实时状态可报，只剩没有卡面文本时的兜底（法术 / 白板）
   $('zoomInfo').innerHTML = zoomInfoHTML({ baseText: baseTextOf(def) });
@@ -6682,9 +6651,11 @@ function showHandCard(card) {
   slot.innerHTML = '';
   // 封印的牌：艺术区叠 ❗（卡面效果文本照常显示 —— 失效由下面那条状态提示说明）
   const sealed = cardSealed(card);
-  slot.innerHTML = '';
-  slot.appendChild(cardFaceEl(def, 'zoom-card hand-card' + (sealed ? ' sealed' : ''),
-    { power: live, sign, cost: liveCost, costSign, sealed }));
+  const el = document.createElement('div');
+  el.className = 'zoom-card hand-card' + (sealed ? ' sealed' : '');
+  el.style.setProperty('--cgrad', gradOf(def));
+  el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign, sealed });
+  slot.appendChild(el);
 
   $('zoomInfo').innerHTML = zoomInfoHTML({
     state: cardStateNotes(card, -1),
@@ -6788,8 +6759,11 @@ function showFieldCard(card, locIdx) {
   const costSign = liveCost > def.c ? 'up' : liveCost < def.c ? 'down' : '';
   const slot = $('zoomCardSlot');
   slot.innerHTML = '';
-  slot.appendChild(cardFaceEl(def, 'zoom-card hand-card' + (sealed ? ' sealed' : ''),
-    { power: live, sign, cost: liveCost, costSign, sealed }));
+  const el = document.createElement('div');
+  el.className = 'zoom-card hand-card' + (sealed ? ' sealed' : '');
+  el.style.setProperty('--cgrad', gradOf(def));
+  el.innerHTML = cardFaceHTML(def, { power: live, sign, cost: liveCost, costSign, sealed });
+  slot.appendChild(el);
 
   $('zoomInfo').innerHTML = zoomInfoHTML({
     state: cardStateNotes(card, locIdx),
@@ -6811,7 +6785,7 @@ function renderSide() {
   const st = state;
   $('aiCount').textContent = st.players.a.hand.length;
   $('aiDeck').textContent = st.players.a.deck.length;
-  renderCountChip(); // 牌库张数被「洗入卡组 / 互换」改动时，底部那块也要跟着变
+  updateDeckCount();
   // 对手信息区：先写单机口径（AI / 🤖 / 无提交状态行），联机时由 js/net.js 的 ui.syncOpponent() 覆盖成
   // 对手昵称 + 他自己选的头像 + 「他这一手交了没有」（单机没有这条状态，恒隐藏）
   const oppTitle = $('oppTitle');
@@ -6822,11 +6796,11 @@ function renderSide() {
   const oppTurn = $('oppTurnTag');
   if (oppTurn) oppTurn.classList.add('hidden');
   if (netOn() && window.Net && window.Net.ui && window.Net.ui.syncOpponent) window.Net.ui.syncOpponent();
-  // 对手的加倍状态：只标「对手已加倍」，不再分"下回合生效"（单机下 AI 永不使用，该标签不出现）
+  // 对手的加倍状态：宣布当回合标「下回合生效」，之后就是「已加倍」（单机下 AI 永不使用，该标签不出现）
   const aiTag = $('aiSnapTag');
   if (aiTag) {
     aiTag.classList.toggle('hidden', !st.snapUsed.a);
-    aiTag.textContent = '对手已加倍';
+    aiTag.textContent = st.snapPending.a ? '⚡ 已加倍（下回合生效）' : '⚡ 已加倍';
   }
   const enRow = $('aiEnergyRow');
   const enA = st.players.a;
@@ -6850,7 +6824,10 @@ function aiSpyCardEl(card) {
   const def = card.def;
   const live = cardPower(card);
   const sign = live > def.p ? 'up' : live < def.p ? 'down' : '';
-  const el = cardFaceEl(def, 'hand-card ai-spy-card' + (def.img ? '' : ' no-img'), { power: live, sign });
+  const el = document.createElement('div');
+  el.className = 'hand-card ai-spy-card' + (def.img ? '' : ' no-img');
+  el.style.setProperty('--cgrad', gradOf(def));
+  el.innerHTML = cardFaceHTML(def, { power: live, sign });
   el.title = def.n + (isSpellDef(def)
     ? '（' + cardCost(card) + ' 费 / 法术 · 无战力）· 点击放大'
     : '（' + cardCost(card) + ' 费 / 威力 ' + live + '）· 点击放大');
@@ -7000,8 +6977,10 @@ function pileCardEl(card, ord) {
   const cell = document.createElement('div');
   cell.className = 'pile-cell';
   cell.title = `${def.n}（${meta}）· 点击放大查看`;
-  const face = cardFaceEl(def, 'codex-card hand-card pile-item' + (def.img ? '' : ' no-img') + (cardSealed(card) ? ' sealed' : ''),
-    { power, sign, cost: liveCost, costSign, sealed: cardSealed(card) });
+  const face = document.createElement('div');
+  face.className = 'codex-card hand-card pile-item' + (def.img ? '' : ' no-img') + (cardSealed(card) ? ' sealed' : '');
+  face.style.setProperty('--cgrad', gradOf(def));
+  face.innerHTML = cardFaceHTML(def, { power, sign, cost: liveCost, costSign, sealed: cardSealed(card) });
   face.addEventListener('click', () => showHandCard(card)); // 复用放大查看（关掉放大层仍回到牌池弹窗）
   const cap = document.createElement('div');
   cap.className = 'pile-cap';
@@ -7171,7 +7150,7 @@ window.Game = {
     localPackage: netLocalPackage,
     applyPackage: netApplyPackage,
     // 对手即时宣布加倍 / 认输：与它随后的提交包幂等（同一个标记只生效一次）
-    applyPeerSnap: (side) => { if (!state.snapUsed[side]) { announceSnap(side); log('snap', `⚡ 对手加倍！本局结算 ${state.stakes} 立方（下回合生效）。`); renderAll(); } },
+    applyPeerSnap: (side) => { if (!state.snapUsed[side]) { announceSnap(side); log('snap', `⚡ 对手双倍下注！本局结算 ${state.stakes} 立方（下回合生效）。`); renderAll(); } },
     applyPeerRetreat: (side) => {
       if (state.phase === 'over') return;
       doRetreat(side);
@@ -7288,18 +7267,6 @@ window.Game = {
   }
   if (aiSpyMask) aiSpyMask.addEventListener('click', (e) => { if (e.target === aiSpyMask) closeAiSpy(); });
   if (pileMask) pileMask.addEventListener('click', (e) => { if (e.target === pileMask) closePiles(); });
-  // 手机状态条：默认 1 行，点一下展开/收起（转屏或改窗口大小后重新量一次是否需要 ▾）
-  const mobCard = $('mobStatusCard');
-  if (mobCard) {
-    mobCard.addEventListener('click', () => {
-      mobCard.classList.toggle('open');
-      syncMobStatusClamp();
-    });
-    window.addEventListener('resize', syncMobStatusClamp);
-  }
-  // 底部中央的计数块：点一下在「手牌：N/7」与「牌库：N」之间切换
-  const countBox = $('handCountVal');
-  if (countBox) countBox.addEventListener('click', toggleCountChip);
   const challengeMask = $('challengeMask');
   if (challengeMask) challengeMask.addEventListener('click', (e) => { if (e.target === challengeMask) closeChallenge(); });
   // 开发者「🪨 添加石块」弹窗：遮罩点击关闭 + 按钮直接绑定 + 输入框实时刷新提示

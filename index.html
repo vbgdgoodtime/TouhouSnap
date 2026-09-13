@@ -17,13 +17,14 @@
        Game.restart() 进入对局。放在 HTML 上而非等 JS 执行，可避免首帧闪一下游戏画面。 -->
 
   <!-- ============ 主页面 ============
-       打开游戏先显示本页（静态标记，不依赖 JS）。入口：
+       打开游戏先显示本页（静态标记，不依赖 JS）。入口（页面上的先后）：
          - 开始对战 → home.js 隐藏本页并调用既有入口 window.Game.restart()（与顶栏
            「重新开始」同一个函数）；
+         - 联机对战 → 房间弹窗 #netMask（js/net.js）；
+         - 开发调试 → dev-page.js（不校验卡组，直接进战斗；玩家空牌库、AI 随机）；
          - 卡组设置 → deck-page.js 的卡组设置页面（见下方 #deckScreen）；
-         - 图鉴 → 与对局顶栏「📖 图鉴」同一个弹窗 #codexMask；
-         - 设置 → 对手 AI 强度；
-         - 开发调试 → dev-page.js（不校验卡组，直接进战斗；玩家空牌库、AI 随机）。
+         - 图鉴 → #homeBtnCodex **当前带 `hidden` 类不显示**（要恢复就删掉那个类）；
+         - 设置 → 昵称 / 头像 + 对手 AI 强度。
        游戏引擎自身仍在后台完成首局初始化，点击开始对战时重开一局。 -->
   <section class="home-screen" id="homeScreen">
     <div class="home-decor" id="homeDecor" aria-hidden="true"></div>
@@ -38,18 +39,30 @@
           <span class="hb-icon">⚔️</span>
           <span class="hb-text">
             <span class="hb-main">开始对战</span>
-            <span class="hb-sub">选择满编卡组出战 · 6 回合 / 3 块地形 / 双倍下注</span>
+            <span class="hb-sub">选择满编卡组出战 · 6 回合 / 3 块地形 / 加倍</span>
           </span>
           <span class="hb-arrow">›</span>
         </button>
         <!-- 联机对战入口 —— 紧接「开始对战」下方（主入口的第 2 项：单机入口之前先摆联机）。
              打开房间弹窗 #netMask（创建 / 加入 6 位房间码）；房间只转发消息、对局本身跑在两端浏览器里，
-             通道与口径见 js/net.js 与 docs/联机对战.md。样式＝.home-btn.net（淡蓝底，与单机入口区分开）。 -->
+             通道与口径见 js/net.js 与 docs/联机对战.md。样式＝.home-btn.net（淡蓝渐变底 + 深蓝字，
+             与「开始对战」同款写法：无边款 + 渐变 + 光晕投影，只是把金色换成淡蓝）。 -->
         <button type="button" class="home-btn net" id="homeBtnNet">
           <span class="hb-icon">🌐</span>
           <span class="hb-text">
             <span class="hb-main">联机对战</span>
             <span class="hb-sub">房间码开房 · 双方各带卡组实时对打</span>
+          </span>
+          <span class="hb-arrow">›</span>
+        </button>
+        <!-- 开发调试入口 —— 紧接「联机对战」下方（主入口的第 3 项）。绿色实心底（.home-btn.dev），
+             与旁边的淡蓝联机入口一眼分开。点它不校验卡组，直接开一局空牌库的调试对局，
+             见 js/dev-page.js 的 window.DevTools；交互接线在 js/home.js 的 openPage('dev')。 -->
+        <button type="button" class="home-btn dev" id="homeBtnDev">
+          <span class="hb-icon">🎛️</span>
+          <span class="hb-text">
+            <span class="hb-main">开发调试</span>
+            <span class="hb-sub">能量修改 / 指定卡牌 / 盘面调试工具</span>
           </span>
           <span class="hb-arrow">›</span>
         </button>
@@ -61,15 +74,17 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- 图鉴入口 —— 主入口列里紧接「卡组设置」下方（主入口的第 4 项）。
-             点它**不进入对局**，只打开既有的图鉴弹窗 #codexMask —— 与对局顶栏「📖 图鉴」
-             是**同一个弹窗**（实现仍在 js/card-browser.js 的 window.CardBrowser，
+        <!-- 图鉴入口 —— **当前隐藏**：`#homeBtnCodex` 带 `hidden` 类（标记与 js/home.js 的接线都留着，
+             删掉这个类即可恢复；对局顶栏「📖 图鉴」不受影响）。
+             它本来排在「卡组设置」下方，点它**不进入对局**，只打开既有的图鉴弹窗 #codexMask ——
+             与对局顶栏「📖 图鉴」是**同一个弹窗**（实现仍在 js/card-browser.js 的 window.CardBrowser，
              卡池 / 费用档筛选与卡池排序都沿用同一套）；交互见 js/home.js
              （openCodex / closeCodex / isCodexOpen）。
              主页面态原本 `body.in-home .modal-mask { display: none }` 会隐藏弹窗，
              故 style.css 另有 `body.in-home #codexMask:not(.hidden)`（z-index 213）
-             与 `body.in-home #zoomMask:not(.hidden)`（214：图鉴里放大查看的那一层）放开显示。 -->
-        <button type="button" class="home-btn" id="homeBtnCodex">
+             与 `body.in-home #zoomMask:not(.hidden)`（214：图鉴里放大查看的那一层）放开显示
+             —— 这一对放开规则与顶栏入口共用，不能因为隐藏本按钮而删掉。 -->
+        <button type="button" class="home-btn hidden" id="homeBtnCodex">
           <span class="hb-icon">📚</span>
           <span class="hb-text">
             <span class="hb-main">图鉴</span>
@@ -77,18 +92,7 @@
           </span>
           <span class="hb-arrow">›</span>
         </button>
-        <!-- 开发调试入口 —— 紧接「图鉴」下方（主入口的第 5 项，夹在「图鉴」与「设置」之间）。
-             点它不校验卡组，直接开一局空牌库的调试对局，见 js/dev-page.js 的 window.DevTools；
-             交互接线在 js/home.js 的 openPage('dev')。 -->
-        <button type="button" class="home-btn" id="homeBtnDev">
-          <span class="hb-icon">🎛️</span>
-          <span class="hb-text">
-            <span class="hb-main">开发调试</span>
-            <span class="hb-sub">能量修改 / 指定卡牌 / 盘面调试工具</span>
-          </span>
-          <span class="hb-arrow">›</span>
-        </button>
-        <!-- 设置入口 —— 紧接「开发调试」下方（主入口的第 6 项）。
+        <!-- 设置入口 —— 主入口列里紧接「图鉴」那一格下方（该格当前隐藏 ⇒ 界面上就排在「卡组设置」之后）。
              打开 #settingsMask，里面两节：**玩家资料**（联机时显示给对手的昵称 + 头像，只存本机）与
              **对手 AI 强度**（四档：简单 / 普通 / 困难 / 月狂，默认「简单」；选项与文案统一来自 js/ai.js 的 window.AI.LEVELS）。
              交互见 js/home.js（openSettings / closeSettings / setAiLevel / setPlayerName / setPlayerAvatar）。
@@ -334,7 +338,6 @@
           <ul>
             <li><b>开始对战</b>：先选一套<b>满 12 张</b>的出战卡组再开打（对手每局随机组牌）。</li>
             <li><b>卡组设置</b>：组建 / 改名 / 删除卡组（上限 20 套、每套 12 张、同名卡限 1 张），自动存在本地。</li>
-            <li><b>图鉴</b>（📚）：不进对局，直接查看全部卡牌与效果说明（可切换「普通卡牌池 / 衍生卡牌池」，点卡放大查看）。</li>
             <li><b>设置</b>（⚙️）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
             <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🪨 添加石块 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制（「🪨 添加石块」＝选区域 1/2/3 + 用 ◀ ▶ 调数量 → 该区域**双方各生成 N 张石块**，方便验「比那名居天子」「大鲶鱼」这类跟石块有关的机制）。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
           </ul>
@@ -343,9 +346,9 @@
         <div class="guide-sec">
           <h3><span class="gs-ico">💡</span>几个小提示</h3>
           <ul>
-            <li>点场上<b>已翻开</b>的卡可以放大查看，并弹出「<b>战力影响历史</b>」逐条列出它当前的战力来源（基础 / 增益台账 / 持续效果 / 区域加成）。</li>
+            <li>点场上<b>已翻开</b>的卡可以放大查看，弹窗顶部一条<b>战力构成</b>按来源列出它当前的战力（每枚一个小方块，可横向滑动），末枚合计＝卡面右上角的实时威力。</li>
             <li>卡面<b>左上角是费用</b>、<b>右上角是当前战力</b>：战力比基础高显示绿色、低显示红色；费用被改高后显示红字。</li>
-            <li>「图鉴」（主页面「📚 图鉴」或对局中顶栏）可查看全部卡牌与说明；手牌<b>右键</b>也能直接放大查看。</li>
+            <li>对局中顶栏的「📖 图鉴」可查看全部卡牌与说明；手牌<b>右键</b>也能直接放大查看。</li>
             <li>区域中间带会实时显示双方点数，领先的一方亮黄；同区谁先翻牌看的是这个实时盘面。</li>
           </ul>
         </div>
@@ -466,6 +469,11 @@
         <button type="button" class="btn" id="netJoin" onclick="Net.ui.join()">🚪 加入房间</button>
         <button type="button" class="btn btn-primary" id="netReady" onclick="Net.ui.ready()">✅ 我已准备</button>
         <button type="button" class="btn" id="netCopy" onclick="Net.ui.copy()">📋 复制房间码</button>
+        <!-- 房主专用的「踢出对手」：**当前关着不显示**（js/net.js 的 KICK_ENABLED = false —— 它是服务端动作，
+             房间服务要重新部署才认；要用就先改那个开关再 deploy）。开启后由 syncMask 控制显隐：
+             房主 + 对手在线 + 没开局或一局已打完。 -->
+        <button type="button" class="btn net-kick hidden" id="netKick" onclick="Net.ui.kick()"
+                title="把对手移出房间（房间把位置腾出来，你可以把房间码发给下一个人）——只在没开局或一局打完后可用">🚫 踢出对手</button>
         <button type="button" class="btn btn-ghost" id="netLeave" onclick="Net.ui.leave()">退出房间</button>
         <button type="button" class="btn" id="netClose" onclick="Net.ui.close()">关闭</button>
       </div>
@@ -473,14 +481,15 @@
     </div>
   </div>
 
-  <!-- 联机：一局打完、对手已经离开房间时的提示（js/net.js 的 peerGoneAfterMatch 打开）。
+  <!-- 联机：房间没法继续时的提示（js/net.js 的 showPeerGone 打开）——三副文案共用这一层：
+         - 对手（加入者）已掉线，将退出房间 / 房主已掉线，房间已解散 / 你已被房主移出房间。
        - 是**这一屏最靠前**的一层：压在结算弹窗（.modal-mask 50）与放大层（.zoom-mask 60）之上（style.css 里给 9700）。
        - 主页面态下也要能显示（玩家可能正在主页面等对手点「再来一局」），故 style.css 另有 body.in-home 那条放开。
-       - 「知道了」＝只关掉这层提示：房间在那之前已经退了，本局结果（结算弹窗）留在后面给玩家看。 -->
+       - 「知道了」＝关掉这层提示；房主掉线 / 被移出这两种还会顺带回主页面（房间已经散了，留着也没事可做）。 -->
   <div class="modal-mask peer-gone-mask hidden" id="peerGoneMask">
     <div class="modal undo-modal peer-gone-modal">
       <div class="modal-emblem">🚪</div>
-      <h2>对手已掉线，将退出房间</h2>
+      <h2 id="peerGoneTitle">对手已掉线，将退出房间</h2>
       <div class="net-tip" id="peerGoneTip"></div>
       <div class="undo-btns">
         <button type="button" class="btn btn-primary" id="peerGoneOk" onclick="Net.ui.closePeerGone()">知道了</button>
@@ -489,32 +498,34 @@
   </div>
 
   <header class="topbar">
-    <div class="brand">
+    <!-- 「⚡ 东方逆转」＝返回主页面的入口（原来那格「← 主页」按钮已去掉：顶栏省下一格） -->
+    <div class="brand" id="brandHome" title="返回主页面" onclick="Home.show()">
       <span class="logo">⚡</span>
       <div>
         <h1>东方逆转</h1>
         <p class="sub">Marvel Snap 玩法 · 东方 Project 主题 · 极简网页 Demo</p>
       </div>
     </div>
+    <!-- 顶栏 HUD 只留两块：回合（「回合：x/N」，手机上其余标签都隐藏，唯独它保留文字）
+         与赌注。**能量已移到最下方的「能量：x/N」块**（它同时是重置本回合暗牌的入口）。 -->
     <div class="hud">
-      <button type="button" class="hud-item hud-home" id="btnHome" title="返回主页面" onclick="Home.show()">
-        <span class="hud-home-ico">←</span><span class="hud-label">主页</span>
-      </button>
-      <div class="hud-item" id="turnBox"><span class="hud-label">回合</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit" id="turnMax">/ 6</span></div>
-      <div class="hud-item clickable" id="energyBox" title="点击可重置本回合已暗出的牌（能量全额返还）" onclick="Game.ui.onEnergyReset()">
-        <span class="hud-label">能量</span><span class="hud-value" id="energyVal">1</span><span class="hud-unit" id="energyUnit">/ 6</span><span class="energy-bonus hidden" id="energyBonus">+1</span><span class="reset-mark">↺</span>
+      <div class="hud-item" id="turnBox" title="当前回合 / 本局总回合数"><span class="hud-turn-label">回合：</span><span class="hud-value" id="turnVal">1</span><span class="hud-unit" id="turnMax">/6</span></div>
+      <!-- 右侧一组：赌注 + 加倍。手机端这一组整体贴在第一行最右（加倍就在最右端） -->
+      <div class="hud-right">
+        <div class="hud-item cubes" title="本局结算的注码（双方各可加倍一次）"><span class="hud-label">赌注</span><span class="cube" id="cubeVal">2</span><span class="cube-pips" id="cubePips"></span></div>
+        <button id="btnSnap" class="btn btn-snap" onclick="Game.ui.onSnap()" title="每局一次：把本局结算从 2 抬到 4（双方都加倍则 8），下回合生效">加倍</button>
       </div>
-      <div class="hud-item cubes"><span class="hud-label">赌注</span><span class="cube" id="cubeVal">2</span><span class="cube-pips" id="cubePips"></span></div>
     </div>
+    <!-- 手机上这一组排到第二行（图鉴 / 重新开始 显示文字；开发调试按钮也在这一组）。
+         「重新开始」在联机对局里会被 renderControls() 收掉 —— 联机不许就地重开（见 uiOnRestart）。 -->
     <div class="top-actions">
-      <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()">⚡ 修改能量</button>
-      <button id="btnPickLoc" class="btn btn-ghost hidden" onclick="Game.ui.onPickLoc()" title="开发调试：指定并替换区域地形">🗻 指定地形</button>
-      <button id="btnAddStone" class="btn btn-ghost hidden" onclick="Game.ui.onAddStone()" title="开发调试：批量为某个区域生成石块（双方各 N 张）">🪨 添加石块</button>
-      <button id="btnPick" class="btn btn-ghost" onclick="Game.ui.onPick()">🎯 指定卡牌</button>
-      <button id="btnSwitchSide" class="btn btn-ghost hidden" onclick="Game.ui.onSwitchSide()" title="开发调试：切换落牌立场">⇄ 切换立场</button>
-      <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()">📖 图鉴</button>
-      <button id="btnSnap" class="btn btn-snap" onclick="Game.ui.onSnap()" title="每局一次：把本局结算从 2 抬到 4（双方都加倍则 8），下回合生效">双倍下注</button>
-      <button id="btnRestart" class="btn btn-ghost" onclick="Game.ui.onRestart()">重新开始</button>
+      <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()" title="开发者：本回合能量设为 7"><span class="bt-ico">⚡</span><span class="bt-txt">修改能量</span></button>
+      <button id="btnPickLoc" class="btn btn-ghost hidden" onclick="Game.ui.onPickLoc()" title="开发调试：指定并替换区域地形"><span class="bt-ico">🗻</span><span class="bt-txt">指定地形</span></button>
+      <button id="btnAddStone" class="btn btn-ghost hidden" onclick="Game.ui.onAddStone()" title="开发调试：批量为某个区域生成石块（双方各 N 张）"><span class="bt-ico">🪨</span><span class="bt-txt">添加石块</span></button>
+      <button id="btnPick" class="btn btn-ghost" onclick="Game.ui.onPick()" title="开发调试：指定一张牌加入手牌"><span class="bt-ico">🎯</span><span class="bt-txt">指定卡牌</span></button>
+      <button id="btnSwitchSide" class="btn btn-ghost hidden" onclick="Game.ui.onSwitchSide()" title="开发调试：切换落牌立场"><span class="bt-ico">⇄</span><span class="bt-txt">切换立场</span></button>
+      <button id="btnCodex" class="btn" onclick="Game.ui.onCodex()" title="图鉴：查看全部卡牌"><span class="bt-ico">📖</span><span class="bt-txt">图鉴</span></button>
+      <button id="btnRestart" class="btn btn-ghost" onclick="Game.ui.onRestart()" title="重新开始这一局（联机对局不适用）"><span class="bt-ico">🔁</span><span class="bt-txt">重新开始</span></button>
     </div>
   </header>
 
@@ -573,7 +584,7 @@
           </div>
           <button type="button" class="btn btn-ghost ai-spy-btn" id="btnAiSpy" title="查看对手手牌与牌库" onclick="Game.ui.onAiSpy()">👁️ 查看</button>
         </div>
-        <div id="aiSnapTag" class="snap-tag hidden">⚡ 已加倍</div>
+        <div id="aiSnapTag" class="snap-tag hidden">对手已加倍</div>
         <!-- 联机专有：对手这一手交了没有（「⏳ 出牌中…」/「✅ 已提交，等你出牌」），单机恒隐藏 -->
         <div id="oppTurnTag" class="opp-turn-tag hidden">⏳ 出牌中…</div>
       </div>
@@ -585,7 +596,7 @@
           <li>每回合可把多张牌暗出到各区域，总费用不超能量；出完点「结束回合」。</li>
           <li>出牌结束后翻牌结算「揭示」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>
           <li>每区域比总战力：若出现平局区域，按三区域总点数高低决胜；无平局时赢下区域多者获胜。</li>
-          <li>「双倍下注」<b>双方各一次</b>、<b>下回合生效</b>：本局结算＝无人加倍 2 立方 / 一人 4 / 两人 8；「认输」按<b>加倍前的值</b>结算。</li>
+          <li>「加倍」<b>双方各一次</b>、<b>下回合生效</b>：本局结算＝无人加倍 2 立方 / 一人 4 / 两人 8；「认输」按<b>加倍前的值</b>结算。</li>
         </ul>
       </div>
       <div class="status-card" id="statusCard">
@@ -766,6 +777,12 @@
   <!-- 放大卡牌查看 -->
   <div class="modal-mask zoom-mask hidden" id="zoomMask">
     <div class="zoom-stage">
+      <!-- 战力影响历史：卡面战力的**构成**，独立占弹窗顶部一整条（横向铺开、来源多时左右滑）；
+           仅场上已翻开卡查看时显示，手牌 / 图鉴 / 牌池里都隐藏 -->
+      <section class="power-panel hidden" id="powerPanel">
+        <div class="pp-label">战力构成</div>
+        <div class="pp-rows" id="ppRows"></div>
+      </section>
       <div class="zoom-row">
         <div class="zoom-main-col">
           <div class="zoom-card-wrap" id="zoomCardSlot"></div>
@@ -775,13 +792,6 @@
       </div>
       <button class="btn btn-primary" onclick="Game.ui.closeZoom()">← 返回图鉴</button>
     </div>
-
-    <!-- 战力影响历史：独立于卡牌详情弹窗、同遮罩并排；仅场上已翻开卡查看时显示 -->
-    <section class="power-panel hidden" id="powerPanel">
-      <div class="pp-head">⚡ 战力影响历史</div>
-      <div class="pp-name" id="ppName"></div>
-      <div class="pp-rows" id="ppRows"></div>
-    </section>
   </div>
 
   <!-- 重置本回合暗牌：确认弹窗 -->
@@ -801,12 +811,13 @@
   <div class="corner-actions corner-left">
     <button id="btnRetreat" class="btn btn-danger" onclick="Game.ui.onRetreat()">🏳️ 认输</button>
   </div>
-  <!-- 认输 与 结束回合 中间的手牌数量提示（当前手牌 N/7）；并排一个「牌库 N」计数
-       （玩家牌库张数；「洗入卡组」会改变它，该计数同时是洗入演出的锚点，
-       见 game.js 的 updateDeckCount / playShuffleInFx） -->
+  <!-- 认输 与 结束回合 中间：能量块 + 计数块（两块居中并排）。
+       能量块＝**重置本回合暗出牌的唯一入口**（顶栏已无能量框）；
+       计数块＝**点一下在「手牌：N/7」与「牌库：N」之间切换**（省掉单独一格牌库计数）。
+       刷新：能量在 game.js 的 renderHud()，计数块在 renderCountChip()。 -->
   <div class="corner-actions corner-center" id="handCountBox">
-    <span class="hand-count-chip" id="handCountVal">0/7</span>
-    <span class="hand-count-chip deck-count-chip" id="deckCountVal">牌库 12</span>
+    <span class="hand-count-chip energy-chip" id="energyChip" onclick="Game.ui.onEnergyReset()" title="点击可重置本回合已暗出的牌（能量全额返还）"><span class="chip-label">能量：</span><span id="energyChipVal">1/1</span><span class="energy-bonus hidden" id="energyBonus">+1</span><span class="reset-mark">↺</span></span>
+    <span class="hand-count-chip hand-chip" id="handCountVal" title="点击切换：手牌数量 / 牌库张数"><span class="chip-label">手牌：</span><span id="handCountNum">0/7</span></span>
   </div>
   <div class="corner-actions corner-right">
     <button id="btnPass" class="btn btn-pass" onclick="Game.ui.onPass()">跳过回合</button>

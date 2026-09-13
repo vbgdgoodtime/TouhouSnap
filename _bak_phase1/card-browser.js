@@ -2,7 +2,7 @@
    东方逆转 · card-browser.js
    图鉴 / 开发者「指定卡牌」页：两层筛选（卡池 → 费用档）与卡牌网格渲染。
    卡池＝普通卡牌池（POOL 人物卡）/ 衍生卡牌池（SPECIAL token，不含 un 占位），两池各自记忆费用档。
-   依赖运行时：window.DS_CARDS.POOL/.SPECIAL 与 game.js 暴露的 gradOf / cardFaceEl / showZoom /
+   依赖运行时：window.DS_CARDS.POOL/.SPECIAL 与 game.js 暴露的 gradOf / cardFaceHTML / showZoom /
    newCard / log / setStatus / renderHand / hidePowerPanel 与顶层 state；入口由 game.js 转发
    ========================================================= */
 (function () {
@@ -157,11 +157,13 @@
       if (grid) grid.appendChild(none);
     }
     defs.forEach(function (def) {
-      // 卡面统一走 game.js 的 cardFaceEl（自带 .card-face 基类与 --cgrad）；
+      var el = document.createElement('div');
       // 无图卡加 .no-img：emoji 占正方形立绘区，与有图卡同高同宽（对齐手牌 / 卡组池）
-      var el = cardFaceEl(def, 'codex-card hand-card'
+      el.className = 'codex-card hand-card'
         + (def.img ? '' : ' no-img')
-        + (isTokenDef(def) ? ' token-card' : ''));
+        + (isTokenDef(def) ? ' token-card' : '');
+      el.style.setProperty('--cgrad', gradOf(def));
+      el.innerHTML = cardFaceHTML(def);
       // 法术 token（def.spell）在「指定卡牌」页可加入手牌（便于调试机制）；其余衍生卡仅可查看
       el.title = def.n + (isTokenDef(def) ? (def.spell ? '（法术 · 衍生卡牌）' : '（衍生卡牌）') : '');
       if (isCodex) {

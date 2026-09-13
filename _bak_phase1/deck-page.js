@@ -12,7 +12,7 @@
      导入只**新建**一套卡组，不覆盖既有卡组，也不改动当前编辑中的内容。
      入口 = 顶栏「📤 导出」/「📥 导入」；两种形态共用弹窗 #deckImportMask，由 openCodeDialog 切换。
    入口 / 返回：DeckBuilder.open()（home.js 的 PAGES.deck）/ close() → Home.show()。
-   依赖：game.js 的 gradOf / cardFaceEl / showZoom；deck-storage.js 的 DeckStorage.load/save。
+   依赖：game.js 的 gradOf / cardFaceHTML / showZoom；deck-storage.js 的 DeckStorage.load/save。
    ========================================================= */
 (function () {
   'use strict';
@@ -537,8 +537,11 @@
   }
   /* ---------- 编辑态：该卡组的 12 个卡槽 ---------- */
   function deckCardSlotEl(deck, def, index) {
-    var btn = cardFaceEl(def, 'hand-card deck-card-slot filled', null, 'button');
+    var btn = document.createElement('button');
     btn.type = 'button';
+    btn.className = 'hand-card deck-card-slot filled';
+    btn.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色
+    btn.innerHTML = cardFaceHTML(def);
     btn.title = '第 ' + (index + 1) + ' 张：' + escapeAttr(def.n) + '（' + def.c + ' 费 / ' + powerText(def) + '）· 点击移出卡组';
     btn.addEventListener('click', function () { removeFromDeck(deck.id, def); });
     return btn;
@@ -613,14 +616,15 @@
   /* ---------- 卡牌网格（下方 2/3）：编辑态下已在卡组中的卡牌加灰色遮罩且不可点击（移出一律走
      「点上方卡槽」），衍生卡牌仅可查看不可加入；右键放大查看在两种状态下都保留。 */
   function poolCardEl(def, deck) {
+    var el = document.createElement('div');
     var token = isTokenDef(def);
     var inDeck = !!(!token && deck && deck.cards.indexOf(def) >= 0);
-    // 卡面统一走 game.js 的 cardFaceEl（自带 .card-face 基类与 --cgrad）；
-    // 无图卡加 .no-img：emoji 占正方形立绘区，高度与有图卡一致
-    var el = cardFaceEl(def, 'hand-card deck-pool-card'
-      + (def.img ? '' : ' no-img')
+    el.className = 'hand-card deck-pool-card'
+      + (def.img ? '' : ' no-img') // 与手牌一致：无图时 emoji 占正方形立绘区，高度统一
       + (token ? ' token-card' : '')
-      + (inDeck ? ' in-deck' : ''));
+      + (inDeck ? ' in-deck' : '');
+    el.style.setProperty('--cgrad', gradOf(def)); // 复用 game.js 的卡面配色与结构
+    el.innerHTML = cardFaceHTML(def);
     if (token) {
       el.title = escapeAttr(def.n) + '（衍生卡牌 · 仅可查看，不可加入卡组）';
     } else if (inDeck) {
