@@ -593,7 +593,7 @@ function recordDestroy(card, locIdx, srcName) {
     power,
   });
   if (!r) return null;
-  log('danger', `⚰️ 「${card.def.n}」被摧毁 → 进入${card.side === 'p' ? '你' : '对手'}的摧毁池（第 ${state.turn} 回合 · 来源：${srcName || '效果'} · ${locName || '未知区域'} · 当时战力 ${power}；现 ${r.n} 张）。`);
+  log('danger', `⚰️ 「${card.def.n}」被摧毁 → ${card.side === 'p' ? '你' : '对手'}摧毁池（第 ${state.turn} 回合 · ${srcName || '效果'} · ${locName || '未知区域'} · 战力 ${power}；现 ${r.n} 张）`);
   renderPiles(); // 侧栏计数即时刷新（牌池弹窗若开着，列表也一并重渲染）
   return r;
 }
@@ -856,7 +856,7 @@ function devDiscard(sideKey, spec) {
   const r = discardFromHand(side, spec || {}, null, '开发者指令');
   const cond = spec ? `（${discardSpecText(spec)}）` : '';
   if (!r.ok) {
-    log('sys', `🗑️ 开发者指令：想弃掉${who}手牌里的牌${cond}，但没有符合条件的牌（现手牌 ${state.players[side].hand.length} 张）。`);
+    log('sys', `🗑️ 开发者指令：${who}手牌里没有符合条件的牌（现 ${state.players[side].hand.length} 张）`);
   } else {
     log('sys', `🗑️ 开发者指令：弃掉${who}手牌里的 ${r.cards.length} 张${r.cards.map((c) => `「${c.def.n}」`).join('')} → 移入${who}的弃牌池（现 ${state.players[side].discardPile.length} 张）。`);
   }
@@ -1019,21 +1019,20 @@ function roundsTotal() {
 }
 /** 本局总回合数**发生变化的那一刻**的提示收口 —— 与 `state.roundTotal` 记录值不同才写一条日志（值本身是实时读的，本函数只负责留痕）。
     调用点＝地形揭晓 / 定时变形 / 卡牌 xform / 地形 collapse / 开发者「指定地形」/ 每回合开始（防御性再补一次：任何路径漏调都能在回合边界补上）。 */
-function syncRoundTotal(tag) {
+function syncRoundTotal() {
   if (!state.locs) return;
   const now = roundsTotal();
   if (now === state.roundTotal) return;
   const prev = state.roundTotal || 6;
   state.roundTotal = now;
-  const why = tag || '地形变化';
   const names = state.locs
     .filter((l) => l && l.def && l.def.extraRound)
     .map((l) => `「${l.def.n}」`)
     .join('、');
   if (now > prev) {
-    log('sys', `🌕 本局总回合数：${prev} → ${now} —— ${names || '虚假之月'}在场，本局将进行第 ${now} 回合（第 ${now} 回合能量 ${now} 点；${why}）。`);
+    log('sys', `🌕 本局总回合数 ${prev} → ${now}：${names || '虚假之月'}在场，本局将进行第 ${now} 回合（能量 ${now} 点）`);
   } else {
-    log('sys', `🌕 本局总回合数：${prev} → ${now} —— 场上已没有「虚假之月」，本局回到 ${now} 回合（${why}）。`);
+    log('sys', `🌕 本局总回合数 ${prev} → ${now}：场上已没有「虚假之月」，退回 ${now} 回合`);
   }
   // 顶栏「回合 N / 总数」当场刷新（不等到回合末的 renderAll）——翻牌阶段里被 xform 变出/变走的虚假之月也能即时反映到 /7 与 /6。
   renderHud();
@@ -1178,7 +1177,7 @@ function startRecord(pDeckMode) {
   gameRecord = {
     seed: rngSeed,
     dataHash: DATA_HASH,
-    pDeckMode: pDeckMode, // 'defs' 自建 12 张 / 'curve' 费用曲线随机组 / 'empty' 开发调试空牌库 —— 重放必须走同一条建牌路径
+    pDeckMode: pDeckMode, // 'defs' 自建 12 张 / 'curve' 费用曲线随机组 / 'aiCurve' 随机卡组（与对手同一条曲线） / 'empty' 开发调试空牌库 —— 重放必须走同一条建牌路径
     pDeck: state.players.p.deck.map((c) => cardCodeOf(c.def)),
     aDeck: state.players.a.deck.map((c) => cardCodeOf(c.def)),
     turns: [],
@@ -1218,7 +1217,7 @@ function recordTurnInputs(side, extra) {
 }
 
 /* 一行文本码 `TH2P2:<种子>:<数据哈希>:<建牌路径>:<我方卡组>:<对方卡组>:<逐回合动作>`
-   —— 建牌路径 1 个字符：`d` 自建 12 张 / `c` 费用曲线随机组 / `e` 开发调试空牌库（两条路径消耗的随机数个数不同，必须原样重放）；
+   —— 建牌路径 1 个字符：`d` 自建 12 张 / `c` 费用曲线随机组 / `r` 随机卡组（与对手同一条曲线）/ `e` 开发调试空牌库（各条路径消耗的随机数个数不同，必须原样重放）；
    逐回合按 `|` 分隔，每回合 9 个字段以 `:` 分隔：回合号、我方落牌、我方移动、我方本回合是否宣布加倍、我方是否撤退、
    对方落牌、对方移动、对方本回合是否宣布加倍、对方是否撤退
    （落牌项 `卡id.区域`，开发调试的敌方立场落牌追加 `A`；移动项 `卡id.来源区域.目标区域`；各项内以 `,` 分隔）。
@@ -1226,7 +1225,7 @@ function recordTurnInputs(side, extra) {
 function encodeRecord() {
   if (!gameRecord) return '';
   const r = gameRecord;
-  const mode = r.pDeckMode === 'defs' ? 'd' : (r.pDeckMode === 'empty' ? 'e' : 'c');
+  const mode = r.pDeckMode === 'defs' ? 'd' : (r.pDeckMode === 'empty' ? 'e' : (r.pDeckMode === 'aiCurve' ? 'r' : 'c'));
   const turns = r.turns.map((tr) => {
     // 落牌项 `卡id.区域`，开发调试的「敌方立场」落牌追加 `A`（该牌归属对手）；
     // `amv` 字段按定义就是对手的动作，不再重复标注 A
@@ -1254,7 +1253,7 @@ function decodeRecord(code) {
   if (f.length < 6) return null;
   const seed = Number(f[0]);
   if (!isFinite(seed)) return null;
-  const mode = f[2] === 'd' ? 'defs' : (f[2] === 'e' ? 'empty' : (f[2] === 'c' ? 'curve' : null));
+  const mode = f[2] === 'd' ? 'defs' : (f[2] === 'e' ? 'empty' : (f[2] === 'c' ? 'curve' : (f[2] === 'r' ? 'aiCurve' : null)));
   if (!mode) return null;
   const turns = [];
   for (const seg of f.slice(5).join(':').split('|')) { // 逐回合用 `|` 分隔、回合内用 `:`，故先把后段拼回来再切
@@ -1364,12 +1363,12 @@ async function replayGame(code, opts) {
   const rec = decodeRecord(code);
   if (!rec) {
     setStatus(isLegacyCode(code)
-      ? '这是旧版挑战码（TH2P1）—— 赌注口径已变（双方各有一次加倍、加倍下回合生效），旧码打不开，请对方用新版重打一局生成新码。'
+      ? '旧版挑战码（TH2P1）不再支持 —— 请对方用新版重打一局生成新码。'
       : '挑战码格式不对（应以 TH2P2: 开头）。');
     return null;
   }
   if (rec.dataHash !== DATA_HASH) {
-    setStatus(`这个挑战码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}），没法重放 —— 请双方刷新后再试。`);
+    setStatus(`挑战码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}）→ 请双方刷新后再试`);
     return null;
   }
   if (rec.pDeckMode === 'empty') {
@@ -1383,20 +1382,21 @@ async function replayGame(code, opts) {
       return null;
     }
   }
-  // 两条建牌路径各自原样复原（'defs' 走"按记录顺序直接建牌"，见 buildDeckInOrder）
+  // 各条建牌路径各自原样复原（'defs' 走"按记录顺序直接建牌"，见 buildDeckInOrder）
   const restartOpts = { seed: rec.seed, replay: rec, replayMode: (opts && opts.mode) || 'review' };
   if (rec.pDeckMode === 'curve') restartOpts.playerDeckCurve = true;
+  else if (rec.pDeckMode === 'aiCurve') restartOpts.playerRandomDeck = true;
   else restartOpts.playerDeckDefs = rec.pDeck.map(cardDefOfCode);
   await restart(restartOpts);
   // 两副卡组在开局（牌库还完整时）就核对过：对不上 ⇒ 引擎或数据变过，宁可中止也不跑出一局假的
   if (!replayMode.decksOk) {
-    setStatus('这个挑战码与当前版本算不出同一副双方卡组（版本可能变过），重放已中止 —— 具体差在哪见控制台。');
+    setStatus('这个挑战码与当前版本算不出同一副卡组，重放已中止（差异见控制台）。');
     await restart({});
     return null;
   }
   const shadow = (opts && opts.mode) === 'shadow';
   log('sys', shadow
-    ? `⟲ 同一局面挑战（种子 ${rec.seed}）—— 你执原局我方的座位（同一副卡组与起手），对手按它当时的动作出牌。`
+    ? `⟲ 挑战同一局面（种子 ${rec.seed}）—— 你执原局我方座位，对手按它当时的动作出牌。`
     : `⟲ 开始重放挑战码（种子 ${rec.seed}）—— 双方动作都取自记录，不需要你操作。`);
   const limit = Math.ceil((shadow ? 30000 : 90000) / 50);
   for (let i = 0; i < limit; i++) {
@@ -1509,20 +1509,21 @@ function setChallengeMode(exporting) {
   if (ta) ta.readOnly = !!exporting;
 }
 // 结算弹窗「📤 生成挑战码」
+/* 这一局能不能生成挑战码：**不能时由 `showModal` 直接把入口收掉**（原来只在点下去之后往侧栏状态条写一句原因，
+   而结算弹窗盖着那条状态条 ⇒ 玩家只看到"点了没反应"）。
+   · 联机对局不能：挑战码重放走的是单机那条建牌路径（对手牌库恒按 AI 费用曲线随机组），复原不出联机那一局
+     —— 对手的牌组虽然也记在码里（`aDeck`），但重放不用它；座位序（房主在先）同样没进码。
+   · 开发调试（空牌库）不能：没有可复原的卡组。 */
+function canExportChallenge() {
+  return !state.netRole && !!(gameRecord && gameRecord.pDeckMode !== 'empty');
+}
 function uiChallengeExport() {
-  if (state.netRole) {
-    setStatus('联机对局不生成挑战码 —— 联机的码还要带"谁执哪一边"的座位信息，现有码格式装不下（单机对局照常）。');
-    return;
-  }
-  if (!gameRecord || gameRecord.pDeckMode === 'empty') {
-    setStatus('开发调试对局（空牌库）没有可分享的挑战码 —— 用正常对局打完一局再生成。');
-    return;
-  }
+  if (!canExportChallenge()) return; // 防御：入口已收掉，正常点不到
   const ta = $('challengeInput'), mask = challengeMaskEl();
   if (!ta || !mask) return;
   setChallengeMode(true);
   ta.value = encodeRecord();
-  setChallengeTip('这一行码装着整局的种子、双方卡组与每一手的动作。发给朋友，对方在主页「🔗 挑战码」里粘贴即可。', false);
+  setChallengeTip('一行码装着整局的种子、双方卡组与每一手动作；对方在主页「🔗 挑战码」粘贴即可。', false);
   mask.classList.remove('hidden');
   if (typeof ta.select === 'function') ta.select(); // 自动复制不可用时，玩家按 Ctrl+C 就能拷走
 }
@@ -1532,7 +1533,7 @@ function uiChallengeOpen() {
   if (!ta || !mask) return;
   setChallengeMode(false);
   ta.value = '';
-  setChallengeTip('粘贴朋友发来的挑战码，再选「👁️ 看复盘」（自动重放整局）或「⚔️ 挑战同一局面」（你执他当时的座位、照同一副起手打）。', false);
+  setChallengeTip('粘贴挑战码，再选「👁️ 看复盘」（重放整局）或「⚔️ 挑战同一局面」（你执他当时的座位）。', false);
   mask.classList.remove('hidden');
   if (typeof ta.focus === 'function') ta.focus();
 }
@@ -1556,13 +1557,13 @@ function uiChallengeStart(mode) {
   const rec = decodeRecord(code);
   if (!rec) {
     setChallengeTip(isLegacyCode(code)
-      ? '这是旧版挑战码（TH2P1）：赌注口径已改成「双方各有一次加倍、加倍下回合生效」，旧码不再支持 —— 请对方用新版重打一局生成新码（并先 Ctrl+F5 硬刷新本页）。'
-      : '这不是一个有效的挑战码（应以 TH2P2: 开头，可能被截断或改动过）。如果对方刚改过游戏，也请先按 Ctrl+F5 硬刷新本页再试。', true);
+      ? '旧版挑战码（TH2P1）不再支持 —— 请对方用新版重打一局生成新码。'
+      : '无效挑战码（应以 TH2P2: 开头，可能被截断或改动过）。', true);
     return;
   }
   if (rec.pDeckMode === 'empty') { setChallengeTip('这是开发调试对局（空牌库）的码，打不开。', true); return; }
   if (rec.dataHash !== DATA_HASH) {
-    setChallengeTip(`这个码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}），打不开 —— 请双方都刷新页面后再试。`, true);
+    setChallengeTip(`挑战码来自不同的卡牌数据版本（码 ${rec.dataHash} / 本机 ${DATA_HASH}）→ 请双方刷新后再试`, true);
     return;
   }
   closeChallenge();
@@ -1618,10 +1619,11 @@ async function restart(opts) {
   state.players.p.energyGain = 0;
   state.players.a.energyGain = 0;
 
-  // 玩家卡组来源：opts.playerDeckDefs（自建满编 12 张）→ 上一局自建 → 随机曲线；opts.emptyPlayerDeck 为开发调试空牌库（「重新开始」会沿用）。
-  // ⚠️ 两条建牌路径**消耗的随机数个数不同**（自建 12 张＝洗 1 次；费用曲线＝每个费用档各洗一次 + 再洗一次曲线），
+  // 玩家卡组来源：opts.playerDeckDefs（自建满编 12 张）→ 上一局自建 → 随机卡组 / 随机曲线；opts.playerRandomDeck 为「随机卡组」出战，
+  // opts.emptyPlayerDeck 为开发调试空牌库（后两者「重新开始」都会沿用）。
+  // ⚠️ 各条建牌路径**消耗的随机数个数不同**（自建 12 张＝洗 1 次；费用曲线＝每个费用档各洗一次 + 再洗一次曲线），
   //    所以重放时必须走**同一条** —— 走错一条，后面整条随机流就错位，对手牌组与三块地形全都会变。
-  //    `pDeckMode` 就是为这件事记的（写进挑战码），取值：'defs' / 'curve' / 'empty'。
+  //    `pDeckMode` 就是为这件事记的（写进挑战码），取值：'defs' / 'curve' / 'aiCurve' / 'empty'。
   let pDeckMode = 'curve';
   if (opts.netPvp) {
     // 联机对局：双方各带一套 12 张卡组，**一律按"房主在先"的顺序建牌**（两端消耗随机数、分配卡牌 id 的顺序必须一致），
@@ -1633,6 +1635,7 @@ async function restart(opts) {
     const hostSeat = guest ? 'a' : 'p';
     const guestSeat = guest ? 'p' : 'a';
     lastEmptyPlayerDeck = false;
+    lastRandomPlayerDeck = false;
     pDeckMode = 'defs';
     lastPlayerDeckDefs = (guest ? np.guestDefs : np.hostDefs).slice();
     state.players[hostSeat].deck = buildDeckFromDefs(np.hostDefs, hostSeat);
@@ -1640,15 +1643,26 @@ async function restart(opts) {
   } else if (opts.emptyPlayerDeck === true) {
     pDeckMode = 'empty';
     lastEmptyPlayerDeck = true;
+    lastRandomPlayerDeck = false;
     lastPlayerDeckDefs = null;
     state.players.p.deck = [];
   } else if (opts.playerDeckCurve === true) {
     // 重放专用：这一局原本就是"按费用曲线随机组牌"，必须原样走同一条路径
     lastEmptyPlayerDeck = false;
+    lastRandomPlayerDeck = false;
     lastPlayerDeckDefs = null;
     state.players.p.deck = buildDeckCards(DECK_CURVE, 'p');
+  } else if (opts.playerRandomDeck === true) {
+    // 「随机卡组」出战（一套满 12 张的卡组都没有时的兜底，见 js/home.js）：与对手**同一条**费用曲线随机组一套，
+    // 每局重开都重新抽；重放走同一条路径（同一个 buildDeckCards 调用 ⇒ 消耗的随机数个数与原来一致）。
+    pDeckMode = 'aiCurve';
+    lastEmptyPlayerDeck = false;
+    lastRandomPlayerDeck = true;
+    lastPlayerDeckDefs = null;
+    state.players.p.deck = buildDeckCards(AI_DECK_CURVE, 'p');
   } else if (opts.playerDeckDefs) {
     lastEmptyPlayerDeck = false;
+    lastRandomPlayerDeck = false;
     const custom = (opts.playerDeckDefs.length === 12) ? opts.playerDeckDefs : null;
     if (custom) {
       pDeckMode = 'defs';
@@ -1662,6 +1676,10 @@ async function restart(opts) {
   } else if (lastEmptyPlayerDeck) {
     pDeckMode = 'empty';
     state.players.p.deck = [];
+  } else if (lastRandomPlayerDeck) {
+    // 「重新开始」/「再来一局」沿用小局口径：随机卡组每局重新随机组一套（对手也是每局重抽）
+    pDeckMode = 'aiCurve';
+    state.players.p.deck = buildDeckCards(AI_DECK_CURVE, 'p');
   } else {
     const custom = (lastPlayerDeckDefs && lastPlayerDeckDefs.length === 12) ? lastPlayerDeckDefs : null;
     if (custom) {
@@ -1721,9 +1739,9 @@ async function restart(opts) {
   $('undoMask').classList.add('hidden');
   clearLog();
   if (isDevMode()) {
-    log('sys', '开发调试对局：玩家空牌库 · 每回合能量 10 · 三块地形固定为「无名之丘」· AI 不出牌。未揭示地形将在第 1/2/3 回合依次揭晓。');
+    log('sys', '开发调试对局：空牌库 · 每回合能量 10 · 三块「无名之丘」· AI 不出牌');
   } else {
-    log('sys', '新对局开始！三块地形皆为「未揭示」，将在第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。先手暗牌后统一翻面。');
+    log('sys', '新对局开始！三块地形待揭晓，将在第 1/2/3 回合依次揭晓（左→中→右）。');
   }
   // 地形「出现时」效果不在开局结算——真实地形在揭晓那一刻才「出现」，由 locationRevealStage 结算
   const gsHits = runGameStartEffects(); // ⓪ 游戏开始效果挂点（现注册者：7 费哆来咪的 `gs`）
@@ -1777,6 +1795,8 @@ function buildDeckCards(curve, side) {
 let lastPlayerDeckDefs = null;
 /* 开发调试空牌库模式（无参 restart / 再来一局沿用） */
 let lastEmptyPlayerDeck = false;
+/* 「随机卡组」出战模式（无参 restart / 再来一局沿用，且每局按对手同一条曲线重新随机组一套） */
+let lastRandomPlayerDeck = false;
 function isDevMode() { return !!lastEmptyPlayerDeck; }
 /** 当前出牌落位归属（开发调试切换立场为敌方时返回 'a'） */
 function playSide() {
@@ -1993,15 +2013,15 @@ function applyGameStartEffect(side, card, gs) {
     for (const d of picks) added += shuffleCardsIntoDeck(side, d, 1); // 每张一份新实例；函数内部会重洗牌库
     if (added > 0) {
       const names = picks.slice(0, added).map((d) => `「${d.n}」`).join('');
-      log('sys', `💤 「${card.def.n}」（游戏开始时）：从卡牌池随机抽到 ${added} 张牌洗入${who}的卡组 —— ${names}（牌库 ${before} → ${pl.deck.length} 张，并重新洗了一次牌；这些牌第一回合起就可能被抽到）。`);
+      log('sys', `💤 「${card.def.n}」（游戏开始时）：${added} 张牌洗入${who}牌库 —— ${names}（牌库 ${before} → ${pl.deck.length} 张，已重洗）`);
     } else {
-      log('sys', `💤 「${card.def.n}」（游戏开始时）：想洗入 ${n} 张随机牌，但卡牌池里没有可抽的候选（数据缺失），本次无事发生。`);
+      log('sys', `💤 「${card.def.n}」（游戏开始时）：没有可洗入的牌 → 跳过`);
     }
   }
   const add = Math.floor(gs.energyAdd || 0);
   if (add) {
     state.energyAddPerTurn[side] = (state.energyAddPerTurn[side] || 0) + add;
-    log('sys', `🔋 「${card.def.n}」（游戏开始时）：${who}本局每回合最大能量 +${add}（本局永久，回合开始并入基数：第 1 回合 ${1 + add} 点 … 第 6 回合 ${6 + add} 点）。`);
+    log('sys', `🔋 「${card.def.n}」（游戏开始时）：${who}本局每回合最大能量 +${add}（本局永久）`);
   }
 }
 
@@ -2023,19 +2043,28 @@ function runGameStartEffects() {
   return hits;
 }
 
+/* 当前是否不在战斗界面：主页面（`in-home`，z-index 200）/ 卡组设置页（`in-deck`）/ 开发调试页（`in-dev`）盖在战斗区之上。
+   ⚠️ 页面底部的启动 `restart()` 会在**主页面背后先跑一局初始化**（见 `js/home.js` 文件头），那局没人看；
+   全屏演出（悬浮层 z-index 比这些页面还高）必须先问这一句，否则会弹到主页面上。
+   真实对局（单机 / 联机 / 开发调试页）都是先收起主页面、再 `restart(...)`，所以这一问不会误伤真正的开局。 */
+function gameScreenHidden() {
+  const cl = document.body.classList;
+  return cl.contains('in-home') || cl.contains('in-deck') || cl.contains('in-dev');
+}
+
 /* ==================== 开局「登场」演出（`gs` 卡，现仅 7 费「哆来咪」）====================
    触发：⓪ 真的结算了带 `gs` 的卡时，在**洗牌 + 登记能量之后、玩家起手 3 张发放之前**播放一次「凸现」演出（约 1.8s），演完才抽牌。
    要点：元素全放 body 悬浮层（`.gs-reveal`，pointer-events:none），不挡操作也不受盘面重渲染影响，播放前先清残留；卡面复用 `cardFaceHTML(def)`；
-   收尾用 `setTimeout`（**不依赖** `animation.finished`，被中断也一定 resolve、绝不卡住开局）；无 Web Animations 时（jsdom 冒烟测试）整段跳过。 */
+   收尾用 `setTimeout`（**不依赖** `animation.finished`，被中断也一定 resolve、绝不卡住开局）；无 Web Animations 时（jsdom 冒烟测试）或不在战斗界面时整段跳过。 */
 function playGameStartReveal(gen, items) {
   const list = (items || []).filter((it) => it && it.card && it.card.def);
   if (!list.length) return Promise.resolve();
+  // 防御：清掉可能残留的上一段演出（例如上一次开局被「重新开始」打断）
+  const stale = document.querySelector('.gs-reveal');
+  if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+  if (gameScreenHidden()) return Promise.resolve(); // 后台首局（主页面背后的那一局）不播
   return new Promise((resolve) => {
     const DUR = 1800; // 演出总时长；CSS 三处动画时长需与它同步（现 1.8s）
-    // 防御：清掉可能残留的上一段演出（例如上一次开局被「重新开始」打断）
-    const stale = document.querySelector('.gs-reveal');
-    if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
-
     const wrap = document.createElement('div');
     wrap.className = 'gs-reveal';
     const veil = document.createElement('div');
@@ -2161,13 +2190,13 @@ function runHandEndEffects() {
       if (he.k === 'discard') {
         const r = discardFromHand(side, he.discard || {}, card, null, card); // 只弃触发的那一张实例
         if (!r.ok) {
-          log('sys', `📖 「${card.def.n}」：回合结束时已不在${who}的手牌中，本次无事发生。`);
+          log('sys', `📖 「${card.def.n}」：回合结束时已不在${who}手牌中`);
           continue;
         }
         log('sys', `🗑️ 「${card.def.n}」：回合结束时依然在${who}的手牌中 → 自动丢弃（移入${who}的弃牌池，现 ${pileOf(side, 'discard').length} 张）。`);
         continue;
       }
-      log('sys', `📖 「${card.def.n}」：手牌回合结束效果「${he.k}」尚未实装，本次无事发生。`);
+      log('sys', `📖 「${card.def.n}」：手牌回合结束效果未实装 → 跳过`);
     }
   }
 }
@@ -2242,7 +2271,7 @@ function runLocAppearSpawn(idx, def) {
     //    当回合对账就对不上（症状：变形成虹龙洞 / 黄瓜田 / 幽灵洋馆的那一回合报"盘面不一致"）。
     let placed = 0;
     for (const side of state.seatOrder) placed += placeToken(side, idx, tk, cnt, made);
-    log('sys', `${def.icon}「${def.n}」出现：双方各生成 ${cnt} 张「${tk.n}」，已落场翻开。${placed < total ? '（部分区域已放满，未能全部落下）' : ''}`);
+    log('sys', `${def.icon}「${def.n}」出现：双方各生成 ${cnt} 张「${tk.n}」${placed < total ? '（部分区已满）' : ''}`);
     if (sp.reveal) resolveSpawnedReveals(made);
     return placed;
   }
@@ -2262,7 +2291,7 @@ function runLocAppearSpawn(idx, def) {
         placed++;
       }
     }
-    log('sys', `${def.icon}「${def.n}」出现：双方各生成 ${cnt} 张随机 ${sp.cost} 费人物卡 —— 你方「${names.p.join('、') || '无'}」、敌方「${names.a.join('、') || '无'}」，已落场翻开。${placed < total ? '（部分区域已放满，未能全部落下）' : ''}`);
+    log('sys', `${def.icon}「${def.n}」出现：双方各生成 ${cnt} 张随机 ${sp.cost} 费卡 —— 你方「${names.p.join('、') || '无'}」、敌方「${names.a.join('、') || '无'}」${placed < total ? '（部分区已满）' : ''}`);
     if (sp.reveal) resolveSpawnedReveals(made);
     return placed;
   }
@@ -2328,7 +2357,7 @@ async function shatterZoneCards(locIdx, gen, srcName) {
     log('danger', `☁️ ${srcName}：「${where}」区域上空无一卡，直接进入地形摧毁。`);
     return 0;
   }
-  log('danger', `☁️ ${srcName}：「${where}」区域开始崩塌 —— 依次摧毁其上的 ${targets.length} 张卡牌（本机制无视一切防摧毁 / 免摧毁保护）。`);
+  log('danger', `☁️ ${srcName}：「${where}」开始崩塌 —— 摧毁其上 ${targets.length} 张卡牌（无视一切防护）`);
   let n = 0;
   for (const c of targets) {
     if (gen !== state.gen) return n;           // 防御：链条播放期间重开了一局
@@ -2357,8 +2386,8 @@ function shatterZoneTerrain(locIdx, srcName) {
   resetLocGaps(locIdx);            // 隙间属于被摧毁的那块地形，一并清空
   renderShatteredColumn(locIdx);
   // 若被摧毁的正是「虚假之月」→ 本局总回合数当场退回 6（并留一条日志 + 刷新顶栏）
-  syncRoundTotal('天界摧毁地形');
-  log('danger', `☁️ ${srcName}：「${prev ? prev.icon + prev.n : '该区域'}」的地形被彻底摧毁 → 该列变成「已破碎」（双方区域一并消失，不能放牌、不计分、不参与胜负）。`);
+  syncRoundTotal();
+  log('danger', `☁️ ${srcName}：「${prev ? prev.icon + prev.n : '该区域'}」地形被摧毁 → 该列变成「已破碎」（不能放牌、不计分）`);
   return prev;
 }
 
@@ -2372,10 +2401,10 @@ async function runShatterChain(heavenIdx, gen, srcName) {
   }
   const heavenName = locDef(heavenIdx) ? locDef(heavenIdx).n : '本区域';
   if (!targets.length) {
-    log('sys', `☁️ ${srcName}：另外两块区域早已破碎（不会重复摧毁），本次「降临」无事发生。`);
+    log('sys', `☁️ ${srcName}：另外两块区域已破碎 → 降临跳过`);
     return;
   }
-  log('danger', `☁️ ${srcName}降临！即将摧毁另外 ${targets.length} 块区域（${targets.map((j) => `「${locDef(j) ? locDef(j).n : '区域 ' + (j + 1)}」`).join('、')}）—— 本局此后只剩「${heavenName}」一个可用区域。`);
+  log('danger', `☁️ ${srcName}降临！摧毁另外 ${targets.length} 块区域（${targets.map((j) => `「${locDef(j) ? locDef(j).n : '区域 ' + (j + 1)}」`).join('、')}）—— 本局只剩「${heavenName}」`);
   for (let k = 0; k < targets.length; k++) {
     const j = targets[k];
     if (gen !== state.gen) return;
@@ -2391,7 +2420,7 @@ async function runShatterChain(heavenIdx, gen, srcName) {
     }
   }
   renderZones();
-  log('danger', `☁️ ${srcName}：另外两块区域已全部破碎 —— 本局仅剩「${heavenName}」可放牌，终局也只按这一个区域判定。`);
+  log('danger', `☁️ 另外两块区域已破碎 —— 本局只剩「${heavenName}」`);
 }
 
 /** 启动「天界降临」链条（同步返回，演出在后台播）。单例：已有链条在播时复用、不重复启动。⚠️ 收尾按「还是同一条 Promise」判定（`shatterChain === p`）——上一局链条若在 restart 之后才收尾，也不会误清新一局的链条。 */
@@ -2492,7 +2521,7 @@ async function locationRevealStage() {
   // 揭晓时刻 = 该地形的「出现时」：结算生成效果；若揭晓的是「天界」，这里同时启动「摧毁另外两块地形」的演出链
   runLocAppearEffect(idx, target);
   // 揭晓出的地形若带 `extraRound`（虚假之月）→ 本局总回合数当场变 7（顶栏「/ 7」+ 一条日志）
-  syncRoundTotal('地形揭晓');
+  syncRoundTotal();
   // 把「天界降临」整条摧毁演出等完再回上层 —— 否则回合开始效果 / 抽牌会插进节奏里
   await awaitShatterChain();
 }
@@ -2523,7 +2552,7 @@ async function locXformTurnEffects() {
     // 变形 = 该地形在本区「出现」→ 立刻结算其「出现时」效果（如变成虹龙洞 → 双方各生成 1 张石块）；随机候选含「天界」时同样会摧毁另外两块地形（演出在此等完）
     runLocAppearEffect(j, target);
     // 随机变形可能变成「虚假之月」→ 本局总回合数当场变 7（反之变走则退回 6）
-    syncRoundTotal('地形定时变形');
+    syncRoundTotal();
     await awaitShatterChain(); // 等「天界降临」的摧毁演出播完再继续（场上「回合开始」效果在它之后）
     changed = true;
   }
@@ -2550,9 +2579,84 @@ function randomLocCandidates(locIdx) {
    ⚠️ **为什么不复用 `xform` + `xf:'random'`**：`def.xf` 是**地形 id 字段**，`js/ai.js` 的 `case 'xform'` 会把它当地形 id 查表投影，塞 `'random'`
    会让那条投影拿到不存在的地形 id。⚠️ 在「守矢神社」里翻开（或 `retrigger` 再触发）会被**执行两次** ⇒ 一次揭示连换两次地形。 */
 
-// 阶段 ①：回合开始 —— 地形揭晓 → 地形定时变形 → 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置；本阶段为 async（「天界」摧毁链要等播完）
+/* ==================== 每回合「回合开始」演出（阶段 ① 最开头，约 2.0s）====================
+   触发：`roundStartStage` 的**第一件事**——每回合（含第 1 回合）先播这段全屏演出，**演完才继续**加倍生效 / 地形揭晓 /
+   回合开始效果 / 能量结算与抽牌。内容＝大字「第 N 回合」＋进度点（共 `roundsTotal()` 枚、前 `state.turn` 枚金色），
+   一眼看出「现在是第几回合、本局还剩几回合」；能量与总回合数仍看顶栏 HUD，演出里不复述。
+   ⚠️ 开演前先 `waitFieldFxDone()` 等上一回合遗留的场上演出（±N 气泡 / 分崩离析 / 弃牌揭示 / 翻牌换面…）播完，
+   否则全屏遮幕会把这些还没播完的演出吞掉。退出段（末段上浮淡出）刻意放慢，见 CSS 的 `roundNumSlam` / `roundRevealFade`。
+   跳过：复盘（`replayMode.mode === 'review'`）、开发调试（空牌库模式）与**不在战斗界面**（`gameScreenHidden()`：页面底部启动的
+   `restart()` 会在主页面背后先跑一局初始化，那局没人看）都不播；无 Web Animations（jsdom 冒烟环境）整段跳过、不加延时。
+   元素全放 body 悬浮层（`.round-reveal`，pointer-events:none）——不挡操作、也不受盘面重渲染影响；收尾用 `setTimeout`（不依赖 `animation.finished`）。
+   形态、样式类名与关键帧见 `docs/动画演出与间隔.md` §6「每回合「回合开始」演出」。 */
+const ROUND_START_ANIM_MS = 2000; // 演出总时长；与 style.css 的 round* 关键帧时长对齐，改时长要两边一起改
+/** 收掉残留的「回合开始」演出层（上一次被「重新开始」打断时留下）。 */
+function clearRoundReveal() {
+  const el = document.querySelector('.round-reveal');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+async function playRoundStartReveal() {
+  // 防御：先收残留——它必须排在下面的等待**之前**，否则上一段演出会把自己等进去
+  clearRoundReveal();
+  if (isDevMode() || gameScreenHidden()) return;
+  if (replayMode && replayMode.mode === 'review') return;
+  await waitFieldFxDone(); // 等上一回合遗留的场上演出播完再开演
+  clearRoundReveal();      // 等待期间可能又起了一段（重新开局），再收一次，保证同时只有一段
+  const turn = state.turn;
+  const total = roundsTotal();
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'round-reveal';
+    const veil = document.createElement('div');
+    veil.className = 'round-reveal-veil';
+    wrap.appendChild(veil);
+    const sweep = document.createElement('div');
+    sweep.className = 'round-reveal-sweep';
+    wrap.appendChild(sweep);
+    const inner = document.createElement('div');
+    inner.className = 'round-reveal-inner';
+    const ring = document.createElement('div');
+    ring.className = 'round-reveal-ring';
+    inner.appendChild(ring);
+    const num = document.createElement('div');
+    num.className = 'round-reveal-num';
+    num.innerHTML = `第 <span class="round-reveal-n">${turn}</span> 回合`;
+    inner.appendChild(num);
+    const pips = document.createElement('div');
+    pips.className = 'round-reveal-pips';
+    for (let i = 1; i <= total; i++) {
+      const pip = document.createElement('span');
+      if (i <= turn) pip.className = 'on';
+      pip.style.animationDelay = (0.5 + (i - 1) * 0.09).toFixed(2) + 's'; // 进度点逐枚点亮：0.5s 起、逐枚错开 90ms（末枚约 1.36s 亮完，须落在 70%＝1.40s 的淡出之前）
+      pips.appendChild(pip);
+    }
+    inner.appendChild(pips);
+    wrap.appendChild(inner);
+    document.body.appendChild(wrap);
+
+    if (typeof wrap.animate !== 'function') { // 无 Web Animations（jsdom / 老浏览器）：跳过演出，不给自动化测试加延时
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      resolve();
+      return;
+    }
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      resolve();
+    };
+    // 收尾按 ROUND_START_ANIM_MS 定时清理并 resolve（不依赖 animation.finished）：被重新开局打断也不卡流程
+    setTimeout(finish, ROUND_START_ANIM_MS);
+  });
+}
+
+// 阶段 ①：回合开始 —— 回合开始演出（第 N 回合，约 2s）→ 地形揭晓 → 地形定时变形 → 回合开始效果 → 能量结算 + 抽牌 → 回合状态重置；本阶段为 async（「天界」摧毁链要等播完）
 async function roundStartStage(gen) {
   const st = state;
+  // 本阶段最开头：先播「第 N 回合」演出（演完才往下结算；复盘 / 开发调试由 playRoundStartReveal 自行跳过）
+  await playRoundStartReveal();
+  if (gen !== state.gen) return;
   // ①-0 之前：上一回合宣布的加倍在这里正式生效（结算值当场抬到新值；本回合结束前撤退仍按加倍前的值）
   if (beginRoundStakes() > 0) {
     log('snap', `⚡ 加倍生效：本局结算 ${st.stakes} 立方 —— 本回合结束前撤退仍按 ${retreatStakes()} 立方结算。`);
@@ -2563,7 +2667,7 @@ async function roundStartStage(gen) {
   await locXformTurnEffects(); // ①-0b 地形定时变形（秘封俱乐部第 5 回合开始时变随机地形 + 结算其「出现时」）
   if (gen !== state.gen) return;
   // 防御性再同步一次本局总回合数：地形变化的各条路径已各自调用 syncRoundTotal，这里保证漏调的路径也能在回合边界补上那一条日志
-  syncRoundTotal('回合开始');
+  syncRoundTotal();
   runTurnStartEffects(); // ①-1 全场「回合开始」效果（按放置队列序）
   // ①-1 里的卡牌若用 `xform`/`fx` 把本区变成「天界」，等摧毁演出播完再抽牌/结算能量
   await awaitShatterChain();
@@ -2594,7 +2698,7 @@ async function playRound(gen) {
   if (gen !== state.gen) return;
   const st = state;
   // 阶段 ① 为 await —— ①-0 若揭到「天界」，会在这里等整条摧毁演出播完
-  await roundStartStage(gen); // 阶段 ①：回合开始（回合开始效果 / 能量结算 / 抽牌）
+  await roundStartStage(gen); // 阶段 ①：回合开始（回合开始演出 / 回合开始效果 / 能量结算 / 抽牌）
   if (gen !== state.gen) return;
 
   // 阶段 ②：玩家放置与移动（出牌 / 跳过 / 认输 / 双倍 / 移动 / 重置均在此阶段触发）
@@ -2667,7 +2771,7 @@ async function playRound(gen) {
       // AI 抛异常**不再打死整局**（否则页面会无声卡死，只能开控制台才发现）：打印完整错误，本回合按"它已经放下的牌"继续。
       // ⚠️ 不做事后回滚 —— 异常可能发生在落牌中途，这一回合的盘面可能不完整，但整局能正常打完。
       console.error('[对手AI] 思考出错，本回合按已放下的牌继续：', err);
-      log('danger', '⚠️ 对手思考出错，本回合按它已放下的牌继续（完整错误见浏览器控制台）。');
+      log('danger', '⚠️ 对手思考出错 → 按它已放下的牌继续（错误见控制台）');
       setStatus('对手思考出错 —— 本局会继续，完整错误见浏览器控制台。');
     } finally {
       Math.random = realRandom;
@@ -2760,7 +2864,7 @@ function uiMoveFly(cardId) {
   }
   if (st.flyMoved.has(cardId)) { setStatus('这张卡本回合已经移动过一次。'); return; }
   st.moveCardId = cardId;
-  setStatus('已选中移动目标：点另一个区域完成移动（每回合一次；再点该卡取消）。');
+  setStatus('已选中移动目标：点另一个区域完成移动（每回合一次）。');
   renderZones();
 }
 
@@ -2886,7 +2990,7 @@ function uiSnap() {
   if (st.phase !== 'play' && st.phase !== 'busy') return;
   if (st.snapUsed.p) { setStatus('本局你已经加倍过了 —— 整局只能加倍一次。'); return; }
   announceSnap('p');
-  log('snap', `⚡ 你加倍！本局结算升至 ${st.stakes} 立方（下回合生效；本回合与下回合内谁撤退都按 ${retreatStakes()} 立方结算）。`);
+  log('snap', `⚡ 你加倍！本局结算升至 ${st.stakes} 立方（下回合生效；撤退按 ${retreatStakes()} 结算）`);
   setStatus(`你加倍！本局结算 ${st.stakes} 立方（下回合生效）。`);
   renderAll();
   // 联机：加倍**当场**告诉对手（对手要在本回合内决定要不要撤退，等到回合末的提交包就晚了）
@@ -3469,7 +3573,7 @@ function vanishSpell(card) {
   dequeueField(card); // 离开场上：后续时机效果（fx）不再结算它
   recordSpellExile(card, locName); // 用过的法术 → 牌本体进归属方的「放逐池」（不是被摧毁，不进摧毁池）
   playSpellVanish(card); // 消散演出（克隆卡面上浮淡出，放 body 悬浮层不受重渲染影响）
-  log('sys', `🪄 ${card.side === 'p' ? '你' : '对手'}的法术「${card.def.n}」揭示结算完毕，自行消散：让出「${locName}」的 1 个格位（不属于被摧毁）。`);
+  log('sys', `🪄 ${card.side === 'p' ? '你' : '对手'}的法术「${card.def.n}」消散 → 让出「${locName}」1 个格位`);
   return true;
 }
 
@@ -3598,17 +3702,23 @@ function flushPendingDriftFly() {
 
 // 区域免摧毁（地形字段 def.prot，如「睡鼠神祠」；卡级持续 def.prot，如「蕾蒂」）：本区域一旦免摧毁，该区域**双方**所有在场卡牌都无法
 // 被摧毁（dw / dwh / 回合末 purge 等一律失效），被保护卡不离场、故 surv / phx 也不触发。卡级防护按源卡“当前所在区域”实时判定。
-function locNoDestroy(locIdx) {
-  if (locDef(locIdx).prot) return true; // 地形级免摧毁（如睡鼠神祠）——地形效果，不受失去文字影响
+function locNoDestroy(locIdx) { return !!noDestroySrc(locIdx); }
+/* 免摧毁的来源名（空串 = 本区不免摧毁）：地形级 → 地形名（睡鼠神祠）；卡级 → 卡名（蕾蒂）。 */
+function noDestroySrc(locIdx) {
+  if (locDef(locIdx).prot) return locDef(locIdx).n; // 地形级免摧毁 —— 地形效果，不受失去文字影响
   for (const s of ['p', 'a']) {
     for (const c of state.players[s].zones[locIdx]) {
       if (!c.revealed || !c.def.prot) continue;
       // 失去卡牌文字（封印 ∪ 静海）——卡级 prot（蕾蒂）的文字也被抹除 ⇒ 不再提供区域免摧毁
       if (cardMuted(c)) { muteSkipLog(c, '「区域免摧毁」（prot）'); continue; }
-      return true;
+      return c.def.n;
     }
   }
-  return false;
+  return '';
+}
+/* 免摧毁拦截的短日志（各摧毁分支共用；同模板只此一处）。 */
+function logNoDestroy(cls, srcName, locIdx, tail) {
+  log(cls, `✦ ${srcName}：本区免摧毁（${noDestroySrc(locIdx)}）→ ${tail || '跳过'}`);
 }
 
 /* ==================== 区域「免减攻」（地形字段 `noDown`，现仅「蓬莱药局」）====================
@@ -3669,12 +3779,12 @@ function muteSkipLog(card, kindTxt) {
   if (!card || !card.def || card.muteNoted) return false;
   card.muteNoted = true;
   if (card.muteP) {
-    log('sys', `☯️ 「${card.def.n}」已被「封印」——永久失去卡牌文字 → ${kindTxt}不发动（本局首次提示；回手、复活、换边、变身、离开静海都不会恢复）。`);
+    log('sys', `☯️ 「${card.def.n}」已被封印 → ${kindTxt}不发动`);
     return true;
   }
   const j = fieldLocOf(card);
   const where = j >= 0 ? `「${locDef(j).n}」` : '场上';
-  log('sys', `🌊 「${card.def.n}」在${where}失去了卡牌文字 → ${kindTxt}不发动（本局首次提示；该牌离开静海后文本会恢复）。`);
+  log('sys', `🌊 「${card.def.n}」在${where}失去卡牌文字 → ${kindTxt}不发动`);
   return true;
 }
 /* 放大视图的「失去文字」提示行（区分两个来源；返回 '' = 没失去文字）。`locIdx` 传该牌当前所在区域，手牌 / 牌池传 -1。 */
@@ -3719,7 +3829,7 @@ function revealSkipLog(card) {
   card.nrNoted = true;
   const j = fieldLocOf(card);
   const where = j >= 0 ? `「${locDef(j).n}」` : '场上';
-  log('sys', `🌑 「${card.def.n}」在${where}无法触发揭示 → 本次揭示效果不发动（本局首次提示；被拦下的这一次不补结算，离开法界后此后的揭示照常发动）。`);
+  log('sys', `🌑 「${card.def.n}」在${where}揭示被封锁`);
   return true;
 }
 /* 放大视图的「揭示被封锁」提示行（返回 '' = 没被封锁）。`locIdx` 传该牌当前所在区域，手牌 / 牌池传 -1。 */
@@ -3744,7 +3854,7 @@ function indestructibleBlock(card, srcName) {
   if (!card || !card.def || !card.def.ind) return false;
   // 失去文字 ⇒ `ind` 已被抹除：不拦、照常摧毁（“判定结束、不改打别的”不再适用）
   if (cardMuted(card)) { muteSkipLog(card, '「自身不可摧毁」（ind）'); return false; }
-  log('sys', `✦ ${srcName} 的摧毁判定落在「${card.def.n}」上，但它自身不可摧毁（无法被摧毁）→ 本次摧毁失败、判定结束（不改打其他牌）。`);
+  log('sys', `✦ ${srcName}：摧毁判定落在「${card.def.n}」上，但它自身不可摧毁 → 本次摧毁失败`);
   return true;
 }
 
@@ -3757,12 +3867,12 @@ function surviveDestroy(card) {
   // 区域「免减攻」（蓬莱药局）——替代降攻被拦下 ⇒ **不离场、也不降攻**（两个防护叠加）
   const j0 = fieldLocOf(card);
   if (j0 >= 0 && locNoDown(j0)) {
-    log('danger', `💥 「${card.def.n}」被摧毁时触发了防摧毁：没有被摧毁；且本区域「${locDef(j0).n}」免减攻，替代的 −${surv} 战力也被一并拦下（战力不变，现 ${cardPowerIn(j0, card)}）。`);
+    log('danger', `💥 「${card.def.n}」防摧毁：未离场，且「${locDef(j0).n}」免减攻 → 不降战力（现 ${cardPowerIn(j0, card)}）`);
     return true;
   }
   applyPermBuff(card, -surv, null, '防摧毁'); // 永久 -N（红色 -N 演出）
   const locIdx = fieldLocOf(card);
-  log('danger', `💥 「${card.def.n}」被摧毁时触发了防摧毁：没有被摧毁，取而代之永久降低 ${surv} 点战力（现 ${locIdx >= 0 ? cardPowerIn(locIdx, card) : cardPower(card)}）。`);
+  log('danger', `💥 「${card.def.n}」防摧毁：未离场，永久 −${surv} 战力（现 ${locIdx >= 0 ? cardPowerIn(locIdx, card) : cardPower(card)}）`);
   return true;
 }
 
@@ -3910,7 +4020,7 @@ async function applyGatherReveal(side, card) {
   const group = gw && gw.group;
   const members = gatherMembers(group);
   if (!members.length) {
-    log(side, `✦ ${card.def.n}：卡池里没有可生成的成员（阵营「${GROUPS[group] || group || '?'}」），无事发生。`);
+    log(side, `✦ ${card.def.n}：本阵营没有可生成的成员`);
     return;
   }
   const picked = shuffle(members.slice()).slice(0, 3); // 随机排列：每区一张、三张互不相同
@@ -4004,7 +4114,7 @@ async function applyReviveDiscardReveal(side, card) {
   const cands = all.filter((c) => c && c.def && !c.def.spell);
   const spellN = all.length - cands.length;
   if (!cands.length) {
-    log(side, `✦ ${card.def.n}：${who}的弃牌池里只有 ${spellN} 张法术（法术不参与复活），本次无事发生。`);
+    log(side, `✦ ${card.def.n}：${who}的弃牌池只有法术（不参与复活）→ 跳过`);
     return;
   }
   const order = shuffle(cands.slice());
@@ -4053,7 +4163,7 @@ function retriggerTargets(side, locIdx, card) {
 function retriggerOne(card) {
   const j = fieldLocOf(card);
   if (j < 0) {
-    log('sys', `✦ 「${card.def.n}」此刻已不在场上（被摧毁或回到了手牌），本次不再触发它的揭示。`);
+    log('sys', `✦ 「${card.def.n}」已不在场上 → 不再触发揭示`);
     return false;
   }
   applyEffect(card.side, j, card);
@@ -4066,7 +4176,7 @@ function retriggerOne(card) {
 async function retriggerOneStaged(card) {
   const j = fieldLocOf(card);
   if (j < 0) {
-    log('sys', `✦ 「${card.def.n}」此刻已不在场上（被摧毁或回到了手牌），本次不再触发它的揭示。`);
+    log('sys', `✦ 「${card.def.n}」已不在场上 → 不再触发揭示`);
     return false;
   }
   await resolveRevealInZone(card.side, j, card); // forceRepeat 省略 ⇒ 实时读该区 repeatReveal
@@ -4184,10 +4294,10 @@ async function applyRetriggerReveal(side, card) {
   if (locIdx < 0) return;
   const targets = retriggerTargets(side, locIdx, card);
   if (!targets.length) {
-    log(side, `✦ ${card.def.n}：本区没有可再触发揭示的其他己方已翻开卡牌（不含自己、法术与同为该效果的卡），本次无事发生。`);
+    log(side, `✦ ${card.def.n}：本区没有可再触发揭示的其他己方卡牌`);
     return;
   }
-  log(side, `✦ ${card.def.n}：${side === 'p' ? '你' : '对手'}在本区「${locDef(locIdx).n}」的 ${targets.length} 张己方卡牌，其「揭示」将各再触发一次（逐张结算，每张间隔 0.5s）—— ${targets.map((c) => `「${c.def.n}」`).join('')}`);
+  log(side, `✦ ${card.def.n}：${side === 'p' ? '你' : '对手'}在本区「${locDef(locIdx).n}」的 ${targets.length} 张己方卡牌将各再触发一次揭示 —— ${targets.map((c) => `「${c.def.n}」`).join('')}`);
   for (const c of targets) {
     if (gen !== state.gen) return;
     await retriggerOneStaged(c); // 分步版：被再触发的牌若是 shift/gather/reviveDiscard 也保留其间隔
@@ -4270,13 +4380,13 @@ function delCopyCore(side, locIdx, card) {
   const def = card.def;
   const zone = st.players[side].zones[locIdx];
   if (locNoDestroy(locIdx)) {
-    log(side, `✦ ${def.n} 想摧毁本区域你的一张卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等）→ 摧毁失败，不生成复制体。`);
+    logNoDestroy(side, def.n, locIdx, '摧毁失败，不生成复制体');
     return [];
   }
   // 候选＝本区域自己一侧、已翻开，排除自己 / 法术 / un 占位卡（含落场 token）
   const cands = zone.filter((c) => c !== card && c.revealed && !c.def.un && !c.def.spell);
   if (!cands.length) {
-    log(side, `✦ ${def.n} 想摧毁本区域你的一张卡牌，但本区没有可摧毁的其他己方已翻开卡牌（不含自己、法术与暗牌），无事发生。`);
+    log(side, `✦ ${def.n}：本区没有其他可摧毁的己方已翻开卡牌`);
     return [];
   }
   const target = cands[Math.floor(rng() * cands.length)];
@@ -4439,11 +4549,11 @@ function applyEffect(side, locIdx, card, spec) {
     }
     case 'dw': {
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
-      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      if (locNoDestroy(locIdx)) { logNoDestroy(side, def.n, locIdx); break; }
       // 只能以“已翻开”的对方卡牌为目标：暗牌不可被提前摧毁；un 占位卡与法术也不可选（法术马上自行消散）。
       // ⚠️ ind 卡（佛体金刚石）**照常参与判定**——判定落在它身上＝摧毁失败、判定结束，不会改打下一张最弱的。
       const vis = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
-      if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区没有可摧毁的已翻开卡牌（暗牌与法术不算）。`); break; }
+      if (vis.length === 0) { log(side, `✦ ${def.n}：对方此区没有可摧毁的已翻开卡牌`); break; }
       let minP = Infinity, target = null;
       for (const c of vis) {
         const p = cardPowerIn(locIdx, c);
@@ -4464,8 +4574,8 @@ function applyEffect(side, locIdx, card, spec) {
       // purge 的“并列全删”不同）。候选同 dw/dwh（已翻开、排除 un/法术）；本区免摧毁时整条失效；目标带 phx/surv 按各自机制处理。
       // ⚠️ 双方混比 ⇒ **可能摧毁己方自己的卡**；ind 卡照常参与抽取，抽中它＝摧毁失败、判定结束（不再打并列的第二张）。
       const both = mine.concat(theirs).filter((c) => c.revealed && !c.def.un && !c.def.spell);
-      if (both.length === 0) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域没有可摧毁的已翻开卡牌（暗牌与法术不算）。`); break; }
-      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      if (both.length === 0) { log(side, `✦ ${def.n}：本区没有可摧毁的已翻开卡牌`); break; }
+      if (locNoDestroy(locIdx)) { logNoDestroy(side, def.n, locIdx); break; }
       let minBoth = Infinity;
       for (const c of both) minBoth = Math.min(minBoth, cardPowerIn(locIdx, c));
       const lowPool = both.filter((c) => cardPowerIn(locIdx, c) === minBoth);
@@ -4490,9 +4600,9 @@ function applyEffect(side, locIdx, card, spec) {
       // `surv`（不离场、改永久降战力）按各自机制结算且都**不算被摧毁**；真被摧毁才 `recordDestroy` 进摧毁池（并喂纯狐 `costDown`）。
       // 候选为空（本区没有战力低于自己的其他己方已翻开卡）⇒ 无事发生、只记日志。
       const selfP = cardPowerIn(locIdx, card);
-      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁己方卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      if (locNoDestroy(locIdx)) { logNoDestroy(side, def.n, locIdx); break; }
       const weaker = mine.filter((c) => c !== card && c.revealed && !c.def.un && !c.def.spell && cardPowerIn(locIdx, c) < selfP);
-      if (weaker.length === 0) { log(side, `✦ ${def.n} 想摧毁一张战力低于自己的己方卡牌，但本区没有这样的已翻开卡牌（暗牌、法术与战力不低于它 ${selfP} 的卡都不算），无事发生。`); break; }
+      if (weaker.length === 0) { log(side, `✦ ${def.n}：本区没有战力低于它（${selfP}）的己方已翻开卡牌`); break; }
       const wPick = weaker[Math.floor(rng() * weaker.length)];
       const wP = cardPowerIn(locIdx, wPick);
       if (indestructibleBlock(wPick, def.n)) break; // ind → 摧毁失败、判定结束（不改打其他牌）
@@ -4502,7 +4612,7 @@ function applyEffect(side, locIdx, card, spec) {
       playShatter(wPick);
       mine.splice(mine.indexOf(wPick), 1);
       dequeueField(wPick);
-      log('danger', `✦ ${def.n} 摧毁了己方「${wPick.def.n}」（威力 ${wP}；本区战力低于 ${selfP} 的己方已翻开卡共 ${weaker.length} 张，随机选中这一张）`);
+      log('danger', `✦ ${def.n} 摧毁了己方「${wPick.def.n}」（威力 ${wP}；候选 ${weaker.length} 张中随机挑中）`);
       break;
     }
     case 'dwc': {
@@ -4540,11 +4650,11 @@ function applyEffect(side, locIdx, card, spec) {
       }
       if (!goneAll) {
         const why = zoneSkipped.length
-          ? `（「${zoneSkipped.join('」「')}」存在免摧毁效果、整区跳过；其余区域没有符合条件的已翻开卡牌，或都被防护/替代机制拦下）`
-          : '（双方场上没有符合条件的已翻开卡牌，或都被防护/替代机制拦下）';
-        log(side, `✦ ${def.n} 想摧毁双方场上所有 ${wantCost} 费卡牌，但没有任何一张真正离场${why}。`);
+          ? `（「${zoneSkipped.join('」「')}」免摧毁、整区跳过）`
+          : '（没有符合条件的已翻开卡牌）';
+        log(side, `✦ ${def.n}：${wantCost} 费卡摧毁落空${why}`);
       } else if (zoneSkipped.length) {
-        log('sys', `✦ ${def.n}：本次共摧毁 ${goneAll} 张 ${wantCost} 费卡牌；「${zoneSkipped.join('」「')}」存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），该区整区跳过。`);
+        log('sys', `✦ ${def.n}：摧毁 ${goneAll} 张 ${wantCost} 费卡牌（「${zoneSkipped.join('」「')}」免摧毁、跳过）`);
       }
       break;
     }
@@ -4608,7 +4718,7 @@ function applyEffect(side, locIdx, card, spec) {
         }
         log(side, placedM
           ? `✦ ${def.n}：${side === 'p' ? '你' : '对手'}方在 ${doneM.length} 个区域各添加「${tkM.n}」—— ${doneM.join('、')}${skipM.length ? `（跳过：${skipM.join('、')}）` : ''}`
-          : `✦ ${def.n} 想为己方每个区域添加「${tkM.n}」，但三个区域都放不下或未开放，未能落下。`);
+          : `✦ ${def.n}：三个区域都放不下「${tkM.n}」`);
       }
       break;
     }
@@ -4641,7 +4751,7 @@ function applyEffect(side, locIdx, card, spec) {
       }
       log(side, hit.length
         ? `✦ ${def.n}：${tb.own ? '己方' : '场上'}「${tkLabel}」共 ${hit.length} 张各 ${add > 0 ? '+' : '−'}${Math.abs(add)} 战力 → ${hit.join('、')}`
-        : `✦ ${def.n}：${tb.own ? '己方' : '场上'}没有已翻开的「${tkLabel}」，这一步无事发生。`);
+        : `✦ ${def.n}：${tb.own ? '己方' : '场上'}没有已翻开的「${tkLabel}」`);
       break;
     }
     case 'clone': {
@@ -4672,7 +4782,7 @@ function applyEffect(side, locIdx, card, spec) {
           }
         }
         log(side, added
-          ? `✦ ${def.n}：向另外两个区域自己一侧各添加 ${cnt} 张「${tk.n}」（分身快照战力=${snap}${added < cnt * zones ? '，部分区域放不下' : ''}）`
+          ? `✦ ${def.n}：向另外两个区域自己一侧各添加 ${cnt} 张「${tk.n}」（战力 ${snap}${added < cnt * zones ? '，部分区域放不下' : ''}）`
           : `✦ ${def.n} 想生成「${tk.n}」，但另外两个区域自己一侧都放不下或未开放。`);
       }
       break;
@@ -4695,7 +4805,7 @@ function applyEffect(side, locIdx, card, spec) {
       const group = gw && gw.group;
       const members = gatherMembers(group);
       if (!members.length) {
-        log(side, `✦ ${txt}：卡池里没有可生成的成员（阵营「${GROUPS[group] || group || '?'}」），无事发生。`);
+        log(side, `✦ ${txt}：本阵营没有可生成的成员`);
         break;
       }
       const picked = shuffle(members.slice()).slice(0, 3);
@@ -4726,7 +4836,7 @@ function applyEffect(side, locIdx, card, spec) {
       // 换边后归属对方（card.side 同步），此后作为对方已翻开卡参与结算；场上放置顺序不变。
       const dst = st.players[other].zones[locIdx];
       if (sideRoom(other, locIdx) < occOf(card)) {
-        log('danger', `✦ ${def.n} 想换边到对方一侧，但对方该区已放满，换边失败（仍留在自己一侧）。`);
+        log('danger', `✦ ${def.n}：对方该区已放满 → 换边失败`);
         break;
       }
       const src = st.players[side].zones[locIdx];
@@ -4747,7 +4857,7 @@ function applyEffect(side, locIdx, card, spec) {
       const hand = st.players[other].hand;
       // 法术不作为变身目标（变身后会立刻消散），候选池里排除
       const cands = hand.filter((c) => c && c.def && !c.def.spell);
-      if (!cands.length) { log(side, `✦ ${def.n} 想变身，但对方手牌里没有可作目标的卡（手牌为空或只有法术）。`); break; }
+      if (!cands.length) { log(side, `✦ ${def.n}：对方手牌没有可作目标的卡`); break; }
       const oldN = def.n;
       const pick = cands[Math.floor(rng() * cands.length)];
       // 大体积目标限制：随机目标是占多格的大体积卡（如萃香 occ:4）时，需本区域 max 恰为该占格数、且己方该区
@@ -4757,7 +4867,7 @@ function applyEffect(side, locIdx, card, spec) {
         const legal = locSideMax(side, locIdx) === occOf(pick)
           && ownZone.length === 1 && ownZone[0] === card;
         if (!legal) {
-          log('danger', `✦ ${def.n} 想变身成「${pick.def.n}」（占 ${occOf(pick)} 格），但本区域不满足条件（需该侧可用格数 = ${occOf(pick)} 且己方该区只有 ${def.n} 这一张卡），变身失败、保持原样。`);
+          log('danger', `✦ ${def.n} 变身「${pick.def.n}」（占 ${occOf(pick)} 格）失败：本区放不下大体积卡`);
           break;
         }
       }
@@ -4781,7 +4891,7 @@ function applyEffect(side, locIdx, card, spec) {
       }
       const own = st.players[side].zones[locIdx].filter((c) => c !== card && c.revealed && !c.def.un && !c.def.spell);
       if (own.length === 0) {
-        log(side, `✦ ${def.n} 想换边己方最低的卡，但本区没有其他已翻开的己方卡（法术不算）。`);
+        log(side, `✦ ${def.n}：本区没有其他已翻开的己方卡 → 换边失败`);
         break;
       }
       let minP = Infinity, poolT = [];
@@ -4805,7 +4915,7 @@ function applyEffect(side, locIdx, card, spec) {
       const target = findLocDef(fx.xf);
       if (!target) break;
       if (locShattered(locIdx)) {
-        log('danger', `✦ ${def.n} 想把本区变成「${target.n}」，但本区域已被摧毁（已破碎）、不能再改变地形，变形失败。`);
+        log('danger', `✦ ${def.n}：本区已破碎，不能变成「${target.n}」`);
         break;
       }
       const over = ['p', 'a'].some((s2) => sideUsed(s2, locIdx) > target.max);
@@ -4818,7 +4928,7 @@ function applyEffect(side, locIdx, card, spec) {
       // 区域变形＝“该地形在本区出现”：立刻结算其「出现时」效果（与地形揭晓同一收口）；本区原本已是目标地形则不重复
       if (prevLoc !== target) runLocAppearEffect(locIdx, target);
       // 变成/变离「虚假之月」→ 本局总回合数在 7/6 间切换（进入第 7 回合后由 roundsTotal() 锁定，中途变掉不影响本局）
-      syncRoundTotal('卡牌区域变形');
+      syncRoundTotal();
       break;
     }
     case 'xformR': {
@@ -4826,7 +4936,7 @@ function applyEffect(side, locIdx, card, spec) {
       // （POOL 除自身、允许与另两列重复、EXTRA 不入）；**不做上限防御**（与 case 'xform' 的“超限则失败”刻意相反）；已破碎的列跳过；
       // 抽到「天界」启动摧毁链、抽到「虚假之月」→ 总回合数当场变 7。
       if (locShattered(locIdx)) {
-        log('danger', `✦ ${def.n} 想把本区变成随机另一个地形，但本区域已被摧毁（已破碎）、不能再改变地形，变形失败。`);
+        log('danger', `✦ ${def.n}：本区已破碎，不能变成随机地形`);
         break;
       }
       const candsR = randomLocCandidates(locIdx);
@@ -4841,7 +4951,7 @@ function applyEffect(side, locIdx, card, spec) {
       refreshLocHeader(locIdx); // 列名/图标/效果文案/配色即时更新
       log('danger', `✦ ${def.n} 掷出了随机地形 —— 「${prevR ? prevR.n : '原地形'}」变成了「${targetR.icon} ${targetR.n}」！`);
       runLocAppearEffect(locIdx, targetR);
-      syncRoundTotal('卡牌区域随机变形'); // 可能变出「虚假之月」→ 总回合数当场变 7
+      syncRoundTotal(); // 可能变出「虚假之月」→ 总回合数当场变 7
       break;
     }
     case 'roam': {
@@ -4849,7 +4959,7 @@ function applyEffect(side, locIdx, card, spec) {
       // ②该侧空余 ≥ 自身占格数；两区都不可达则失败留原地。移动不改归属/揭示状态/放置顺序队列（同 mv/fly/shift）；核心与 gust 共用。
       const dst = moveCardToRandomZone(card);
       if (dst < 0) {
-        log(side, `✦ ${txt} 想移动到别的区域，但另外两个区域都放不下或未开放，留在原地。`);
+        log(side, `✦ ${txt}：另外两个区域都放不下 → 留在原地`);
         break;
       }
       log(side, `✦ ${txt} 飘到了「${st.locs[dst].def.n}」（现 ${cardPowerIn(dst, card)}）。`);
@@ -4858,7 +4968,7 @@ function applyEffect(side, locIdx, card, spec) {
     case 'mv': {
       // 揭示：把本区“对方战力最低”的已翻开卡移到另外两区随机一处；候选区须该侧未满且已开放，全不可达则失败
       const vis = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
-      if (vis.length === 0) { log(side, `✦ ${def.n} 想移走对方卡牌，但对方本区没有可移动的已翻开卡牌（暗牌与法术不算）。`); break; }
+      if (vis.length === 0) { log(side, `✦ ${def.n}：对方此区没有可移动的已翻开卡牌`); break; }
       let minP = Infinity, target = null;
       for (const c of vis) {
         const p = cardPowerIn(locIdx, c);
@@ -4900,7 +5010,7 @@ function applyEffect(side, locIdx, card, spec) {
         cands.push(c);
       }
       const whatTxt = onlyOngoing ? '包含持续效果的' : '';
-      if (!cands.length) { log(side, `✦ ${def.n} 想封印${whoTxt}${whatTxt}卡牌，但本区没有符合条件的已翻开卡牌（暗牌与法术不算）。`); break; }
+      if (!cands.length) { log(side, `✦ ${def.n}：本区没有符合条件的已翻开卡牌 → 封印落空`); break; }
       // 取牌：`n:'all'` ＝全部；否则取 n 张，并列随机（先 shuffle 再按实时战力稳定排序取前 n，同 discard 的 maxCost）
       let targets;
       if (all) {
@@ -4917,9 +5027,9 @@ function applyEffect(side, locIdx, card, spec) {
       for (const t of targets) {
         const already = cardSealed(t);
         t.muteP = true; // 永久：写在卡实例上——回手 / 复活 / 换边 / 变身 / 洗回牌库都保持，没有任何收尾代码会清它
-        log('danger', `☯️ ${def.n} 封印了${t.side === side ? '己方' : '对方'}「${t.def.n}」（${pickTxt}威力 ${cardPowerIn(locIdx, t)}）→ 它永久失去卡牌文字：揭示 / 持续 / 时机 / 防护效果一律不发动。${already ? '⚠️ 它本就已被封印，本次再抹一次、无额外变化。' : ''}`);
+        log('danger', `☯️ ${def.n} 封印了${t.side === side ? '己方' : '对方'}「${t.def.n}」（${pickTxt}威力 ${cardPowerIn(locIdx, t)}）→ 效果永久不发动${already ? '（本就已封印，无额外变化）' : ''}`);
       }
-      if (targets.length > 1) log(side, `✦ ${def.n}：本区一次性封印 ${targets.length} 张${whoTxt}${whatTxt}已翻开卡牌（同一时机全封，无逐张停顿）。`);
+      if (targets.length > 1) log(side, `✦ ${def.n}：一次性封印 ${targets.length} 张${whoTxt}${whatTxt}已翻开卡牌`);
       break;
     }
     case 'give': {
@@ -4934,7 +5044,7 @@ function applyEffect(side, locIdx, card, spec) {
         const want = gv.n || 1;
         const cands = gv.pool.map((k) => TOKENS[k]).filter((d) => !!d);
         if (!cands.length) {
-          log('sys', `✦ ${def.n}：神宝池里没有可加入的卡（数据缺失），本次无事发生。`);
+          log('sys', `✦ ${def.n}：神宝池为空 → 跳过`);
           break;
         }
         const picked = shuffle(cands.slice()).slice(0, Math.min(want, cands.length));
@@ -4985,7 +5095,7 @@ function applyEffect(side, locIdx, card, spec) {
       const si = fx.shuffleIn;
       const inDef = si && findCardDefByKey(si.card);
       if (!si || !inDef) {
-        log('sys', `✦ ${def.n}：洗入卡组的条目缺失或键名写错（${(si && si.card) || '?'}），本次无事发生。`);
+        log('sys', `✦ ${def.n}：洗入卡牌未配置 → 跳过`);
         break;
       }
       const toOpp = si.to === 'opp' || si.to === 'a' || si.to === 'enemy';
@@ -5000,7 +5110,7 @@ function applyEffect(side, locIdx, card, spec) {
       // 先刷新对手侧计数再播演出（玩家侧的牌库张数不再单独显示，洗入演出落在「手牌」方块上）
       if (tgtSide !== 'p') renderSide();
       log(toOpp ? 'danger' : side,
-        `🃏 ${def.n}：把 ${got} 张「${inDef.n}」洗入了${tgtWho}的牌库，并重新洗了一次牌（现牌库 ${state.players[tgtSide].deck.length} 张）。`);
+        `🃏 ${def.n}：${got} 张「${inDef.n}」洗入${tgtWho}牌库，并重洗（现 ${state.players[tgtSide].deck.length} 张）`);
       playShuffleInFx(tgtSide, got, inDef.n, def.n);
       break;
     }
@@ -5012,7 +5122,7 @@ function applyEffect(side, locIdx, card, spec) {
       // 缺省 `'random'`、`'right'`/`'left'`＝从最右/最左起取；`n` 缺省 1、`'all'`＝命中即全弃；`give` 子句＝按被弃牌印刷费用给施放方加衍生物。
       const dc = fx.discard;
       if (!dc) {
-        log('sys', `✦ ${def.n}：弃牌的条目缺失（def.discard 未写），本次无事发生。`);
+        log('sys', `✦ ${def.n}：弃牌效果未配置 → 跳过`);
         break;
       }
       const toOpp = dc.to === 'opp' || dc.to === 'a' || dc.to === 'enemy';
@@ -5021,7 +5131,7 @@ function applyEffect(side, locIdx, card, spec) {
       const r = discardFromHand(tgtSide, dc, card);
       if (!r.ok) {
         const cond = discardSpecText(dc);
-        log('sys', `✦ ${def.n} 想弃掉${dWho}手牌里的牌（${cond}），但${dWho}手里没有符合条件的牌（现手牌 ${st.players[tgtSide].hand.length} 张），本次无事发生。`);
+        log('sys', `✦ ${def.n}：${dWho}手里没有符合条件（${cond}）的牌（现 ${st.players[tgtSide].hand.length} 张）`);
         break;
       }
       const dNames = r.cards.map((c) => `「${c.def.n}」`).join('');
@@ -5033,7 +5143,7 @@ function applyEffect(side, locIdx, card, spec) {
       const gvR = discardGiveTokens(side, dc, r, card);
       if (gvR) {
         if (gvR.missing) {
-          log('sys', `✦ ${def.n}：弃牌衍生物的条目缺失（discard.give.card 键名写错），本次只弃了牌、未加入任何卡。`);
+          log('sys', `✦ ${def.n}：弃牌衍生物未配置，本次只弃了牌`);
         } else if (!gvR.added) {
           log(side, `✦ ${def.n}：想把「${gvR.name}」加入手牌，但手牌已满（7/7），本次未能加入。`);
         } else {
@@ -5069,7 +5179,7 @@ function applyEffect(side, locIdx, card, spec) {
       const cands = all.filter((c) => c && c.def && !c.def.spell); // ① 只复活角色卡牌（非法术）
       const spellN = all.length - cands.length;
       if (!cands.length) {
-        log(side, `✦ ${def.n}：${who}的弃牌池里只有 ${spellN} 张法术（法术不参与复活），本次无事发生。`);
+        log(side, `✦ ${def.n}：${who}的弃牌池只有法术（不参与复活）→ 跳过`);
         break;
       }
       const order = shuffle(cands.slice()); // ② 随机顺序
@@ -5092,10 +5202,10 @@ function applyEffect(side, locIdx, card, spec) {
       // 揭示：摧毁本区对方一张“已翻开且战力最高”的卡（与 dw 只差选最弱 / 选最强）。判全是混比，并列最高
       // 随机挑一张；法术与暗牌不入选，ind 卡照常参与“最强”判定 —— 抽中它＝摧毁失败、判定结束（不改打其他牌）。
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
-      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      if (locNoDestroy(locIdx)) { logNoDestroy(side, def.n, locIdx); break; }
       const vis = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell); // 法术不选为目标
       // ind 卡照常参与“最强”判定与并列随机抽取——抽中它＝摧毁失败、判定结束
-      if (vis.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区没有可摧毁的已翻开卡牌（暗牌与法术不算）。`); break; }
+      if (vis.length === 0) { log(side, `✦ ${def.n}：对方此区没有可摧毁的已翻开卡牌`); break; }
       let maxP = -Infinity;
       for (const c of vis) maxP = Math.max(maxP, cardPowerIn(locIdx, c));
       const maxPool = vis.filter((c) => cardPowerIn(locIdx, c) === maxP);
@@ -5118,9 +5228,9 @@ function applyEffect(side, locIdx, card, spec) {
       // ⑤ 选定后**逐张**走完整摧毁链 ind → phx → surv → recordDestroy：某张被 ind 拦下只让**那一张**摧毁失败
       //（另一张照常），不因此改选、也不顺位补第 3 名。
       if (theirs.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但该区空无一人。`); break; }
-      if (locNoDestroy(locIdx)) { log(side, `✦ ${def.n} 想摧毁卡牌，但本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌都无法被摧毁。`); break; }
+      if (locNoDestroy(locIdx)) { logNoDestroy(side, def.n, locIdx); break; }
       const vis2 = theirs.filter((c) => c.revealed && !c.def.un && !c.def.spell);
-      if (vis2.length === 0) { log(side, `✦ ${def.n} 想摧毁对方卡牌，但对方在此区没有可摧毁的已翻开卡牌（暗牌与法术不算）。`); break; }
+      if (vis2.length === 0) { log(side, `✦ ${def.n}：对方此区没有可摧毁的已翻开卡牌`); break; }
       const ranks2 = [...new Set(vis2.map((c) => cardPowerIn(locIdx, c)))].sort((a, b) => b - a);
       const rankPool = (p) => vis2.filter((c) => cardPowerIn(locIdx, c) === p);
       const topPool2 = rankPool(ranks2[0]);
@@ -5183,7 +5293,7 @@ function applyEffect(side, locIdx, card, spec) {
       }
       const cands = hand.filter((c) => c && c.def && !c.def.un && cardCost(c) + up <= 6);
       if (!cands.length) {
-        log('sys', `✦ ${txt}：对方手牌里的卡都已到 6 费上限，没有可加费的目标（本次揭示落空）。`);
+        log('sys', `✦ ${txt}：对方手牌都到 6 费上限 → 加费落空`);
         break;
       }
 
@@ -5191,7 +5301,7 @@ function applyEffect(side, locIdx, card, spec) {
       const before = cardCost(pick);
       applyCostMod(pick, up, card);
       const after = cardCost(pick);
-      log('danger', `✦ ${txt}：对方手牌里的「${pick.def.n}」能量消耗 ${before} → ${after}（公开：这张牌现在需要 ${after} 点能量，仅本场战斗有效）。`);
+      log('danger', `✦ ${txt}：对方手牌「${pick.def.n}」费用 ${before} → ${after}（本场战斗有效）`);
       break;
     }
     case 'swapDeck': {
@@ -5210,7 +5320,7 @@ function applyEffect(side, locIdx, card, spec) {
         if (newCost !== oldCost) applyCostMod(c, newCost - oldCost, card, null, true); // silent：牌库不做逐张改费演出
         if (newPow !== oldPow) applyPermBuff(c, newPow - oldPow, card); // 法术自动跳过（战力恒 0）
       }
-      log(side, `⇄ ${txt}：${side === 'p' ? '你' : '对手'}牌库里剩下的 ${snap.length} 张牌的能量消耗与战力互换（本场战斗有效；不列牌名）。`);
+      log(side, `⇄ ${txt}：${side === 'p' ? '你' : '对手'}牌库剩余 ${snap.length} 张牌的费用与战力互换（本场战斗有效）`);
       playDeckSwapFx(side, snap.length);
       break;
     }
@@ -5225,7 +5335,7 @@ function applyEffect(side, locIdx, card, spec) {
       const who = side === 'p' ? '你' : '对手';
       log('sys', `🔋 ${txt}：${who}将在下一回合额外获得 ${gain} 点能量${total > gain ? `（已累计 ${total} 点）` : ''}。`);
       if (st.turn >= roundsTotal()) {
-        log('sys', `⚠️ 这是最后一回合（第 ${roundsTotal()} 回合），下一回合不存在，这份额外能量本局不会生效。`);
+        log('sys', `⚠️ 已是最后一回合，这份额外能量不会生效`);
         break;
       }
 
@@ -5242,7 +5352,7 @@ function applyEffect(side, locIdx, card, spec) {
       const poolKeys = (Array.isArray(fx.pool) && fx.pool) || (Array.isArray(def.spellPool) && def.spellPool) || [];
       const spellPool = poolKeys.map((k) => TOKENS[k]).filter((d) => d && d.spell);
       if (!spellPool.length) {
-        log('sys', `✦ ${def.n}：法术池里没有可抽的法术（数据缺失），本回合无事发生。`);
+        log('sys', `✦ ${def.n}：法术池为空 → 本回合跳过`);
         break;
       }
       const dHand = st.players[side].hand;
@@ -5271,7 +5381,7 @@ function applyEffect(side, locIdx, card, spec) {
       queueRetriggerFx(side, locIdx, card);
       const targets = retriggerTargets(side, locIdx, card);
       if (!targets.length) {
-        log(side, `✦ ${txt}：本区没有可再触发揭示的其他己方已翻开卡牌（不含自己、法术与同为该效果的卡），本次无事发生。`);
+        log(side, `✦ ${txt}：本区没有可再触发揭示的其他己方卡牌`);
         break;
       }
       log(side, `✦ ${txt}：${side === 'p' ? '你' : '对手'}在本区「${locDef(locIdx).n}」的 ${targets.length} 张己方卡牌，其「揭示」各再触发一次 —— ${targets.map((c) => `「${c.def.n}」`).join('')}`);
@@ -5284,7 +5394,7 @@ function applyEffect(side, locIdx, card, spec) {
 
 /* ---------------- 终局结算 ---------------- */
 
-// 终局演出：先等场上遗留的 ±N 动画（.gain-ring）播完，再依“左→右”把各区域的【胜方总点数横幅】
+// 终局演出：先等场上遗留的演出（±N 气泡等）播完，再依“左→右”把各区域的【胜方总点数横幅】
 // 做 700ms 放大高亮（区域之间间隔 150ms）；全部结束后调用方才弹结算弹窗（finishMatch）。
 function zoneWinnerSide(j) {
   const eP = zoneEff('p', j);
@@ -5293,16 +5403,35 @@ function zoneWinnerSide(j) {
   if (eA > eP) return 'a';
   return null;
 }
-async function waitBuffFxDone(timeoutMs) {
-  const limit = timeoutMs || 1600;
+
+/* 等「场上遗留的演出」播完再开演（带超时兜底）：调用点＝① 每回合「回合开始」演出开演之前（`playRoundStartReveal`）、
+   ② 终局逐区高亮之前（`playEndHighlights`）。上一回合末的 ±N 卡面提亮与气泡、分崩离析碎片、弃牌揭示、法术消散、
+   翻牌换面等演出各自用 `setTimeout` 收尾、**都不等**，直接开演会被全屏遮幕 / 高亮横幅吞掉。
+   判定＝**文档里还有跑着的有限时长动画**（跳过 `iterations: Infinity` 的常驻呼吸 / 漂移动画，如未揭示地形的漂移）；
+   另加 ±N 的排队队列 `buffFlashQueue`（已入队、但这次渲染还没播出，DOM 里还看不到）。
+   ⚠️ 超时兜底：绝不因为某个意料之外的动画卡住回合流程；无 `document.getAnimations`（jsdom 冒烟环境）时立即返回。 */
+const FIELD_FX_WAIT_MS = 1600;
+async function waitFieldFxDone(timeoutMs) {
+  const limit = timeoutMs || FIELD_FX_WAIT_MS;
   const t0 = Date.now();
   while (Date.now() - t0 < limit) {
-    if (!document.querySelector('.gain-ring') && buffFlashQueue.length === 0) return;
+    if (buffFlashQueue.length === 0 && !fieldFxRunning()) return;
     await sleep(40);
   }
 }
+/** 是否还有「场上的演出动画」在跑（只算有限时长的一次性演出；无限循环的常驻动画不算）。 */
+function fieldFxRunning() {
+  if (typeof document.getAnimations !== 'function') return false;
+  for (const a of document.getAnimations()) {
+    if (a.playState !== 'running') continue;
+    const it = (a.effect && typeof a.effect.getTiming === 'function') ? a.effect.getTiming().iterations : 1;
+    if (it === Infinity) continue;
+    return true;
+  }
+  return false;
+}
 async function playEndHighlights(gen) {
-  await waitBuffFxDone();
+  await waitFieldFxDone();
   if (gen !== state.gen) return;
   for (let j = 0; j < 3; j++) {
     if (state.locs[j].shattered) continue;
@@ -5364,7 +5493,7 @@ async function locCollapseEffects() {
     if (cnt < col.cards) continue;
     // 防御：任一方占格数超过目标地形上限则本次不崩塌
     if (['p', 'a'].some((s) => sideUsed(s, j) > target.max)) {
-      log('danger', `${def.icon} ${def.n}：本区双方共 ${cnt} 张卡牌，但有一方占格数超过「${target.n}」的上限（${target.max}），结界未能崩塌。`);
+      log('danger', `${def.icon} ${def.n}：有一方占格超过「${target.n}」上限（${target.max}）→ 结界未崩塌`);
       continue;
     }
     st.locs[j].def = target;
@@ -5374,7 +5503,7 @@ async function locCollapseEffects() {
     // 变形 = 该地形在本区“出现” → 立刻结算其「出现时」效果（冥界无 spawn，此处是空操作）
     runLocAppearEffect(j, target);
     // 崩塌出「虚假之月」→ 本局总回合数变 7（第 6 回合末崩塌同样续出第 7 回合）
-    syncRoundTotal('地形崩塌');
+    syncRoundTotal();
     await awaitShatterChain();
   }
 }
@@ -5450,10 +5579,10 @@ async function resolveRevealInZone(side, locIdx, card, forceRepeat) {
   }
   const nowLoc = fieldLocOf(card);
   if (nowLoc < 0) {
-    log('sys', `🔁 ${locName}：想重复结算「${card.def.n}」的揭示，但它已不在场上（被摧毁或回到了手牌），本次不重复。`);
+    log('sys', `🔁 ${locName}：「${card.def.n}」已不在场上 → 不重复揭示`);
     return;
   }
-  log(side, `🔁 ${locName}：重复结算「${card.def.n}」的揭示效果 —— 第 2 次（仅重复揭示；持续与回合开始/结束等非揭示效果不重复）。`);
+  log(side, `🔁 ${locName}：重复结算「${card.def.n}」的揭示（第 2 次）`);
   // ② 第 2 次：走共用分派；**这里不再递归加倍**（本字段每处只多一次）
   await resolveCardReveal(card.side, nowLoc, card);
   renderZones();
@@ -5470,7 +5599,7 @@ function runLocAfterRevealEffects(side, locIdx, card) {
   if (fieldLocOf(card) !== locIdx) return -1;
   const dst = moveCardToRandomZone(card);
   if (dst < 0) {
-    log(side, `${def.icon} ${def.n}：${side === 'p' ? '你方' : '敌方'}「${card.def.n}」想被吹走，但另外两个区域都放不下或未开放，留在原地。`);
+    log(side, `${def.icon} ${def.n}：「${card.def.n}」无处可吹 → 留在原地`);
     return -1;
   }
   log(side, `${def.icon} ${def.n}：${side === 'p' ? '你方' : '敌方'}「${card.def.n}」被吹到了「${st.locs[dst].def.n}」（现 ${cardPowerIn(dst, card)}）。`);
@@ -5585,7 +5714,7 @@ function locTurnEndPowerEffects() {
       log(delta > 0 ? 'sys' : 'danger',
         `${def.icon} ${def.n}：本区双方已翻开卡牌各 ${sign}${Math.abs(delta)} 战力 → ${hit.join('、')}${blocked ? `（另有 ${blocked} 张因本区「免减攻」被拦下）` : ''}`);
     } else if (blocked) {
-      log('sys', `${def.icon} ${def.n}：本区双方已翻开卡牌本应各 −${Math.abs(delta)} 战力，但 ${blocked} 张全部因本区「免减攻」被拦下（战力不变）。`);
+      log('sys', `${def.icon} ${def.n}：本区免减攻 → ${blocked} 张卡的 −${Math.abs(delta)} 被拦下`);
     }
   }
 }
@@ -5602,7 +5731,7 @@ function reactorPurge() {
     // 摧毁失败、本回合不再波及别的牌（如金刚石 6 + 辉夜 8：最低＝金刚石 → 失败 → 辉夜存活）
     const all = zoneP.concat(zoneA).filter((c) => !c.def.un && !c.def.spell);
     if (all.length === 0) continue;
-    if (locNoDestroy(j)) { log('danger', `⚡ ${def.n}：本区域存在免摧毁效果（地形「睡鼠神祠」或「蕾蒂」等），所有卡牌均无法被摧毁，本次跳过。`); continue; }
+    if (locNoDestroy(j)) { logNoDestroy('danger', def.n, j); continue; }
     let min = Infinity;
     for (const c of all) min = Math.min(min, cardPowerIn(j, c));
     const doomed = all.filter((c) => cardPowerIn(j, c) === min);
@@ -5803,7 +5932,7 @@ function renderHud() {
   const cubeEl = $('cubeVal');
   cubeEl.textContent = state.stakes;
   cubeEl.title = state.snapPrev > 0
-    ? `本局结算 ${state.stakes} 立方（有加倍已宣布/刚生效 —— 本回合结束前谁撤退都按 ${state.snapPrev} 立方结算）`
+    ? `本局结算 ${state.stakes} 立方（撤退仍按 ${state.snapPrev} 立方）`
     : `本局结算 ${state.stakes} 立方（双方各可加倍一次：一人 4、两人 8）`;
   const pips = $('cubePips');
   pips.innerHTML = '';
@@ -6233,8 +6362,8 @@ function uiOnEnergyDev() {
   const en = st.players.p;
   en.energyTotal = 7;
   en.energyLeft = 7;
-  log('sys', '⚡ 开发者指令：本回合你的能量已设为 7（对手能量不变；下回合双方按回合数重置）。');
-  setStatus('本回合你的能量已改为 7，可继续出牌（仅本回合有效，下回合恢复）。');
+  log('sys', '⚡ 开发者指令：本回合你的能量设为 7');
+  setStatus('本回合能量改为 7（下回合恢复）。');
   renderAll();
 }
 
@@ -6247,8 +6376,8 @@ function uiOnSwitchSide() {
   st.selected = -1;
   st.moveCardId = null;
   if (st.playAsSide === 'a') {
-    log('sys', '⇄ 已切换到敌方立场：本回合及之后暗出的牌将落在对手区域，归属对手。');
-    setStatus('立场：敌方 — 选牌点区域会放到对手一侧（再点「切换立场」恢复我方）。');
+    log('sys', '⇄ 已切换到敌方立场：暗出的牌将落在对手区域。');
+    setStatus('立场：敌方 — 暗出的牌会落到对手一侧。');
   } else {
     log('sys', '⇄ 已恢复我方立场：暗出的牌回到自己区域。');
     setStatus('立场：我方 — 暗出的牌落在自己一侧。');
@@ -6376,7 +6505,7 @@ function uiOnPickLocConfirm() {
   }
   // ⚠️ 已破碎的区域**永久锁定** —— 任何路径（含开发者工具）都不能再给它换地形
   if (locShattered(locIdx)) {
-    updatePickLocTip('区域 ' + (locIdx + 1) + ' 已被「天界」摧毁（已破碎）：永久锁定，不能再指定地形。需要重试请先「重新开始」。');
+    updatePickLocTip('区域 ' + (locIdx + 1) + ' 已破碎：不能再指定地形（重试请先「重新开始」）。');
     return;
   }
   const prev = state.locs[locIdx].def;
@@ -6394,7 +6523,7 @@ function uiOnPickLocConfirm() {
   // 与地形揭晓走同一结算路径（虹龙洞等「出现时」效果）；换上「天界」时同时启动摧毁另外两块地形的演出链
   const spawnCount = wantSpawn ? runLocAppearEffect(locIdx, def) : 0;
   // 换上/换掉「虚假之月」→ 本局总回合数当场变（顶栏即时刷新）
-  syncRoundTotal('开发者指定地形');
+  syncRoundTotal();
   // ⚠️ 这里**刻意不等** `awaitShatterChain()` —— 开发者工具必须**立刻关窗**：演出在后台自己逐张 renderZones 并收尾重绘，
   //    若在此 await，弹窗会一直挂到两块都拆完。注：正常对局的四条路径（揭晓 / xformTurn / collapse / 卡牌 xform）**仍然会等**。
   renderZones();
@@ -6540,7 +6669,7 @@ function uiOnAddStoneConfirm() {
   }
   const short = (placedP < n || placedA < n);
   renderAll();
-  log('sys', `🪨 开发者指令：给「${locDef(idx).n}」区域**双方各生成 ${n} 张「${tk.n}」** → 你方实际 ${placedP} 张、敌方实际 ${placedA} 张（落地即翻开、占格位、进放置队列；该侧放满则少放）。`);
+  log('sys', `🪨 开发者指令：「${locDef(idx).n}」双方各生成 ${n} 张「${tk.n}」（实际 你 ${placedP} / 敌 ${placedA}）`);
   setStatus(`区域 ${idx + 1}：双方各生成 ${n} 张石块 —— 你方 ${placedP} 张、敌方 ${placedA} 张`
     + (short ? '（空位不足，已按实际可放张数生成）' : '') + '。');
   closeAddStone();
@@ -6645,7 +6774,7 @@ function zoomInfoHTML(opts) {
 function baseTextOf(def) {
   if ((def.t || '').trim()) return '';
   return isSpellDef(def)
-    ? '法术：只有能量花费与「揭示」效果 —— 无战力；揭示结算完后自行消散'
+    ? '法术：只花能量、无战力，揭示结算后自行消散'
     : '平平无奇的白板卡，纯靠身材作战。';
 }
 /* 放大视图的**当前状态**行（手牌 / 场上共用；图鉴按 def 渲染、恒为空数组）：只报费用递减的**实时计数**
@@ -6979,9 +7108,9 @@ function renderPilePanel() {
 }
 function pileEmptyText(side, kind) {
   const who = pileSideLabel(side);
-  if (kind === 'discard') return `${who}的弃牌池还是空的 —— 本局还没有牌被弃掉（弃牌只把手牌里的牌移出，与场上的摧毁是两回事）。`;
-  if (kind === 'exile') return `${who}的放逐池还是空的 —— 本局还没有法术被使用（法术揭示结算完后消散时入池）。`;
-  return `${who}的摧毁池还是空的 —— 本局还没有牌被摧毁（只有真正离场的摧毁才会入池）。`;
+  if (kind === 'discard') return `${who}的弃牌池是空的 —— 本局还没有牌被弃掉（弃牌只动手牌）。`;
+  if (kind === 'exile') return `${who}的放逐池是空的 —— 本局还没有用过法术。`;
+  return `${who}的摧毁池是空的 —— 本局还没有牌被摧毁。`;
 }
 // 牌池卡片：战力取「入池时」的记录值；入池序号/回合做成卡片下方独立小字（不叠在卡面上，手机端同样可见）
 function pileCardEl(card, ord) {
@@ -7039,7 +7168,7 @@ function hideModal() { $('modalMask').classList.add('hidden'); }
 // 结算/认输弹窗的「确认」：只关弹窗、不清空终局盘面 —— 场上已翻开的牌本就可点击放大，此时手牌（phase over）也可点击复盘。
 function closeResult() {
   hideModal();
-  setStatus('终局已确认 —— 可点击场上与手牌卡牌复盘，或点顶部「重新开始」再来一局。');
+  setStatus('终局已确认 —— 可点击场上 / 手牌上的卡复盘。');
 }
 /* 结算弹窗「再来一局」：单机就地重开；**联机不能就地重开**——那会与对手分叉，
    必须走「两端各点一次、房主另定种子」的重开请求（js/net.js 的 ui.rematch）。 */
@@ -7053,10 +7182,21 @@ function uiOnAgain() {
 /* 顶栏「重新开始」：同理，联机时不许就地重开（本机一重开就与对手分叉），只说明该走哪条路 */
 function uiOnRestart() {
   if (state.netRole) {
-    setStatus('联机对局不能就地重开 —— 这一局要打到底：打完在结算弹窗点「🔁 再来一局」（两端各点一次），或退出房间重开一局。');
+    setStatus('联机对局不能就地重开：打完在结算弹窗点「🔁 再来一局」（两端各点一次）。');
     return;
   }
   restart();
+}
+/* 顶栏「←返回主页」：单人 / 联机 / 开发调试三种对局里都常驻（开发调试的 body.in-dev 由 Home.show() 一并清掉）。
+   ⚠️ 联机对局交给 js/net.js：**开局后、终局前**先弹一层确认（退房＝这一局按提交超时判你输，而按钮常驻顶栏、
+   手机上容易误触），确认后由 net.js 退房并回主页面 —— 不退房就回主页的话连接还挂着，对手会一直等你交牌。 */
+function uiOnHome() {
+  hideModal(); // 结算弹窗开着时先收掉，免得它留在主页底下
+  if (window.Net && window.Net.room && window.Net.room() && window.Net.ui && window.Net.ui.leaveConfirm) {
+    window.Net.ui.leaveConfirm();
+    return;
+  }
+  if (window.Home && window.Home.show) window.Home.show();
 }
 function showModal(emblem, title, sub, delta) {
   $('modalEmblem').textContent = emblem;
@@ -7066,6 +7206,9 @@ function showModal(emblem, title, sub, delta) {
   if (delta > 0) { cube.textContent = `+${delta} 立方`; cube.className = 'modal-cubes win'; }
   else if (delta < 0) { cube.textContent = `${delta} 立方`; cube.className = 'modal-cubes lose'; }
   else { cube.textContent = '无立方变动'; cube.className = 'modal-cubes draw'; }
+  // 「📤 生成挑战码」：这一局生成不出码就收掉入口（联机对局 / 开发调试空牌库，判据见 canExportChallenge）
+  const challengeBtn = $('btnChallenge');
+  if (challengeBtn) challengeBtn.classList.toggle('hidden', !canExportChallenge());
   $('modalMask').classList.remove('hidden');
 }
 
@@ -7108,7 +7251,7 @@ function stateFingerprint() {
    ③ 判"定型"必须用 `phase === 'play'` **且 `pendingResolve` 非空**（＝已停在等你操作），只看 `phase` 会读到回合开始尚未走完的中间态。 */
 async function newSeededGame(n, opts) {
   opts = (opts && typeof opts === 'object') ? opts : {};
-  if (opts.freshDeck) { lastPlayerDeckDefs = null; lastEmptyPlayerDeck = false; }
+  if (opts.freshDeck) { lastPlayerDeckDefs = null; lastEmptyPlayerDeck = false; lastRandomPlayerDeck = false; }
   // 防御：第二个参数写错（例如把整个 opts 当 waitMs 传）会让下面的等待循环一次都不跑、直接读到中间态 —— 这里兜住
   const waitMs = (typeof opts.waitMs === 'number' && isFinite(opts.waitMs)) ? opts.waitMs : 20000;
   const limit = Math.max(1, Math.ceil(waitMs / 50));
@@ -7163,7 +7306,7 @@ window.Game = {
       const hostDefs = (o.hostCodes || []).map(cardDefOfCode);
       const guestDefs = (o.guestCodes || []).map(cardDefOfCode);
       if (hostDefs.length !== 12 || guestDefs.length !== 12 || hostDefs.some((d) => !d) || guestDefs.some((d) => !d)) {
-        log('danger', '⇄ 联机：双方卡组里有解析不出的卡（对方可能没刷新页面），本局未开局 —— 请双方先 Ctrl+F5 再试。');
+        log('danger', '⇄ 联机：卡组里有解析不出的卡 → 请双方 Ctrl+F5 后重开');
         return null;
       }
       return restart({ seed: o.seed, netPvp: { role: o.role, hostDefs: hostDefs, guestDefs: guestDefs } });
@@ -7209,6 +7352,7 @@ window.Game = {
     closeResult,
     onAgain: uiOnAgain,
     onRestart: uiOnRestart,
+    onHome: uiOnHome,
     onPick: uiOnPick,
     onPickClose: uiOnPickClose,
     onPickConfirm: uiOnPickConfirm,

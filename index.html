@@ -190,7 +190,8 @@
     <div class="deck-toast hidden" id="deckToast" role="status" aria-live="polite"></div>
   </section>
 
-  <!-- 开始对战前选卡组（仅满 12 张可选）；主页面态需单独放开显示（见 style.css） -->
+  <!-- 开始对战前选卡组（仅满 12 张可选；一套满编卡组都没有时，由 js/home.js 在列表里补一个
+       「随机卡组」兜底项，开局按与对手同一条费用曲线随机组满 12 张）；主页面态需单独放开显示（见 style.css） -->
   <div class="modal-mask hidden" id="battleDeckMask">
     <div class="modal battle-deck-modal">
       <div class="modal-emblem">⚔️</div>
@@ -231,10 +232,8 @@
                联机握手时把文件名随 hello 发出去，对手那边再核对一遍本地是否真有这张图（对不上退回 👤）。 -->
         <div class="settings-sec">
           <h3><span class="ss-ico">🙋</span>玩家资料（联机用）</h3>
-          <p class="settings-note">联机对战时，<b>昵称与头像会显示在对手那一侧</b>（房间弹窗的双方名单、侧栏对手信息区），
-            昵称还会出现在结算弹窗的「你 vs 对手」。只记在这台设备的浏览器里，不需要账号。<br>
-            ⚠️ 存在浏览器里 ⇒ <b>同一台电脑的同一个浏览器开两个窗口＝同一个人</b>（两边会看到同一个昵称与同一张头像）；
-            想在一台机器上试"两个人"，请用一个普通窗口 + 一个<b>无痕窗口</b>，或直接用两台设备。</p>
+          <p class="settings-note">联机对战时，<b>昵称与头像会显示在对手那一侧</b>（房间弹窗、侧栏、结算弹窗）。只记在这台设备的浏览器里，不需要账号。<br>
+            ⚠️ 同一台电脑的同一个浏览器开两个窗口＝同一个人；想在一台机器上试"两个人"，请用一个普通窗口 + 一个<b>无痕窗口</b>。</p>
           <div class="player-row">
             <label class="player-label" for="playerNameInput">昵称</label>
             <input type="text" class="player-name-input" id="playerNameInput" maxlength="12"
@@ -245,17 +244,10 @@
         </div>
         <div class="settings-sec">
           <h3><span class="ss-ico">🤖</span>对手 AI 强度</h3>
-          <p class="settings-note">四档只影响对手的<b>出牌水平</b>，不影响规则、卡牌与你自己的操作。点选即生效，并记住在你的浏览器里（之后开战也沿用）。</p>
+          <p class="settings-note">四档由「简单」到「月狂」逐级变强，只影响对手的<b>出牌水平</b>，不影响规则、卡牌与你自己的操作。点选即生效并记住；觉得赢得太轻松就往上调一档。</p>
           <div class="ai-level-list" id="aiLevelList" role="radiogroup" aria-label="对手 AI 强度"></div>
           <p class="settings-note" id="aiLevelDetail"></p>
-        </div>
-        <div class="settings-sec">
-          <h3><span class="ss-ico">💡</span>关于对手</h3>
-          <ul class="settings-list">
-            <li><b>简单 → 普通 → 困难 → 月狂</b> 逐级变强：觉得赢得太轻松就往上调一档，只想轻松打一局就留在「简单」。</li>
-            <li>难度只影响对手<b>出牌的水平</b>，它的牌库、你的卡组与全部对局规则都不变。</li>
-            <li>对手<b>每局都会随机组牌</b>，所以同一档也会遇到不同的牌路，多打几局再判断强度更准。</li>
-          </ul>
+          <p class="settings-note">对手<b>每局都会随机组牌</b>，同一档也会遇到不同牌路；多打几局再判断强度更准。</p>
         </div>
       </div>
       <div class="pick-actions settings-actions">
@@ -273,7 +265,7 @@
     <div class="modal codex-modal guide-modal">
       <div class="codex-head">
         <h2>📖 新手引导</h2>
-        <span class="codex-tip">3 分钟读完，马上能打一局</span>
+        <span class="codex-tip">30 秒看懂怎么玩</span>
         <button type="button" class="btn btn-ghost codex-close" id="guideCloseBtn">关闭 ✕</button>
       </div>
 
@@ -282,18 +274,19 @@
           <h3><span class="gs-ico">🎯</span>一句话目标</h3>
           <ul>
             <li>一局 <b>6 回合</b>、场上固定 <b>3 块区域</b>：终局<b>赢下区域更多</b>的一方获胜。</li>
-            <li>⚠️ 例外：地形「<b>虚假之月</b> 🌕」在场时本局变成 <b>7 回合</b>（第 7 回合能量 7）；它被变走就退回 6 回合，而一旦已经打到第 7 回合就锁定打完。</li>
-            <li>若存在<b>平局区域</b>，改为比<b>三个区域的总点数</b>（高者胜，仍相同才是平局）——所以「大赢两区」和「小赢三区」要自己权衡。</li>
+            <li>⚠️ 地形「<b>虚假之月</b> 🌕」在场时本局变成 <b>7 回合</b>；它被变走就退回 6 回合，而一旦已经打到第 7 回合就锁定打完。</li>
+            <li>若存在<b>平局区域</b>，改为比<b>三个区域的总点数</b>（高者胜，仍相同才是平局）。</li>
           </ul>
         </div>
 
         <div class="guide-sec">
           <h3><span class="gs-ico">⚡</span>回合与能量</h3>
           <ul>
-            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>（个别卡牌效果会提高本局上限，如「哆来咪」每回合 +1；若本局有「虚假之月」🌕 则还有第 7 回合，当天双方各 <b>7 点</b>）；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
+            <li>第 1 回合 <b>1 点能量</b>，之后每回合 +1，<b>上限 6</b>；能量是<b>当回合预算</b>，用不完不会累积到下一回合。</li>
+            <li>个别卡牌会抬高本局上限（如「哆来咪」每回合 +1）；有「虚假之月」🌕 时第 7 回合双方各 <b>7 点</b>。</li>
             <li>一回合可以<b>暗出任意多张牌</b>，只要费用总和不超过能量。</li>
             <li>出完点右下角「<b>结束回合</b>」把回合交给对手（对手是 AI，会尽量把能量花完）。</li>
-            <li>出牌阶段点顶部<b>能量框</b>可重置：本回合暗出的牌按原顺序放回手牌、<b>能量全额返还</b>（本回合移动过的卡也移回原位）。</li>
+            <li>出牌阶段点底部「<b>能量：x/N ↺</b>」可重置：本回合暗出的牌按原顺序放回手牌、<b>能量全额返还</b>。</li>
           </ul>
         </div>
 
@@ -301,7 +294,8 @@
           <h3><span class="gs-ico">🂠</span>暗出 → 翻牌 → 揭示</h3>
           <ul>
             <li>先点手牌选中，再点区域即<b>暗出</b>：牌背朝上、<b>不计点数</b>，双方都看不见。</li>
-            <li>双方出完后<b>逐张翻开</b>：翻面那一刻结算这张牌写的「<b>揭示</b>」效果（加成 / 削弱 / 摧毁 / 生成 / 换边 / 变身……），并且<b>翻面后才把战力计入该区点数</b>。</li>
+            <li>双方出完后<b>逐张翻开</b>：翻面那一刻结算这张牌写的「<b>揭示</b>」效果（加成 / 削弱 / 摧毁 / 生成 / 换边 / 变身……）。</li>
+            <li><b>翻面后才把战力计入该区点数</b>，所以暗牌再多也不算赢。</li>
             <li>翻牌先后：<b>第 1 回合随机</b>；之后由<b>当前领先的一方先翻</b>（持平则随机）；同一方内部严格按<b>放置先后</b>翻。</li>
             <li>每块区域每方最多放 <b>4 张</b>（个别地形更少；画着「<b>隙间</b> ≋」的格子不能放牌）。</li>
           </ul>
@@ -311,15 +305,15 @@
           <h3><span class="gs-ico">🗺️</span>地形（区域）</h3>
           <ul>
             <li>开局三块地形都是「<b>未揭示</b> ❓」，在<b>第 1 / 2 / 3 回合开始</b>依次揭晓（左 → 中 → 右），揭晓当刻结算它的「出现时」效果。</li>
-            <li>地形效果举例：出现时给双方生成卡牌（虹龙洞 → 石块）、每回合结束成长 / 衰减 / 摧毁、<b>反转区</b>（点数低的一方反而赢下该区）、限制放牌张数、第 N 回合起才开放、把本局延长到 <b>第 7 回合</b>（虚假之月 🌕）……</li>
+            <li>地形效果种类很多：出现时生成卡牌、每回合成长 / 衰减 / 摧毁、<b>反转区</b>（点数低的一方反而赢下该区）、限制放牌张数、第 N 回合起才开放、把本局延长到 <b>第 7 回合</b>……</li>
           </ul>
         </div>
 
         <div class="guide-sec">
           <h3><span class="gs-ico">✦</span>卡牌效果的两类口径</h3>
           <ul>
-            <li><b>揭示</b>：只在<b>翻开的这一次</b>结算，之后不再触发（例：「同区你的其他卡 +2」「摧毁同区对方最低战力」「把本区变成辉针城」）。</li>
-            <li><b>持续 / 常驻</b>：翻开后<b>一直有效</b>，卡一离场立即失效（例：「此区域双方卡牌都不会被摧毁」「己方石块 +2」）。</li>
+            <li><b>揭示</b>：只在<b>翻开的这一次</b>结算，之后不再触发（例：「同区你的其他卡 +2」）。</li>
+            <li><b>持续</b>：翻开后<b>一直有效</b>，卡一离场立即失效（例：「己方石块 +2」）。</li>
             <li><b>法术</b>（带「✦ 法术」标记）：<b>没有战力</b>，只花能量、只结算揭示效果，结算完<b>自行消散</b>、不占格位。</li>
           </ul>
         </div>
@@ -327,26 +321,17 @@
         <div class="guide-sec">
           <h3><span class="gs-ico">🎲</span>赌注、认输与复盘</h3>
           <ul>
-            <li>本局赌注＝无人加倍 <b>2 立方</b>、一人加倍 <b>4</b>、两人都加倍 <b>8</b>（<b>双方各只能加倍一次</b>）。加倍<b>在下一回合才生效</b>，宣布当回合侧栏就显示新值；从宣布到生效回合结束前，谁「认输」都按<b>加倍前的值</b>结算 —— 留一个完整回合给对手决定要不要撤退（末回合宣布则直接按新值结算）。</li>
+            <li>本局赌注：无人加倍 <b>2 立方</b>、一人加倍 <b>4</b>、两人都加倍 <b>8</b>；<b>双方各只能加倍一次</b>。</li>
+            <li>加倍<b>在下一回合才生效</b>（宣布当回合侧栏就显示新值），留一个完整回合给对手决定要不要撤退。从宣布到生效回合结束前，谁「认输」都按<b>加倍前的值</b>结算；末回合宣布则直接按新值结算。</li>
             <li>「<b>认输</b>」立即判负，按上面的撤退价扣除赌注。</li>
             <li>结算弹窗点「确认」会保留终局盘面，可以点场上 / 手牌里的卡放大复盘。</li>
           </ul>
         </div>
 
         <div class="guide-sec">
-          <h3><span class="gs-ico">🧭</span>主页面各入口怎么用</h3>
-          <ul>
-            <li><b>开始对战</b>：先选一套<b>满 12 张</b>的出战卡组再开打（对手每局随机组牌）。</li>
-            <li><b>卡组设置</b>：组建 / 改名 / 删除卡组（上限 20 套、每套 12 张、同名卡限 1 张），自动存在本地。</li>
-            <li><b>设置</b>（⚙️）：切换<b>对手 AI 强度</b>——<b>简单（默认）/ 普通 / 困难 / 月狂</b>，点选即生效并记住；四档差别见弹窗内说明。</li>
-            <li><b>开发调试</b>：空牌库 + 每回合能量 10 + 三块「无名之丘」、AI 不出牌；顶栏可用「🗻 指定地形 / 🪨 添加石块 / 🎯 指定卡牌 / 👁️ 查看对手 / ⇄ 切换立场」自由验证机制（「🪨 添加石块」＝选区域 1/2/3 + 用 ◀ ▶ 调数量 → 该区域**双方各生成 N 张石块**，方便验「比那名居天子」「大鲶鱼」这类跟石块有关的机制）。想看对手这回合的思路，留意对局信息栏里它每次暗出的说明。</li>
-          </ul>
-        </div>
-
-        <div class="guide-sec">
           <h3><span class="gs-ico">💡</span>几个小提示</h3>
           <ul>
-            <li>点场上<b>已翻开</b>的卡可以放大查看，弹窗顶部一条<b>战力构成</b>按来源列出它当前的战力（每枚一个小方块，可横向滑动），末枚合计＝卡面右上角的实时威力。</li>
+            <li>点场上<b>已翻开</b>的卡可以放大查看，弹窗顶部一条<b>战力构成</b>按来源列出它当前的战力（末枚合计＝卡面右上角的实时威力）。</li>
             <li>卡面<b>左上角是费用</b>、<b>右上角是当前战力</b>：战力比基础高显示绿色、低显示红色；费用被改高后显示红字。</li>
             <li>对局中顶栏的「📖 图鉴」可查看全部卡牌与说明；手牌<b>右键</b>也能直接放大查看。</li>
             <li>区域中间带会实时显示双方点数，领先的一方亮黄；同区谁先翻牌看的是这个实时盘面。</li>
@@ -461,23 +446,53 @@
       </div>
       <div class="net-room-row" id="netRoomRow">
         <input type="text" class="deck-import-input net-room-input" id="netRoomInput" maxlength="6"
-               spellcheck="false" autocomplete="off" placeholder="6 位房间码（加入时填）">
+               spellcheck="false" autocomplete="off" placeholder="6 位房间码">
       </div>
       <div class="net-tip" id="netTip"></div>
       <div class="undo-btns net-actions">
-        <button type="button" class="btn" id="netCreate" onclick="Net.ui.create()">🏠 创建房间</button>
-        <button type="button" class="btn" id="netJoin" onclick="Net.ui.join()">🚪 加入房间</button>
-        <button type="button" class="btn btn-primary" id="netReady" onclick="Net.ui.ready()">✅ 我已准备</button>
-        <button type="button" class="btn" id="netCopy" onclick="Net.ui.copy()">📋 复制房间码</button>
+        <button type="button" class="btn btn-tint-gold" id="netCreate" onclick="Net.ui.create()">创建房间</button>
+        <button type="button" class="btn btn-tint-blue" id="netJoin" onclick="Net.ui.join()">加入房间</button>
+        <!-- 连接自检（js/net.js 的 testConnection）：把"网页能不能开"与"长连接能不能建"分开报 ——
+             移动网络里这两件事经常一个通一个不通（页面正常、WebSocket 被浏览器云加速或运营商中间设备掐掉）。
+             连不上时先点它，结果能直接截图给对方/发群，不用再靠猜。只在未进房间时显示。 -->
+        <button type="button" class="btn btn-tint-gray" id="netTest" onclick="Net.ui.testConnection()">测试连接</button>
+        <button type="button" class="btn btn-tint-green" id="netReady" onclick="Net.ui.ready()">我已准备</button>
+        <button type="button" class="btn btn-tint-teal" id="netCopy" onclick="Net.ui.copy()">复制房间码</button>
         <!-- 房主专用的「踢出对手」：**当前关着不显示**（js/net.js 的 KICK_ENABLED = false —— 它是服务端动作，
              房间服务要重新部署才认；要用就先改那个开关再 deploy）。开启后由 syncMask 控制显隐：
              房主 + 对手在线 + 没开局或一局已打完。 -->
-        <button type="button" class="btn net-kick hidden" id="netKick" onclick="Net.ui.kick()"
-                title="把对手移出房间（房间把位置腾出来，你可以把房间码发给下一个人）——只在没开局或一局打完后可用">🚫 踢出对手</button>
+        <button type="button" class="btn btn-tint-red hidden" id="netKick" onclick="Net.ui.kick()"
+                title="把对手移出房间，位置腾给下一个人（对局进行中不可用）">踢出对手</button>
         <button type="button" class="btn btn-ghost" id="netLeave" onclick="Net.ui.leave()">退出房间</button>
-        <button type="button" class="btn" id="netClose" onclick="Net.ui.close()">关闭</button>
+        <button type="button" class="btn btn-tint-gray" id="netClose" onclick="Net.ui.close()">关闭</button>
       </div>
       <div class="net-server">服务器：<span id="netServer">（未配置）</span></div>
+    </div>
+  </div>
+
+  <!-- 创建房间：先选「随机房间码」还是「自定义房间码」（js/net.js 的 ui.create → askCreate）
+       - 为什么要有自定义：手机端开完房要切出去（QQ / 微信）把码报给对方，切后台很容易把连接弄断、
+         回来发现自己已掉线；事先在聊天里约定同一串码，双方各自打开页面就能进，中途不用离开页面。
+       - 自定义码**不需要服务端配合**：房间按码现开，角色按到达顺序分配（谁先到谁是房主），
+         与「加入房间」是同一条连接逻辑。
+       - 主页面态下由 style.css 的 `body.in-home #netCodeMask:not(.hidden)` 放开显示（同 #netMask），
+         层级压在房间弹窗之上；按钮用内联 onclick（与 #netMask 里那几个同一习惯）。 -->
+  <div class="modal-mask hidden" id="netCodeMask">
+    <div class="modal undo-modal net-code-modal">
+      <div class="modal-emblem">🏠</div>
+      <h2>创建房间</h2>
+      <p class="modal-sub">随机码：建好房再把码报给对方<br />自定义码：双方先约定同一串码，各自打开就能进</p>
+      <button type="button" class="btn btn-tint-gold net-code-random" id="netCodeRandom" onclick="Net.ui.createRandom()">随机房间码</button>
+      <div class="net-code-or">或者</div>
+      <div class="net-code-row">
+        <input type="text" class="deck-import-input net-room-input net-code-input" id="netCodeInput"
+               maxlength="6" spellcheck="false" autocomplete="off" placeholder="自定义 6 位码">
+        <button type="button" class="btn btn-tint-blue" id="netCodeCustom" onclick="Net.ui.createCustom()">用这个码建房</button>
+      </div>
+      <div class="net-tip" id="netCodeTip"></div>
+      <div class="undo-btns">
+        <button type="button" class="btn btn-ghost" id="netCodeCancel" onclick="Net.ui.closeCodeAsk()">取消</button>
+      </div>
     </div>
   </div>
 
@@ -493,6 +508,22 @@
       <div class="net-tip" id="peerGoneTip"></div>
       <div class="undo-btns">
         <button type="button" class="btn btn-primary" id="peerGoneOk" onclick="Net.ui.closePeerGone()">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 联机对局里点顶栏「←返回主页」的确认（js/net.js 的 ui.leaveConfirm 打开）：
+       **只在对局进行中**问这一句 —— 此时退房＝这一局按提交超时判你输，而按钮常驻顶栏、手机上容易误触；
+       还没开局 / 一局已打完都没有可输的东西，直接退房回主页面。
+       复用 peer-gone 那一层的层级（style.css 的 .peer-gone-mask＝9700，压过结算弹窗与放大层）。 -->
+  <div class="modal-mask peer-gone-mask hidden" id="leaveConfirmMask">
+    <div class="modal undo-modal peer-gone-modal">
+      <div class="modal-emblem">🚪</div>
+      <h2>退出房间并返回主页面？</h2>
+      <p class="undo-text">这一局就到此为止：对手会在提交超时后判你认输，房间位置随即腾出。</p>
+      <div class="undo-btns">
+        <button type="button" class="btn" onclick="Net.ui.leaveConfirmCancel()">取消</button>
+        <button type="button" class="btn btn-danger" onclick="Net.ui.leaveConfirmOk()">退出并返回主页</button>
       </div>
     </div>
   </div>
@@ -519,6 +550,11 @@
     <!-- 手机上这一组排到第二行（图鉴 / 重新开始 显示文字；开发调试按钮也在这一组）。
          「重新开始」在联机对局里会被 renderControls() 收掉 —— 联机不许就地重开（见 uiOnRestart）。 -->
     <div class="top-actions">
+      <!-- 「←返回主页」＝对局里回主页面的显式入口（单人 / 联机 / 开发调试都在这一行的最左端；
+           手机上靠 style.css ≤700px 的 margin-right:auto 顶到该行左端）。左上角「⚡ 东方逆转」也能回主页，
+           但那条不容易看出来。⚠️ 联机对局**进行中**会先弹一层确认（js/net.js 的 ui.leaveConfirm）——
+           确认即退房，不退房的话人回了主页、连接还挂着，对手要一直等你交牌到超时判负。 -->
+      <button id="btnHome" class="btn btn-ghost" onclick="Game.ui.onHome()" title="返回主页面（联机对局会退出房间）"><span class="bt-ico">←</span><span class="bt-txt">返回主页</span></button>
       <button id="btnEnergyDev" class="btn btn-ghost" onclick="Game.ui.onEnergyDev()" title="开发者：本回合能量设为 7"><span class="bt-ico">⚡</span><span class="bt-txt">修改能量</span></button>
       <button id="btnPickLoc" class="btn btn-ghost hidden" onclick="Game.ui.onPickLoc()" title="开发调试：指定并替换区域地形"><span class="bt-ico">🗻</span><span class="bt-txt">指定地形</span></button>
       <button id="btnAddStone" class="btn btn-ghost hidden" onclick="Game.ui.onAddStone()" title="开发调试：批量为某个区域生成石块（双方各 N 张）"><span class="bt-ico">🪨</span><span class="bt-txt">添加石块</span></button>
@@ -529,13 +565,14 @@
     </div>
   </header>
 
-  <!-- 联机状态条（js/net.js 的 renderBar 刷新）：只在联机对局中出现，六段各管一件事，
-       一眼看出卡在谁身上、还剩多少秒、上一回合对账过没过 —— 房间码 / 角色 / 对手在线 /
-       本回合阶段（等你出牌＝中性、已提交＝蓝、对手离线或超时＝红）/ 倒计时 / 最近一次对账。
+  <!-- 联机状态条（js/net.js 的 renderBar 刷新）：只在联机对局中出现，七段各管一件事，
+       一眼看出卡在谁身上、还剩多少秒、上一回合对账过没过 —— 房间码 / 角色 / 双方设备（你 电脑 · 对手 手机）/
+       对手在线 / 本回合阶段（等你出牌＝中性、已提交＝蓝、对手离线或超时＝红）/ 倒计时 / 最近一次对账。
        倒计时那段带一条随剩余秒数缩短的进度条，剩余不足 HURRY_AT 秒时转告警色。 -->
   <div class="net-bar hidden" id="netBar">
     <span class="nb-seg nb-room" id="nbRoom"></span>
     <span class="nb-seg nb-role" id="nbRole"></span>
+    <span class="nb-seg nb-device" id="nbDevice"></span>
     <span class="nb-seg nb-peer" id="nbPeer"></span>
     <span class="nb-seg nb-phase" id="nbPhase"></span>
     <span class="nb-seg nb-time hidden" id="nbTime"><i id="nbTimeFill"></i><b id="nbTimeVal">--</b></span>
@@ -591,7 +628,7 @@
       <div class="rules">
         <h3>玩法速览</h3>
         <ul>
-          <li>共 6 回合（地形「虚假之月」🌕 在场时为 7 回合），能量逐回合 +1（上限 6，第 7 回合为 7）；「额外能量」（如斯塔萨菲雅）会让下一回合上限临时 +1，顶栏能量框显示绿色「+N」。</li>
+          <li>共 6 回合（地形「虚假之月」🌕 在场时为 7 回合），能量逐回合 +1（上限 6，第 7 回合为 7）；「额外能量」（如斯塔萨菲雅）会让下一回合上限临时 +1，底部能量块显示绿色「+N」。</li>
           <li>开局三块地形皆为「未揭示」，第 1/2/3 回合开始依次揭晓（左→中→右）；未揭示地形可正常放牌。</li>
           <li>每回合可把多张牌暗出到各区域，总费用不超能量；出完点「结束回合」。</li>
           <li>出牌结束后翻牌结算「揭示」效果：首回合先后随机，之后当前领先方先翻，持平则随机。</li>

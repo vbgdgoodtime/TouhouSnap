@@ -147,12 +147,13 @@
   让自己的两个子块直接成为网格项（省一层容器，也意味着 `.hud` 的 `margin-left: auto` / `gap` 在这个断点失效）。
 - 第一行：**品牌（左）** · 「`回合：x/N`」（居中，靠 `.hud-turn-label` 保留文字 —— 手机上其余 HUD 标签仍隐藏）·
   `.hud-right`（贴右：赌注 + **「加倍」**）。
-- 第二行：`.top-actions`（`grid-area: 2 / 1 / 3 / 4`，**整行靠右**）＝ `📖 图鉴` / `🔁 重新开始` **带文字**，
-  开发调试按钮也在这一行（仅开发调试出现，会自动往下折）。
+- 第二行：`.top-actions`（`grid-area: 2 / 1 / 3 / 4`，**整行靠右**）＝ `←返回主页`（`#btnHome`，靠 `margin-right: auto` 贴在该行**最左端**）
+  / `📖 图鉴` / `🔁 重新开始` **带文字**，开发调试按钮也在这一行（仅开发调试出现，会自动往下折）。
 - **「加倍」按钮在手机上也显示**（原来 `≤900px` 是 `display:none`）；它两态文案是 `加倍` → `已加倍`（**无括号**）。
 - **「重新开始」只在单人局出现**：`renderControls()` 按 `state.netRole` 给它加 `.hidden`（联机不许就地重开，`uiOnRestart` 也挡）。
-- **顶栏已没有能量框、也没有「← 主页」按钮**：`#energyBox` / `#btnHome` / `.hud-home*` 全删了；
-  **返回主页面＝点「⚡ 东方逆转」**（`#brandHome`，`onclick="Home.show()"`）。
+- **顶栏已没有能量框**：`#energyBox` / `.hud-home*` 已删；**返回主页面有两个入口** —— 左上角「⚡ 东方逆转」
+  （`#brandHome`，`onclick="Home.show()"`）与第二行最左端的「←返回主页」（`#btnHome` → `Game.ui.onHome()`，
+  单人 / 联机 / 开发调试都常驻；联机对局**进行中会先弹一层确认**再退房，见 `docs/现有机制.md` §6）。
 - 按钮文案是 `<span class="bt-ico">` + `<span class="bt-txt">` 两段（手机上曾只显示图标、现已恢复显示文字，结构保留）。
   ⚠️ **`renderControls()` 只改 `.bt-txt` 那段**（早先直接用 `textContent` 覆写会把两段结构冲掉）。
 
@@ -359,7 +360,7 @@ node tools/css-cascade-check.js 旧style.css 新style.css
 | --- | --- |
 | `style.css` | 阶段 0 全部（令牌 / 死代码 / 断点 / z-index / 地形调色板 / 文字对比色）；**阶段 1**（`.card-face` 基准段、各上下文/断点的尺寸变量、`.mini-card` 的 `--mc-*`、`--art-*` 收口、`.dcs-*` 跟随变量）；**阶段 2 手机端**（≤700px 顶栏两行网格 + `.hud-right`、状态条 1 行 + `.clamped/.open`、隐藏 `.energy-pips`、底部三块 `bottom: 4px + 安全区` 且同高 38px、`.energy-chip` 金黄配色、`.hand-chip` 可点反馈；删掉 `.hud-home*` / `.hud-item.clickable` / `.deck-count-chip` / `.top-actions #btnSnap` 隐藏等死规则） |
 | `js/game.js` | **阶段 1**：`cardFaceEl()` 唯一出口 + 12 处调用点改走它；**阶段 2 手机端**：`setStatus()` 收起+量高度、`syncMobStatusClamp()`（点状态条展开）、计数块 `renderCountChip()` / `toggleCountChip()`（手牌 ⇄ 牌库）、`renderControls()` 里对联机收掉「重新开始」、`renderHud()` 改刷底部能量块、`playEnergyGainFx` / `playShuffleInFx` / `playDeckSwapFx` 的锚点改到新的底部块、回合提示与「加倍」术语；阶段 0：放大弹窗三个视图与 `zoomInfoHTML` / `cardStateNotes` / `renderPowerHistory` 重写，删 `kindTags` / `KIND_LABEL` 引用 / `costDown*Note` / `revealOnlyCard` |
-| `index.html` | **阶段 2 手机端**：顶栏重排（品牌可点回主页面、删 `#btnHome` 与 `#energyBox`、`回合：x/N`、`.hud-right` 收「赌注 + 加倍」、第二行放图鉴/重新开始）；底部中央改成「能量：x/N ↺」+「手牌/牌库」可切块；按钮文案拆成 `.bt-ico` + `.bt-txt`；玩法速览与主页面副标题的术语（加倍）。阶段 0：放大弹窗结构、帮助页文案 |
+| `index.html` | **阶段 2 手机端**：顶栏重排（品牌可点回主页面、`#energyBox` 删除、`回合：x/N`、`.hud-right` 收「赌注 + 加倍」、第二行放图鉴/重新开始）；底部中央改成「能量：x/N ↺」+「手牌/牌库」可切块；按钮文案拆成 `.bt-ico` + `.bt-txt`；玩法速览与主页面副标题的术语（加倍）。阶段 0：放大弹窗结构、帮助页文案 |
 | `js/card-browser.js` | **阶段 1**：图鉴 / 指定卡牌的卡面改走 `cardFaceEl()`（不再手拼类名与 `--cgrad`） |
 | `js/deck-page.js` | **阶段 1**：卡组编辑槽（`button` 也走 `cardFaceEl` 的 tag 参数）与卡组池卡面改走 `cardFaceEl()` |
 | `tools/css-cascade-check.js` | **阶段 1**：新增的卡面等价性核对脚本（见 §五） |

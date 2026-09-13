@@ -92,6 +92,7 @@
   --z-fx-discard: 9510;
   --z-fx-gs: 9520;
   --z-fx-gs-note: 9525;
+  --z-fx-round: 9530;           /* 每回合「回合开始」演出（大字「第 N 回合」） */
   --z-fx-peer-gone: 9700;       /* 掉线提示：压过一切 */
 }
 
@@ -196,6 +197,20 @@ body {
   color: #3d2c00; font-weight: 700; border: none;
   padding: 10px 26px; font-size: 15px; border-radius: var(--r-2);
 }
+/* 淡底色按钮：一排并列的动作按钮靠**底色取色**区分职责，尺寸仍由各自的上下文（如 .net-actions .btn）决定。
+   取色一律「同色系的半透明底 + 同色系描边与文字」，色相复用页面里已有的语义色（金=主行动 / 蓝=联机 / 绿=就绪 / 青=工具 / 红=破坏性 / 灰=中性）。 */
+.btn-tint-gold { background: rgba(224, 163, 22, .14); border-color: rgba(196, 146, 20, .45); color: #8a6300; font-weight: 700; }
+.btn-tint-gold:hover:not(:disabled) { background: rgba(224, 163, 22, .24); border-color: rgba(196, 146, 20, .7); }
+.btn-tint-blue { background: rgba(74, 130, 200, .14); border-color: rgba(70, 120, 190, .42); color: #2c62b0; font-weight: 700; }
+.btn-tint-blue:hover:not(:disabled) { background: rgba(74, 130, 200, .24); border-color: rgba(70, 120, 190, .68); }
+.btn-tint-green { background: rgba(64, 150, 90, .15); border-color: rgba(60, 140, 85, .45); color: #2f7d4f; font-weight: 700; }
+.btn-tint-green:hover:not(:disabled) { background: rgba(64, 150, 90, .25); border-color: rgba(60, 140, 85, .7); }
+.btn-tint-teal { background: rgba(47, 143, 136, .14); border-color: rgba(47, 143, 136, .42); color: #2b6f6a; font-weight: 700; }
+.btn-tint-teal:hover:not(:disabled) { background: rgba(47, 143, 136, .24); border-color: rgba(47, 143, 136, .68); }
+.btn-tint-red { background: rgba(208, 72, 72, .1); border-color: rgba(208, 72, 72, .45); color: #a04040; font-weight: 700; }
+.btn-tint-red:hover:not(:disabled) { background: rgba(208, 72, 72, .2); border-color: rgba(208, 72, 72, .7); }
+.btn-tint-gray { background: rgba(120, 144, 111, .13); border-color: rgba(120, 144, 111, .42); color: #4d6b46; }
+.btn-tint-gray:hover:not(:disabled) { background: rgba(120, 144, 111, .22); border-color: rgba(120, 144, 111, .64); }
 
 /* ---------- 布局 ---------- */
 .layout {
@@ -1582,6 +1597,183 @@ body {
   .gs-reveal-note { font-size: 10.5px; padding: 3px 10px; }
 }
 
+/* ---- 每回合「回合开始」演出（全屏 · 约 2.0s · 幻想乡自然风景配色）----
+   阶段 ① 最开头播出（每回合含第 1 回合；开演前 game.js 先等上一回合遗留的场上演出播完）：
+   晨雾与树影光斑淡入 → 暖阳金光横扫展开 → 巨型「第 N 回合」砸入（缩放过冲 + 轻微旋转抖动 + 提亮）→
+   天蓝光环脉冲两下 → 进度点逐枚点亮 → 上浮淡出（**退出段刻意放慢**：约 70% 起、约 0.6s 慢慢淡出，别一闪就没）。
+   配色与场地 / 面板同源（本文件顶部「幻想乡自然风景淡绿主题」）：底色＝亮底草绿晨雾（`--bg1`/`--bg2` 一系）+ 暖金阳光（`--accent` 一系）；
+   **信息色＝天空蓝（`--blue` 一系）**——文字 / 数字 / 进度点 / 光环都走蓝，好和满屏的绿色一眼分开（草地 + 蓝天 + 暖阳）。**不用深紫暗底**。
+   时长与 game.js 的 ROUND_START_ANIM_MS 对齐（进度点的 0.42~1.32s 落在全长之内），**改时长要两边一起改**。
+   结构：.round-reveal（全屏层，pointer-events:none，不挡操作也不受盘面重渲染影响）
+         ├ .round-reveal-veil（晨雾：暖阳亮心 → 草绿边缘；::before 另叠一层树影光斑）
+         ├ .round-reveal-sweep（暖阳光刃，scaleX 横扫展开）
+         └ .round-reveal-inner（动画主体，position:relative）
+             ├ .round-reveal-ring（天蓝光环脉冲，以整块为基准外扩）
+             ├ .round-reveal-num（大字「第 N 回合」，数字在 .round-reveal-n）
+             └ .round-reveal-pips > span（进度点，`.on` ＝本局已到的回合；animation-delay 由 JS 逐枚写入） */
+.round-reveal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-fx-round);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  animation: roundRevealFade 2s ease-out forwards;
+}
+@keyframes roundRevealFade {
+  0%   { opacity: 0; }
+  6%   { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* 晨雾：中心是暖阳下的亮白，向外过渡到草绿薄雾（只罩一层雾、不压暗场地） */
+.round-reveal-veil {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(closest-side at 50% 46%, rgba(255, 255, 252, .82), rgba(230, 244, 212, .8) 62%, rgba(196, 225, 174, .9));
+  animation: roundVeilIn 2s ease-out forwards;
+}
+/* 树影光斑（木漏れ日）：暖阳 / 嫩绿 / 天光四团散斑随雾上浮，坐实「自然」质感 */
+.round-reveal-veil::before {
+  content: '';
+  position: absolute;
+  inset: -15%;
+  background:
+    radial-gradient(circle at 20% 28%, rgba(255, 246, 194, .85), transparent 40%),
+    radial-gradient(circle at 76% 64%, rgba(172, 224, 148, .7), transparent 44%),
+    radial-gradient(circle at 46% 86%, rgba(255, 253, 232, .7), transparent 38%),
+    radial-gradient(circle at 88% 18%, rgba(198, 236, 255, .6), transparent 36%);
+  animation: roundDapple 2s ease-out forwards;
+}
+@keyframes roundVeilIn {
+  0%   { opacity: 0; transform: scale(1.12); }
+  10%  { opacity: 1; transform: scale(1); }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+@keyframes roundDapple {
+  0%   { opacity: 0; transform: scale(1.08) translateY(14px); }
+  20%  { opacity: 1; transform: scale(1) translateY(0); }
+  66%  { opacity: .9; transform: scale(1.01) translateY(-5px); }
+  100% { opacity: 0; transform: scale(1.05) translateY(-22px); }
+}
+/* 光刃：暖阳色（金 → 白亮）横扫展开，外圈带一点嫩绿柔光 */
+.round-reveal-sweep {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, transparent, rgba(255, 238, 172, .55) 18%, rgba(255, 210, 108, .98) 50%, rgba(255, 238, 172, .55) 82%, transparent);
+  box-shadow: 0 0 16px rgba(255, 224, 140, .9), 0 0 42px rgba(160, 214, 140, .5);
+  opacity: 0;
+  animation: roundSweep 2s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+@keyframes roundSweep {
+  0%   { opacity: 0; transform: scaleX(.08); }
+  12%  { opacity: 1; transform: scaleX(1); }
+  30%  { opacity: .85; transform: scaleX(1); }
+  50%  { opacity: 0; transform: scaleX(1); }
+  100% { opacity: 0; }
+}
+.round-reveal-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  animation: roundNumSlam 2s cubic-bezier(.2, .8, .3, 1) forwards;
+}
+/* 亮底上不做高倍提亮（会糊成一片白），只留一点过冲的提亮与模糊；
+   退出段（70% → 100%，约 0.6s）上浮更缓、位移更小，避免"一闪就没" */
+@keyframes roundNumSlam {
+  0%   { opacity: 0; transform: scale(2.5) translateY(-16px); filter: brightness(1.6) blur(6px); }
+  10%  { opacity: 1; transform: scale(.93) translateY(0); filter: brightness(1.35) blur(0); }
+  14%  { transform: scale(1.11) rotate(-1.5deg); }
+  18%  { transform: scale(.98) rotate(1deg); }
+  23%  { transform: scale(1.03) rotate(-.4deg); }
+  27%  { transform: scale(1) rotate(0deg); filter: brightness(1.1); }
+  38%  { filter: brightness(1); }
+  70%  { opacity: 1; transform: scale(1) translateY(0); }
+  88%  { opacity: .55; transform: scale(1.03) translateY(-12px); filter: brightness(1.12); }
+  100% { opacity: 0; transform: scale(1.05) translateY(-22px); filter: brightness(1.2); }
+}
+/* 光环：以整块（大字 + 进度点）为定位基准外扩——天蓝描边 + 暖阳金柔光（跟着信息色走，避免又一片绿） */
+.round-reveal-ring {
+  position: absolute;
+  inset: -26px -52px;
+  border-radius: 30px;
+  animation: roundRingPulse 2s ease-out forwards;
+}
+@keyframes roundRingPulse {
+  0%   { box-shadow: 0 0 0 2px rgba(96, 158, 214, .7), 0 0 24px 10px rgba(255, 226, 150, .3); }
+  18%  { box-shadow: 0 0 0 20px rgba(96, 158, 214, .28), 0 0 46px 20px rgba(255, 222, 140, .5); }
+  42%  { box-shadow: 0 0 0 10px rgba(96, 158, 214, .44), 0 0 34px 14px rgba(255, 226, 150, .38); }
+  64%  { box-shadow: 0 0 0 17px rgba(96, 158, 214, .32), 0 0 42px 18px rgba(255, 222, 140, .46); }
+  78%  { box-shadow: 0 0 0 8px rgba(96, 158, 214, .24), 0 0 30px 14px rgba(255, 226, 150, .26); }
+  100% { box-shadow: 0 0 0 2px rgba(96, 158, 214, .06), 0 0 18px 6px rgba(255, 226, 150, .06); }
+}
+/* 大字：天空蓝压亮底（深蓝数字 + 中蓝「第 / 回合」）；白晕 + 天蓝辉光 + 暖金外圈 */
+.round-reveal-num {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  color: #2b6ba8;
+  font-size: 44px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  white-space: nowrap;
+  text-shadow: 0 0 10px var(--surf-9), 0 2px 10px rgba(28, 60, 110, .25);
+}
+.round-reveal-num .round-reveal-n {
+  font-size: 136px;
+  line-height: .9;
+  letter-spacing: 0;
+  color: #12539c;
+  text-shadow:
+    0 0 12px var(--surf-96),
+    0 0 30px rgba(122, 190, 240, .95),
+    0 0 62px rgba(255, 226, 150, .6),
+    0 6px 18px rgba(28, 60, 110, .35);
+}
+.round-reveal-pips { display: flex; align-items: center; gap: 12px; }
+.round-reveal-pips span {
+  width: 40px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: rgba(96, 130, 160, .16);
+  border: 1px solid rgba(120, 160, 195, .4);
+  box-shadow: inset 0 0 6px rgba(28, 60, 110, .14);
+  opacity: 0;
+  animation: roundPipIn .26s ease-out forwards;
+}
+.round-reveal-pips span.on {
+  background: linear-gradient(90deg, #6bb6ea, #2160ad);
+  border-color: rgba(126, 190, 230, .95);
+  box-shadow: 0 0 10px rgba(110, 180, 235, .85), 0 0 22px rgba(255, 226, 150, .4), inset 0 1px 0 var(--surf-6);
+  animation: roundPipOn .32s cubic-bezier(.2, .8, .3, 1) forwards;
+}
+@keyframes roundPipIn {
+  0%   { opacity: 0; transform: scale(.4); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes roundPipOn {
+  0%   { opacity: 0; transform: scale(.3); filter: brightness(1.7); }
+  60%  { opacity: 1; transform: scale(1.22); filter: brightness(1.3); }
+  100% { opacity: 1; transform: scale(1); filter: brightness(1); }
+}
+@media (max-width: 700px) {
+  .round-reveal-num { font-size: 28px; gap: 8px; letter-spacing: 2px; }
+  .round-reveal-num .round-reveal-n { font-size: 88px; }
+  .round-reveal-pips { gap: 8px; }
+  .round-reveal-pips span { width: 26px; height: 7px; }
+  .round-reveal-ring { inset: -18px -26px; border-radius: 22px; }
+}
+
 /* v169：额外能量（斯塔萨菲雅 k='energyNext'）的两段演出
    ① 登记段（揭示当刻、卡位上）：卡位金光闪一下 + 金色光环扩散 + 星光迸发 + 「能量 +1」气泡；
    ② 到账段（下回合开始、顶栏能量框上）：同款但锚点换成能量框，并配合 #energyBonus 的绿色角标。
@@ -2700,6 +2892,8 @@ body { -webkit-tap-highlight-color: transparent; }
   .cube-pips span { width: 6px; height: 6px; }
   /* 第二行＝图鉴 / 重新开始（**带文字**）+ 开发调试按钮：整行**靠右对齐** */
   .top-actions { grid-area: 2 / 1 / 3 / 4; gap: 6px; justify-content: flex-end; }
+  /* 「←返回主页」固定在这一行的**最左端**（整行靠右对齐，靠这条 auto 外边距把它顶到左端） */
+  .top-actions #btnHome { margin-right: auto; }
   .btn { padding: 6px 10px; font-size: 12px; }
 
   .layout { gap: 10px; padding: 8px 10px 6px; }
@@ -2795,6 +2989,9 @@ body { -webkit-tap-highlight-color: transparent; }
    ⚠️ 阈值 620px（原 640/620/560 三档合并而来）：521~620px 高度区间现在也吃这一套收小规则。 */
 @media (max-height: 620px) {
   .gs-reveal .zoom-card { --text-fs: 11.5px; width: 168px; }
+  .round-reveal-num { font-size: 26px; gap: 8px; }
+  .round-reveal-num .round-reveal-n { font-size: 78px; }
+  .round-reveal-pips span { width: 24px; height: 6px; }
   .brand .sub { display: none; }
   .brand h1 { font-size: 15px; }
   .brand .logo { font-size: 22px; }
@@ -3686,6 +3883,13 @@ body.in-home #challengeMask:not(.hidden) {
   box-shadow: 0 0 0 2px rgba(224, 163, 22, .35);
 }
 .bd-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「随机卡组」兜底项（单机且一套满编卡组都没有时才出现）：**淡紫底** + 紫虚线描边 + 🎲，
+   一眼看出它不是正式卡组；选中态也留在紫色（只加深）——换成上面的金色 .selected 就把这层提示盖掉了 */
+.battle-deck-item.special { border-style: dashed; border-color: rgba(138, 90, 214, .5); background: #f4effc; }
+.battle-deck-item.special:hover { border-color: rgba(138, 90, 214, .9); background: #ece2fa; }
+.battle-deck-item.special.selected { border-color: var(--purple); background: #e6d9f8; box-shadow: 0 0 0 2px rgba(138, 90, 214, .3); }
+.battle-deck-item.special .bd-name { color: #5b3c96; }
+.battle-deck-item .bd-ico { flex: 0 0 auto; font-size: 15px; line-height: 1; }
 /* v154：卡组位不再显示费用构成（.bd-curve）与「12 / 12」徽标（.bd-count）——整行只留卡组名，
    手机端与电脑端一致；12 张信息保留在卡组位的悬停提示（title）里 */
 .battle-deck-empty {
@@ -3886,9 +4090,6 @@ body.in-home #settingsMask:not(.hidden) {
 }
 .settings-sec h3 .ss-ico { font-size: 17px; line-height: 1; }
 .settings-note { margin: 0 0 10px; font-size: 12.2px; line-height: 1.6; color: var(--dim); }
-.settings-list { margin: 0; padding-left: 18px; }
-.settings-list li { margin-bottom: 4px; font-size: 12.8px; line-height: 1.72; color: #3f5b39; }
-.settings-list li b { color: #24401f; }
 .settings-actions { flex: 0 0 auto; justify-content: flex-end; }
 
 /* 三档难度选项（单选式按钮组） */
@@ -4011,7 +4212,6 @@ body.in-home #settingsMask:not(.hidden) {
 @media (max-width: 640px) {
   .settings-modal { width: 94vw; max-width: 94vw; padding: 14px 14px 12px; }
   .settings-sec h3 { font-size: 13.5px; }
-  .settings-list li { font-size: 12.2px; line-height: 1.68; }
   .ai-level-opt { padding: 10px 11px; }
   .ai-level-opt .alo-name { font-size: 13.5px; }
   .ai-level-opt .alo-desc { font-size: 11px; }
@@ -4337,7 +4537,7 @@ body.in-home #netMask:not(.hidden) {
 body.in-home #peerGoneMask:not(.hidden) { display: flex; z-index: var(--z-home-modal-net); }
 .peer-gone-modal { width: min(460px, 94vw); max-width: min(460px, 94vw); }
 .net-modal { width: min(520px, 94vw); max-width: min(520px, 94vw); }
-/* 房间信息（房间码 · 你的身份 · 对手进没进来）：这是弹窗里最该一眼看清的一行，字号给足 */
+/* 房间信息：**只放房间码**（身份与对手状态都在下面的双方就位面板里，此处不再复述），字号给足好一眼看清 */
 .net-room-info {
   font-size: 15.5px;
   font-weight: 700;
@@ -4384,6 +4584,22 @@ body.in-home #peerGoneMask:not(.hidden) { display: flex; z-index: var(--z-home-m
 .nv-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: #a04040; }
 .nv-row b { font-family: ui-monospace, Consolas, monospace; }
 .net-room-row { margin-bottom: 8px; }
+/* 创建房间的选码弹窗（js/net.js 的 ui.create → askCreate）：随机码一条路、自定义码一条路。
+   层级给 --z-home-modal-net（高于房间弹窗 212），选完码就收起来、把后面的房间弹窗露出来。 */
+body.in-home #netCodeMask:not(.hidden) {
+  display: flex;
+  z-index: var(--z-home-modal-net);
+}
+.net-code-modal { width: min(400px, 92vw); max-width: min(400px, 92vw); }
+.net-code-modal .btn { padding: 10px 14px; }
+.net-code-modal .modal-sub { font-size: 12.5px; line-height: 1.6; }
+.net-code-random { width: 100%; }
+.net-code-or { margin: 10px 0; font-size: 11.5px; color: var(--dim2); text-align: center; }
+/* 自定义码这一路：输入框与「用这个码建房」**上下两行**，按钮占满一整行 ——
+   两条路现在都是**淡底色整行按钮**（金 = 随机码 / 蓝 = 自定义码），谁也不比谁矮一头。 */
+.net-code-row { display: flex; flex-direction: column; gap: 8px; }
+.net-code-row .net-code-input { width: 100%; min-width: 0; }
+.net-code-row .btn { width: 100%; }
 .net-room-input {
   width: 100%;
   height: 42px;
@@ -4394,15 +4610,13 @@ body.in-home #peerGoneMask:not(.hidden) { display: flex; z-index: var(--z-home-m
   font-weight: 700;
   text-transform: uppercase;
 }
-/* 房间弹窗的提示行（net.js 的 ui.tip 写入，warn ＝ 需要玩家处理的错误）：这里的字是"要读的"，别给 11px 的小字 */
-.net-tip { min-height: 36px; margin-bottom: 14px; font-size: 13px; line-height: 1.55; color: #5d7a55; }
+/* 房间弹窗的提示行（net.js 的 ui.tip 写入，warn ＝ 需要玩家处理的错误）：这里的字是"要读的"，别给 11px 的小字。
+   pre-line：让「测试连接」那种按行列出各条线路结果的提示能保留换行（普通单行提示不受影响）。 */
+.net-tip { min-height: 36px; margin-bottom: 14px; font-size: 13px; line-height: 1.55; color: #5d7a55; white-space: pre-line; }
 .net-tip.warn { font-weight: 700; color: #d04848; }
 .net-actions { flex-wrap: wrap; }
-/* 房间弹窗的按钮（创建 / 加入 / 我已准备 / 复制房间码 / 退出）：与放大后的名单、提示行配套，别让按钮比正文还小 */
+/* 一排动作按钮：尺寸统一在这里给（各按钮的职责靠 .btn-tint-* 的淡底色区分，见文件上方按钮段） */
 .net-actions .btn { font-size: 14.5px; padding: 9px 16px; }
-/* 房主专用的「踢出对手」：做成"警示色"，跟普通操作（复制 / 退出）区分开 */
-.net-kick { color: #a04040; border-color: rgba(208, 72, 72, .45); }
-.net-kick:hover:not(:disabled) { background: rgba(208, 72, 72, .08); border-color: rgba(208, 72, 72, .7); }
 /* 服务器地址：小字收在弹窗底部，不占主视线 */
 .net-server { margin-top: 10px; font-size: 10.5px; color: #93a88b; word-break: break-all; }
 
@@ -4422,6 +4636,7 @@ body.in-home #peerGoneMask:not(.hidden) { display: flex; z-index: var(--z-home-m
 .nb-seg { white-space: nowrap; }
 .nb-room { letter-spacing: 2px; color: #ffe08a; }
 .nb-role { color: #a8c89c; }
+.nb-device { color: #a8c89c; }  /* 双方设备（你 电脑 · 对手 手机）：次要信息，跟角色段同色 */
 .nb-peer.bad { color: #ff8f8f; }
 .nb-phase.sent { color: #7fd1ff; }
 .nb-phase.bad { color: #ff8f8f; }

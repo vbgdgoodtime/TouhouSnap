@@ -5,7 +5,8 @@
    首帧即为主页面、不依赖 JS 执行顺序；本文件只做：
      1) 主页面背景的随机漂浮装饰图标；2) 入口按钮事件接线；
      3) 暴露 window.Home（show / hide / openPage / isHome）；
-     4) 出战卡组弹窗（仅满 12 张可选）—— 单机「开始对战」与联机前选卡组共用，见 openDeckPicker()；
+     4) 出战卡组弹窗（仅满 12 张可选；**单机在一套满编卡组都没有时**额外给一个「随机卡组」兜底项，
+        选它则开局由引擎按与对手同一条费用曲线随机组一套）—— 单机「开始对战」与联机前选卡组共用，见 openDeckPicker()；
      5) 新手引导 / 设置 / 图鉴 / 特殊牌池弹窗的开关与互斥。
 
    ⚠️ 跨文件收口：AI 强度档位的选项与中文文案唯一数据源＝js/ai.js 的 window.AI
@@ -27,6 +28,9 @@
   };
 
   var pickedDeckId = null;
+  // 「随机卡组」兜底项的哨兵 id：一套满 12 张的卡组都没有时（仅单机「开始对战」）才在列表里出现，
+  // 它不是真卡组 —— 确认时改调 Game.restart({ playerRandomDeck: true })，由引擎在开局时按与对手同一条费用曲线组牌。
+  var RANDOM_DECK_ID = '__random__';
   // 出战卡组弹窗的用途：'battle' ＝ 单机开战（选完直接开打）；'net' ＝ 联机选卡组（选完交给 openDeckPicker 传进来的
   // onPick，由 js/net.js 接着打开房间弹窗）。同一个弹窗两种用途，单机那条流程不经过 onPick 分支。
   var pickerMode = 'battle';
@@ -124,6 +128,18 @@
     if (ok) ok.disabled = true;
   }
 
+  // 选中一个卡组位：记下 id、把高亮移到该位、放开「开始战斗」（真卡组与「随机卡组」兜底项共用）
+  function selectBattleDeck(list, btn, id, ok) {
+    pickedDeckId = id;
+    list.querySelectorAll('.battle-deck-item').forEach(function (el) {
+      el.classList.remove('selected');
+      el.setAttribute('aria-selected', 'false');
+    });
+    btn.classList.add('selected');
+    btn.setAttribute('aria-selected', 'true');
+    if (ok) ok.disabled = false;
+  }
+
   function renderBattleDeckList() {
     var list = $('battleDeckList');
     var empty = $('battleDeckEmpty');
@@ -136,21 +152,26 @@
     if (ok) ok.disabled = true;
 
     var decks = readyDecks();
-    var has = decks.length > 0;
     var net = pickerMode === 'net';
+    // 一套满编卡组都没有：单机给一个「随机卡组」兜底项（开局时由引擎随机组一套），
+    // 联机要双方各自带一套确定卡组（卡组码随握手发出去），故联机不给这一项。
+    var randomFallback = !net && decks.length === 0;
+    var has = decks.length > 0 || randomFallback;
     if (empty) empty.classList.toggle('hidden', has);
     if (list) list.classList.toggle('hidden', !has);
-    if (gotoBtn) gotoBtn.classList.toggle('hidden', has);
+    if (gotoBtn) gotoBtn.classList.toggle('hidden', decks.length > 0);
     if (ok) {
       ok.classList.toggle('hidden', !has);
       ok.textContent = net ? '用这套卡组联机' : '开始战斗';
     }
     if (sub) {
-      sub.textContent = has
-        ? (net
-          ? '联机双方各带一套满 12 张的卡组 —— 先选好你这套，选完就打开房间弹窗（共 ' + decks.length + ' 套可选）'
-          : '请选择一套已凑满 12 张的卡组后再开战（共 ' + decks.length + ' 套可选）')
-        : '没有可出战的满编卡组';
+      sub.textContent = randomFallback
+        ? '还没有满12张的卡组，已为你创建随机卡组'
+        : (has
+          ? (net
+            ? '联机双方各带一套满 12 张的卡组 —— 先选好你这套，选完就打开房间弹窗（共 ' + decks.length + ' 套可选）'
+            : '请选择一套已凑满 12 张的卡组后再开战（共 ' + decks.length + ' 套可选）')
+          : '没有可出战的满编卡组');
     }
 
     for (var i = 0; i < decks.length; i++) {
@@ -166,18 +187,28 @@
         nameEl.textContent = deck.name;
         btn.appendChild(nameEl);
         btn.title = deck.name + '（12 / 12）';
-        btn.addEventListener('click', function () {
-          pickedDeckId = deck.id;
-          list.querySelectorAll('.battle-deck-item').forEach(function (el) {
-            el.classList.remove('selected');
-            el.setAttribute('aria-selected', 'false');
-          });
-          btn.classList.add('selected');
-          btn.setAttribute('aria-selected', 'true');
-          if (ok) ok.disabled = false;
-        });
+        btn.addEventListener('click', function () { selectBattleDeck(list, btn, deck.id, ok); });
         list.appendChild(btn);
       })(decks[i]);
+    }
+
+    if (randomFallback) {
+      var rnd = document.createElement('button');
+      rnd.type = 'button';
+      rnd.className = 'battle-deck-item special';
+      rnd.setAttribute('role', 'option');
+      rnd.setAttribute('aria-selected', 'false');
+      var ico = document.createElement('span');
+      ico.className = 'bd-ico';
+      ico.textContent = '🎲';
+      var rndName = document.createElement('span');
+      rndName.className = 'bd-name';
+      rndName.textContent = '随机卡组';
+      rnd.appendChild(ico);
+      rnd.appendChild(rndName);
+      rnd.title = '随机卡组（开局时随机组满 12 张）';
+      rnd.addEventListener('click', function () { selectBattleDeck(list, rnd, RANDOM_DECK_ID, ok); });
+      list.appendChild(rnd);
     }
   }
 
@@ -203,14 +234,17 @@
 
   function confirmBattleDeck() {
     if (!pickedDeckId) return;
-    var decks = readyDecks();
+    var random = (pickedDeckId === RANDOM_DECK_ID);
     var deck = null;
-    for (var i = 0; i < decks.length; i++) {
-      if (decks[i].id === pickedDeckId) { deck = decks[i]; break; }
-    }
-    if (!deck || !deck.cards || deck.cards.length !== 12) {
-      toast('请选择一套满 12 张的卡组。');
-      return;
+    if (!random) {
+      var decks = readyDecks();
+      for (var i = 0; i < decks.length; i++) {
+        if (decks[i].id === pickedDeckId) { deck = decks[i]; break; }
+      }
+      if (!deck || !deck.cards || deck.cards.length !== 12) {
+        toast('请选择一套满 12 张的卡组。');
+        return;
+      }
     }
     var onPick = pickerOnPick;
     var net = pickerMode === 'net';
@@ -219,7 +253,8 @@
     hide();
     document.body.classList.remove('in-dev');
     try {
-      var p = window.Game.restart({ playerDeckDefs: deck.cards.slice() });
+      // 「随机卡组」不在这里组牌：把开关交给引擎，开局时按与对手同一条费用曲线随机组一套（见 js/game.js）
+      var p = window.Game.restart(random ? { playerRandomDeck: true } : { playerDeckDefs: deck.cards.slice() });
       if (p && typeof p.catch === 'function') {
         p.catch(function (err) {
           console.error('[home] 开始对战失败：', err);

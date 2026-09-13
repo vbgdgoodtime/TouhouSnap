@@ -6,12 +6,22 @@
 
 ## 部署
 
-1. `npx wrangler login`
-2. `cd worker` 后 `npx wrangler deploy`
-3. 把输出里的地址填进 `js/net.js` 顶部的 `SERVER` 常量
+1. `npx.cmd wrangler login`（本机 npm.ps1 / npx.ps1 被执行策略拦着，统一用 `.cmd` 那版）
+2. `cd worker` 后 `npx.cmd wrangler deploy`
+3. 把输出里的地址填进 `js/net.js` 顶部的 `SERVER` 常量（同域线路的路由写在 `wrangler.toml` 里，跟着这次 deploy 一起生效，控制台不用点）
 
-**线上现状**：`pvp.2houvv.xyz`（自定义域名，**国内直连、不需要梯子**）。`*.workers.dev` 那个地址在国内常不稳，
-只作备用 —— 别拿它做验收，也别把它写回 `SERVER`。
+**线上现状**：两条入口指向**同一个 Worker、同一批房间**：
+- `pvp.2houvv.xyz`（自定义域名，**备用线路**）：`js/net.js` 的 `SERVER` 写的就是它。
+- `game.2houvv.xyz/ws/*`（**同域线路**，`wrangler.toml` 里的 `[[routes]]`）：游戏页面的域名同时也是房间入口 ——
+  国内部分网络"网页能打开、连 `pvp.` 子域名的长连接被掐"（实测：玩家必须挂代理才能联机），
+  同域长连接有机会直接过；客户端优先用它、连不上自动回落 `pvp.`。
+  该路由只匹配 `/ws/*`（Pages 上没有这个路径），所以最坏情况只是同域线路不通，**不影响站点本身**。
+  验收：`curl -s -o /dev/null -w "%{http_code}" https://game.2houvv.xyz/ws/ZZA123`
+  —— 路由生效时返回 **426**（Worker 的应答："这里只收 WebSocket 升级请求"）；若仍是 **200**，那是 Pages 的兜底页面
+  （会把 `index.html` 当 200 返回），说明路由没生效 —— 此时同域线路自然建不起来、客户端会自动回落备用线路，
+  **站点与联机都不受影响**。备用线路的对照：`https://pvp.2houvv.xyz/ws/ZZA123` 现在就应返回 **426**。
+
+`*.workers.dev` 那个地址在国内常不稳，只作备用 —— 别拿它做验收，也别把它写回 `SERVER`。
 
 零依赖、无构建步骤，改完 `worker/src/index.js` 直接重新 deploy。
 这个目录跟着主仓库一起版本管理；GitHub Pages 会把它当静态文件一并发布（无害，里面没有任何密钥）。
@@ -43,7 +53,7 @@
 `msg.t === "start"` / `"rematch"` 到达时**清空去重表**：新一局的回合号从 1 重新数，不清会把它当成重复包静默丢掉
 （症状：两端都卡在"等对手出牌"）。
 
-除上面两条外，服务端不看消息内容、一律原样转发。客户端用到的类型：`hello`（昵称 + 头像卡图文件名 + 数据哈希 + 引擎指纹 + 卡组码）/ `ready`（准备 / 撤销，带 `ok: 1|0`）/ `start` / `turn` /
+除上面两条外，服务端不看消息内容、一律原样转发。客户端用到的类型：`hello`（昵称 + 头像卡图文件名 + 手机/电脑 + 数据哈希 + 引擎指纹 + 卡组码）/ `ready`（准备 / 撤销，带 `ok: 1|0`）/ `start` / `turn` /
 `hash`（对账指纹）/ `snap`（加倍）/ `retreat`（认输）/ `status`（我这一手交了）/ `timeout`（超时判负）/ `rematch`（再来一局）。
 各条的口径见 `docs/联机对战.md` §5。
 

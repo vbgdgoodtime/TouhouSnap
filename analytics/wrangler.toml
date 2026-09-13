@@ -1,0 +1,20 @@
+name = "touhou-stats"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# 时长数据表。库已建好（wrangler d1 create touhou-stats）
+# ⚠️ binding 必须是 "DB"（代码里写的是 env.DB）；wrangler 提示里那份 binding = "touhou_stats" 别照抄，
+#    名字对不上时心跳会静默写不进库（页面上看不出任何异常）。
+[[d1_databases]]
+binding = "DB"
+database_name = "touhou-stats"
+database_id = "c1bcc570-4c8a-48e0-aae3-e9ec72223503"
+
+# 看板 key（/_pt-report?key=…）不写在这里：会进 git。
+# 用 npx.cmd wrangler secret put REPORT_KEY 配置（自己挑一串随机字符）。
+
+# 整个站点走这个 Worker：HTML 注入 + 心跳 + 看板。
+# ⚠️ game.2houvv.xyz/ws/* 比 /* 更具体 ⇒ 仍归联机房间 Worker（worker/wrangler.toml），联机不受影响。
+[[routes]]
+pattern = "game.2houvv.xyz/*"
+zone_name = "2houvv.xyz"

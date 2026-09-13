@@ -17,7 +17,7 @@ python -m http.server 8000        # 然后打开 http://localhost:8000/
 
 首页入口（按页面上的先后）：
 
-- 开始对战：先选满 12 张的出战卡组。
+- 开始对战：先选满 12 张的出战卡组；一套满编卡组都没有时，列表里给出「随机卡组」兜底项（开局随机组满 12 张，结构与对手一致）。
 - 🌐 联机对战：先选一套满 12 张的出战卡组，再进房间弹窗用 6 位房间码开房 / 加入，双方实时对打（房间服务 `pvp.2houvv.xyz`，国内可直接连、不需要梯子）。
 - 🎛️ 开发调试（淡绿底）：空牌库 + 固定地形 + 指定卡牌 / 石块等调试工具。
 - 卡组设置：构筑 / 保存卡组。
@@ -45,6 +45,10 @@ Touhou2/
 ├─ worker/            联机房间服务（Cloudflare Workers + Durable Objects；只转发消息，不参与规则）
 │  ├─ src/index.js    Worker 与房间 DO（wrangler 入口）
 │  └─ wrangler.toml   部署配置（绑定 ROOMS；免费计划用 SQLite 后端的 DO）
+├─ analytics/         访问时长统计（Cloudflare Workers + D1；只统计、不参与游戏，游戏代码一行不动，见其 README）
+│  ├─ src/index.js    给站点 HTML 注入统计脚本 + 收心跳 + 看板（wrangler 入口）
+│  ├─ schema.sql      D1 建表（playtime：一天一行 / 一个本机 ID 一行）
+│  └─ wrangler.toml   部署配置（绑定 DB；路由 game.2houvv.xyz/*，联机 /ws/* 不受影响）
 ├─ data/              游戏数据（改卡 / 改地形只动这里）
 │  ├─ cards.js        人物卡 POOL + 特殊卡 SPECIAL
 │  └─ locations.js    地形池 POOL

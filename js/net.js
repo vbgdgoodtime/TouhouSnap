@@ -26,19 +26,56 @@
   'use strict';
 
   /* ⚠️ 部署完 worker/ 之后，把这里换成你自己的 Worker 地址（`wrangler deploy` 的输出，末尾不要带 / ）。
-     用 http(s):// 写即可，代码会自动换成 ws(s)://。 */
+     用 http(s):// 写即可，代码会自动换成 ws(s)://。这是**备用线路**：客户端优先用「和页面同一个域名」
+     （见下面的 endpointList()），连不上才回落这里。 */
   var SERVER = 'https://pvp.2houvv.xyz';
+
+  /* ---------------- 线路（为什么有两条） ----------------
+     ① **同域线路**：`<页面自己的域名>/ws/<房间码>` —— 由同一条 Worker 的一条路由接（见 `worker/wrangler.toml`
+        的 `[[routes]]`）。为什么需要它：国内部分网络"网页能打开、但连 `pvp.` 这个子域名的长连接被掐"
+        （实测案例：玩家必须挂代理才能联机；而她的页面 HTTPS 是通的 ⇒ 同域长连接有机会直接过）。
+     ② **备用线路**：正式地址 `SERVER`（`pvp.2houvv.xyz`）。
+     ⚠️ 两条线路进的是**同一个房间**：房间对象按房间码命名（`ROOMS.idFromName(room)`），与从哪个入口进来无关
+        —— 所以两端各走各的线路（一个走同域、一个走备用）照样能遇上。 */
+  function endpointList() {
+    var out = [];
+    try {
+      var loc = window.location;
+      var okProto = (loc.protocol === 'https:') || (loc.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(loc.hostname));
+      if (okProto && loc.host) out.push(loc.protocol + '//' + loc.host);
+    } catch (e) { /* file:// 打开时没有同域线路 */ }
+    out.push(SERVER);
+    var seen = {}, uniq = [];
+    for (var i = 0; i < out.length; i++) {
+      var b = String(out[i]).replace(/\/+$/, '');
+      if (!seen[b]) { seen[b] = 1; uniq.push(b); }
+    }
+    return uniq;
+  }
+  function netHostOf(base) { return String(base).replace(/^https?:\/\//, '').replace(/\/+$/, ''); }
+  function wsUrlOf(base, code) {
+    return String(base).replace(/^http/, 'ws') + '/ws/' + code
+      + '?token=' + encodeURIComponent(myToken) + '&name=' + encodeURIComponent(myName);
+  }
 
   var TURN_TIMEOUT = 90; // 等对手提交包的秒数；到点直接判他认输
   var HURRY_AT = 30;     // 倒计时剩这么多秒时状态条转告警色（只是提示，判负仍按 TURN_TIMEOUT）
   var CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 房间码字符集：去掉容易看错的 I O 0 1
-  /* 房主专用「🚫 踢出对手」按钮：**当前关着**（`false`）—— 它不是纯客户端功能，房间服务得重新部署才认 `{"t":"kick"}`，
+  /* 房主专用「踢出对手」按钮：**当前关着**（`false`）—— 它不是纯客户端功能，房间服务得重新部署才认 `{"t":"kick"}`，
      没部署时点了不会发生任何事，索性先不露出来。要用：① 把这里改成 `true`；② `cd worker && npx wrangler deploy`。 */
   var KICK_ENABLED = false;
 
   var $ = function (id) { return document.getElementById(id); };
 
   var ws = null;
+  // 线路状态：本页固定的 token（服务端认人："同一个 token 回来还是原角色"）、上次连通的线路、
+  // 本次连接用的线路、本次是否已收到 welcome、本次是否已试过另一条线路、握手超时计时器
+  var myToken = randStr(10);
+  var netBase = null;
+  var connectBase = null;
+  var gotWelcome = false;
+  var triedAlt = false;
+  var connTimer = null;
   var room = '';
   var myName = '';
   var role = null;        // 'host' | 'guest'：本机在房间里的角色
@@ -46,13 +83,22 @@
   var started = false;    // 是否已开局（开局后 active() 为真；本局打完仍为真，直到退出房间或重开）
   var closed = false;     // 主动退出 / 中止后不再提示重连
   var selfGone = false;   // 本机这根连接已经断了（不是主动退出）—— 与"对手掉线"要分开：状态条与提示不能把两件事说成一件
-  var myHello = null;     // { t, name, dataHash, engineHash, codes }
+  var myHello = null;     // { t, name, avatar, device, dataHash, engineHash, codes }
   var peerHello = null;
   var seed = null;
   var readySelf = false;
   var readyPeer = false;
   var versionBad = false; // 双方版本对不上（数据哈希或引擎指纹），弹窗里并排列出两边的号
   var engineHash = 'pending';
+  // 旧页面自检：发布时 tools/publish.ps1 会把「页面版本」烘进 index.html 的 <meta name="page-version">。
+  // selfVersion＝本页加载时那一份（于是天然"冻结"在本页的版本上），liveVersion＝现拉的线上那份。
+  // 两者不一致 ⇒ 本页是旧版（手机端标签页能活好几天，玩家不会主动刷新），在进房间之前就挡住。
+  var stalePage = false;
+  var selfVersion = '';
+  var liveVersion = '';
+  var versionChecking = false;  // 自检请求正在飞
+  var versionAt = 0;            // 上次自检完成的时间（结果在 VERSION_TTL 内复用，避免每次点入口都发请求）
+  var VERSION_TTL = 120000;
   var chosenCodes = null; // 出战卡组的卡牌码（进房间弹窗之前选好的那套，握手交换的就是它）
   var chosenDeckName = ''; // 那套卡组的名字（只在房间弹窗里回显，让人确认自己带的是哪套）
 
@@ -97,6 +143,50 @@
     })).then(function (texts) { engineHash = shortHash(texts.join('\n/*---*/\n')); })
       .catch(function () { engineHash = 'none'; });
   })();
+
+  /* ---------------- 旧页面自检 ----------------
+     发布时 tools/publish.ps1 把「页面版本」烘进 index.html 的 <meta name="page-version">；
+     本页加载时记下自己那份（selfVersion，于是它天然"冻结"在本页这一批上）。
+     点「🌐 联机对战」时**在后台**拉一份不缓存的 index.html 比一比，不一致＝本页是旧版
+     （手机端标签页能活好几天，玩家不会主动刷新）⇒ 在房间弹窗里拦住建房 / 加入 / 准备，并说清该怎么办。
+     ⚠️ 自检**绝不挡操作**：拉取放在点入口之后的后台跑（结果 2 分钟内复用）。挡在点击路径上会让
+        「联机对战」按钮像坏了一样——要等请求回来才弹选卡组，手机上一两秒就是这么来的。
+     ⚠️ 两边任一取不到就放行（老页面没有这个 meta / file:// 打开 / 网络失败）——
+        那种情况仍由握手时的引擎指纹兜底，这里只是"提前一步、说人话"。 */
+  (function readSelfVersion() {
+    var m = document.querySelector('meta[name="page-version"]');
+    selfVersion = (m && m.getAttribute('content')) || '';
+  })();
+  function ensureVersionCheck() {
+    if (!selfVersion || !window.fetch) return;                        // 拿不到版本号就什么都不做（见上）
+    if (versionChecking) return;
+    if (versionAt && (Date.now() - versionAt) < VERSION_TTL) return;  // 刚查过就不重复查（同一份文档不会变）
+    versionChecking = true;
+    // no-store ＋ 时间戳：连中间的透明代理 / 运营商缓存都绕开，拿到的必须是线上当前那份文档
+    fetch('index.html?ts=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var m = /<meta\s+name="page-version"\s+content="([^"]+)"/i.exec(html);
+        liveVersion = m ? m[1] : '';
+        if (liveVersion && liveVersion !== selfVersion) {
+          stalePage = true;
+          ui.tip(staleTip(), true);   // 弹窗已经开着就当场看到；还没开则由 syncMask 常驻在提示区
+          syncMask();
+        }
+      })
+      .catch(function () { /* 拉不到就放行 */ })
+      .then(function () { versionChecking = false; versionAt = Date.now(); });
+  }
+  // 旧版页面：把门挡住，并把两个版本号一起说出来（排查时一眼看得出本机是哪一批）
+  function staleTip() {
+    return '你的页面是旧版（本机 ' + (selfVersion || '—') + ' / 线上 ' + (liveVersion || '—')
+      + '）—— 手机下拉刷新 / 电脑 Ctrl+F5 刷新后再进。';
+  }
+  function staleBlocked() {
+    if (!stalePage) return false;
+    ui.tip(staleTip(), true);
+    return true;
+  }
   function helloReady() {
     return new Promise(function (resolve) {
       if (engineHash !== 'pending') { resolve(); return; }
@@ -125,6 +215,9 @@
     el.classList.remove('hidden');
     seg('nbRoom', room, '');
     seg('nbRole', role === 'host' ? '房主' : '加入者', '');
+    // 双方设备（本机现算 / 对手随 `hello` 带来）：只用于显示；对手还没报或报不上来就只显示自己这半
+    seg('nbDevice', '你 ' + DEVICE_TEXT[myDevice()]
+      + (peerHello && peerHello.device ? ' · 对手 ' + DEVICE_TEXT[peerHello.device] : ''), '');
     // ⚠️ 本机自己断了要说"连接已断开"，不能说成"对手已掉线"（对手可能好好地坐在房间里等你回去）
     seg('nbPeer', selfGone ? '连接已断开' : (peerOnline ? '对手在线' : '对手已掉线'), (selfGone || !peerOnline) ? 'bad' : '');
     seg('nbPhase', barInfo.phase, barInfo.tone);
@@ -154,6 +247,20 @@
     var h = window.Home;
     return (h && h.playerAvatar) ? (h.playerAvatar() || '') : '';
   }
+  /* ---------------- 本机是手机还是电脑 ----------------
+     只用于显示（房间弹窗的双方名单 + 顶栏状态条），**不进任何指纹、不参与规则**。
+     两条判据：UA 里的移动端关键字；或「触摸 + 粗指针」—— iPadOS 13+ 的 UA 装成 Macintosh，只能靠后者认出来。
+     认不出的一律算电脑端。对手那头是 `hello.device`，先过白名单再落地（与昵称 / 头像同一条口径）。 */
+  function myDevice() {
+    if (/Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(navigator.userAgent || '')) return 'phone';
+    try {
+      if (navigator.maxTouchPoints > 0 && window.matchMedia('(pointer: coarse)').matches) return 'phone';
+    } catch (e) { /* 老浏览器没有 matchMedia：按电脑端算 */ }
+    return 'pc';
+  }
+  // 双方设备在两处显示（房间弹窗名单 / 顶栏状态条），都用「电脑 / 手机」四个字，不带图标
+  var DEVICE_TEXT = { pc: '电脑', phone: '手机' };
+  function cleanPeerDevice(v) { return (v === 'pc' || v === 'phone') ? v : ''; }
   function cleanPeerName(n) {
     var h = window.Home;
     var s = (h && h.cleanName) ? h.cleanName(n) : String(n == null ? '' : n).replace(/[<>&"']/g, '').slice(0, 12);
@@ -225,15 +332,24 @@
     el.textContent = text;
     el.className = 'np-state' + (tone ? ' ' + tone : '');
   }
+  // 角色名的唯一读法：**收到服务器的 `welcome` 之前一律"连接中…"**（早先默认写"加入者"，会让人误以为
+  // 自己先当加入者、又瞬间变成房主 —— 其实是"对方根本没连上、房间是空的"）
+  function roleName() {
+    return role ? (role === 'host' ? '房主' : '加入者') : '连接中…';
+  }
   function syncMask() {
     var noRoom = !room;
-    toggle('netCreate', noRoom);
-    toggle('netJoin', noRoom);
-    toggle('netRoomRow', noRoom);
-    toggle('netReady', !noRoom && !started);
+    // 旧版页面（见「旧页面自检」）：建房 / 加入 / 准备一律不露出来，并把"刷新本页"这句话常驻在提示区
+    var stale = stalePage && !started;
+    toggle('netCreate', noRoom && !stale);
+    toggle('netJoin', noRoom && !stale);
+    toggle('netTest', noRoom && !stale);
+    toggle('netRoomRow', noRoom && !stale);
+    toggle('netReady', !noRoom && !started && !stale);
     toggle('netCopy', !noRoom && !started);
     toggle('netLeave', !noRoom);
-    // 「🚫 踢出对手」：只有房主能看见，而且只在"没开局"或"一局已打完"时出现（对局进行中踢人＝替自己判对手负，容易误触）；
+    if (stale) ui.tip(staleTip(), true);
+    // 「踢出对手」：只有房主能看见，而且只在"没开局"或"一局已打完"时出现（对局进行中踢人＝替自己判对手负，容易误触）；
     // 对手已经断开时也不出现 —— 那时房间已经把他那个位置腾出来了，没东西可踢。留在房间里的"半死连接"才是它的用武之地。
     // KICK_ENABLED 当前是 false ⇒ 这个按钮不露出来（原因见文件顶部那个常量的注释）。
     toggle('netKick', KICK_ENABLED && !noRoom && role === 'host' && peerOnline && (!started || matchOver()));
@@ -242,22 +358,29 @@
 
     show('netRoomInfo', noRoom
       ? '还没有进入房间'
-      : ('房间码 ' + room + '（你是' + (role === 'host' ? '房主' : '加入者') + '）'
-        + (started ? ' · 对局进行中' : (peerOnline ? ' · 对手已进入' : ' · 等对手进来'))));
+      : (!role
+        // 还没收到服务器的 `welcome`：只说"连接中"。⚠️ 早先这里在角色未知时就默认写"（你是加入者）"，
+        // 于是"加入了一个其实没人的房间"看起来就像"我本来是加入者、一瞬间变成了房主"，白白误导玩家。
+        ? ('房间码 ' + room + ' · 连接中…')
+        : ('房间码 ' + room)));
 
-    // 双方名单：括号里统一放"身份"（你 · 房主 / 对手），括号后面才是昵称 —— 不要用括号去装昵称，两种用法混在一起很难读
-    show('npSelfWho', '（你 · ' + (role === 'host' ? '房主' : '加入者') + '）' + (myName || ''));
-    show('npPeerWho', '（对手）' + (peerName() || '还没进来'));
+    // 双方名单：**昵称在前、括号里的属性在后**（昵称（你 · 房主 · 电脑）/ 昵称（对手 · 手机））；
+    // 括号只装属性（身份 / 设备），不装昵称；对手还没进来时没有昵称可放，就退回「（对手）还没进来」。
+    // ⚠️ 身份只在这里报一次（上面的房间信息行不再复述）；**设备类型保留在这里** —— 联机排查时要一眼看出两端分别是什么设备。
+    show('npSelfWho', (myName || '') + '（你 · ' + roleName() + ' · ' + DEVICE_TEXT[myDevice()] + '）');
+    show('npPeerWho', peerHello
+      ? (peerName() + '（对手' + (peerHello.device ? ' · ' + DEVICE_TEXT[peerHello.device] : '') + '）')
+      : '（对手）还没进来');
     setAv('npSelfAv', myAvatar(), '🙋');                      // 自己在设置里选的头像
     setAv('npPeerAv', peerHello && peerHello.avatar, '👤');   // 对手随 hello 带来的头像（已核对过本机有没有这张卡图）
     npState('npSelfState',
-      started ? '对局进行中' : (readySelf ? '✓ 已准备' : '… 等你点「我已准备」'),
+      started ? '对局中' : (readySelf ? '已准备' : '等你准备'),
       !started && readySelf ? 'ok' : '');
     npState('npPeerState',
-      started ? '对局进行中'
-        : (versionBad ? '⚠️ 版本不一致'
-          : (selfGone ? '⚠️ 你已断开'
-            : (!peerHello ? '… 还没进来' : (!peerOnline ? '⚠️ 已掉线' : (readyPeer ? '✓ 已准备' : '… 等待中'))))),
+      started ? '对局中'
+        : (versionBad ? '版本不一致'
+          : (selfGone ? '你已断开'
+            : (!peerHello ? '还没进来' : (!peerOnline ? '已掉线' : (readyPeer ? '已准备' : '等待中'))))),
       (started || readyPeer) && !versionBad ? 'ok' : (versionBad || selfGone || (peerHello && !peerOnline) ? 'warn' : ''));
 
     toggle('netVersion', versionBad);
@@ -267,7 +390,7 @@
     }
     // 准备按钮的文案跟着状态走：已准备时它就是"撤销"入口（两端都能撤销，只有双方都准备才开局）
     var readyBtn = $('netReady');
-    if (readyBtn) readyBtn.textContent = readySelf ? '↩️ 取消准备' : '✅ 我已准备';
+    if (readyBtn) readyBtn.textContent = readySelf ? '取消准备' : '我已准备';
     syncAgainBtn();
   }
 
@@ -296,13 +419,11 @@
   // 提示的三副文案：`host` ＝ 房主掉线（加入者看）、`kicked` ＝ 被房主移出、其余 ＝ 对手（加入者）掉线
   var PEER_GONE_TXT = {
     peer: ['对手已掉线，将退出房间',
-      '他已经离开房间 —— 本机已退出房间，这一局之后不能再和他「再来一局」。'
-      + '点「知道了」看本局结果；想再开一局就点顶部「← 主页」，从「🌐 联机对战」重新进。'],
+      '他已经离开房间，本机已退出 —— 点「知道了」看本局结果；想再开一局请回主页面重新进「联机对战」。'],
     host: ['房主已掉线，房间已解散',
-      '房主离开了房间 —— 房间没人管了，本机已退出。点「知道了」回到主页面；'
-      + '想再打一局就点「🌐 联机对战」，这次由你建房、把房间码发给朋友。'],
+      '房主离开了房间，房间没人管了，本机已退出 —— 点「知道了」回主页面；想再打一局就自己建一间。'],
     kicked: ['你已被房主移出房间',
-      '房主把你请出了这个房间（多半是位置要腾给别人）—— 想再打就点「🌐 联机对战」重新加入，或自己建一间。'],
+      '房主把你请出了房间（多半是要腾位置）—— 想再打就点「联机对战」重新加入，或自己建一间。'],
   };
   var goHomeAfterGone = false; // 上面那层提示的「知道了」要不要顺带回主页面（房主掉线 / 被移出：要）
   function showPeerGone(kind) {
@@ -324,6 +445,76 @@
     if (!showPeerGone(hostGone ? 'host' : 'peer')) return false;
     ui.leave(); // 退出房间（提示里已写明）
     return true;
+  }
+
+  /* ---------------- 连接自检（「测试连接」） ----------------
+     把「网页能不能开」与「长连接能不能建」分成两步报 —— 移动网络里这两件事经常一个通、一个不通：
+     典型就是"页面正常、WebSocket 被浏览器云加速或运营商中间设备掐掉"（真事：玩家就因为这一条，
+     在聊天软件里折腾了二十分钟，而两句错提示（"我是加入者→房主了"、"多半是房间满了"）一直在误导）。
+     测的是**同一台房间服务**；用固定测试房号 ZZTEST，连上就读到应答立刻断开，不打扰任何真实房间。 */
+  var TEST_ROOM = 'ZZTEST';
+  var testing = false;
+  function testSocket(base, done) {
+    var url = String(base).replace(/^http/, 'ws') + '/ws/' + TEST_ROOM
+      + '?token=' + randStr(10) + '&name=' + encodeURIComponent('连接测试');
+    var sock = null, opened = false, settled = false;
+    var finish = function (state) {
+      if (settled) return;
+      settled = true;
+      try { if (sock) sock.close(); } catch (e) { /* ignore */ }
+      done(state);
+    };
+    try { sock = new WebSocket(url); } catch (e) { finish('fail'); return; }
+    var timer = setTimeout(function () { finish(opened ? 'noanswer' : 'fail'); }, 6000);
+    sock.onopen = function () { opened = true; };
+    // 收到任何一条服务端消息都算"长连接通了"（哪怕是"房间满"的报错 —— 那也证明连接建起来了）
+    sock.onmessage = function () { clearTimeout(timer); finish('open'); };
+    sock.onerror = function () { clearTimeout(timer); finish(opened ? 'noanswer' : 'fail'); };
+    sock.onclose = function () { clearTimeout(timer); finish(opened ? 'noanswer' : 'fail'); };
+  }
+  function testConnection() {
+    if (testing) return;
+    testing = true;
+    var list = endpointList();
+    var lines = [], i = 0, anyWs = false, anyHttp = false;
+    // 判据：**长连接能不能建**才是"能不能联机"；网页探测只是"网络到不到得了这台服务"的旁证。
+    var step = function () {
+      if (i >= list.length) {
+        testing = false;
+        var tail = anyWs
+          ? ' —— 用标了「长连接能建立」的那条即可（两条进的是同一个房间）。'
+          : anyHttp
+            ? ' —— 网页能开、长连接不行：多半是浏览器或网络拦了它。依次试：① 换网络（Wi-Fi ↔ 流量）；'
+              + '② 关掉浏览器的「云加速 / 极速模式 / 省流」，改用系统自带浏览器；③ 用代理。'
+            : ' —— 连网页都打不开：先检查网络 / DNS，或换个网络再试。';
+        ui.tip(lines.join('\n') + tail, !anyWs);
+        return;
+      }
+      var base = list[i++];
+      var tag = (base === SERVER ? '备用 ' : '同域 ') + netHostOf(base);
+      // ⚠️ 探测必须用 no-cors：备用线路（pvp.）与页面**不同源**，普通 fetch 会被 CORS 拦掉
+      //    （浏览器报 "No 'Access-Control-Allow-Origin'"，但状态其实是 200），把"其实通着"误报成"网页打不开"—— 实测踩过。
+      //    no-cors 只问"请求能不能发出去"，正好是这里要的。
+      var probeHttp = function (next) {
+        if (!window.fetch) { next(true); return; }
+        fetch(base + '/?ts=' + Date.now(), { mode: 'no-cors', cache: 'no-store' })
+          .then(function () { next(true); })
+          .catch(function () { next(false); });
+      };
+      probeHttp(function (httpOk) {
+        if (httpOk) anyHttp = true;
+        testSocket(base, function (sock) {
+          var wsOk = (sock === 'open');
+          if (wsOk) anyWs = true;
+          lines.push((httpOk ? '✅ 网页能开' : '❌ 网页打不开') + ' ｜ '
+            + (wsOk ? '✅ 长连接能建立' : sock === 'noanswer' ? '⚠️ 长连接无应答' : '❌ 长连接建不起来')
+            + '　— ' + tag);
+          step();
+        });
+      });
+    };
+    ui.tip('正在测试 ' + list.length + ' 条线路…');
+    step();
   }
 
   var ui = {
@@ -357,7 +548,7 @@
       if (peerGoneCheck()) return; // 对手已经不在房间里：不进"等对手也点一下…"，直接提示 + 退房
       rematchSelf = true;
       send({ t: 'rematch' });
-      ui.tip(rematchPeer ? '对手也在等 —— 房主正在定新种子重开…' : '已请求再来一局 —— 等对手也点「🔁 再来一局」。');
+      ui.tip(rematchPeer ? '对手也在等 —— 房主正在定新种子重开…' : '已请求再来一局 —— 等对手也点一次。');
       syncAgainBtn();
       maybeRematch();
     },
@@ -371,19 +562,19 @@
         if (window.Home && window.Home.show) window.Home.show();
       }
     },
-    /* 房主专用「🚫 踢出对手」：请服务端把对手那根连接关掉（`{t:'kick'}`，房间收到后先给他一条 `kicked` 再 close）。
+    /* 房主专用「踢出对手」：请服务端把对手那根连接关掉（`{t:'kick'}`，房间收到后先给他一条 `kicked` 再 close）。
        只在"没开局"或"一局已打完"时可用：对局进行中踢人等于替自己判对手负，容易误触，那种情况让超时判负去收（见 docs/联机对战.md §5）。
        ⚠️ 当前 `KICK_ENABLED = false` ⇒ 按钮不露出来、这里也直接返回（房间服务要重新部署才认这条指令）。 */
     kick: function () {
       if (!KICK_ENABLED) return;
       if (role !== 'host' || !room) return;
       if (started && !matchOver()) {
-        ui.tip('对局进行中不能踢人 —— 他要是真掉线了，等提交包超时就会判他认输；这一局打完了再踢。', true);
+        ui.tip('对局进行中不能踢人 —— 他真掉线的话，提交超时就会判他认输；打完了再踢。', true);
         return;
       }
-      if (!peerOnline) { ui.tip('对手已经断开、位置也空出来了 —— 直接把房间码发给下一个人就行（他进来时会显示"对手已进入"）。'); return; }
+      if (!peerOnline) { ui.tip('对手已断开、位置空出来了 —— 把房间码发给下一个人即可。'); return; }
       sendRaw({ t: 'kick' });
-      ui.tip('已请房间把对手移出 —— 他的连接会被关掉，位置随即空出来，你可以把房间码发给下一个人。');
+      ui.tip('已请房间移出对手 —— 位置随即空出，可以把房间码发给下一个人。');
       syncMask();
     },
     // 设置里改了昵称 / 头像时由 js/home.js 调：在房间里就把 hello 重报一次，对手当场看到新的（见 refreshHello）
@@ -392,6 +583,11 @@
     // 选完才打开房间弹窗；已经在房间里 / 对局进行中就只把弹窗放出来 —— 那时卡组已随握手发出去，换不得了。
     open: function () {
       if (room || started) { ui.showMask(); return; }
+      // 已知本页是旧版：直接把房间弹窗放出来说清楚，别让人白选一套卡组
+      if (stalePage) { ui.showMask(); return; }
+      // 其余情况**先按正常流程走**（选卡组 → 房间弹窗），自检在后台并行跑 ——
+      // 结果若是不一致，会在房间弹窗里拦住建房 / 加入 / 准备（见 syncMask 与 staleBlocked）
+      ensureVersionCheck();
       pickDeck(function () { ui.showMask(); });
     },
     showMask: function () {
@@ -399,32 +595,37 @@
       if (!m) return;
       show('netServer', SERVER);
       syncMask();
-      if (!room) {
-        ui.tip((chosenDeckName ? '出战卡组『' + chosenDeckName + '』已选定 —— ' : '')
-          + '一台设备点「创建房间」，把 6 位房间码报给朋友，对方在同一个弹窗里「加入房间」。'
-          + '要换一套卡组就关掉这个弹窗、重新点「🌐 联机对战」。'
-          + '双方页面必须是同一版本（先 Ctrl+F5 硬刷新）；对局中每一手都要在 ' + TURN_TIMEOUT + ' 秒内交出来，'
-          + '超时直接判那一方认输；刷新页面等于离开房间。');
+      // 旧版页面：syncMask 已经给出"该刷新"的提示，这里别再覆盖成正常流程说明
+      if (!room && !stalePage) {
+        ui.tip((chosenDeckName ? '出战卡组『' + chosenDeckName + '』已选定 · ' : '')
+          + '一方点「创建房间」把 6 位码报给对方，另一方填码后点「加入房间」。\n'
+          + '换卡组请关掉本弹窗重进 · 每手 ' + TURN_TIMEOUT + ' 秒内交牌，超时判负 · 刷新页面＝离开房间。');
       }
       m.classList.remove('hidden');
     },
     close: function () { var m = $('netMask'); if (m) m.classList.add('hidden'); },
-    create: function () { if (serverReady()) connect(randStr(6)); },
+    // 「测试连接」：见上面「连接自检」段（网页 / 长连接两步分开报，专治"页面能开但连不上房间"）
+    testConnection: testConnection,
+    create: function () { if (staleBlocked()) return; askCreate(); },
+    createRandom: createRandom,
+    createCustom: createCustom,
+    closeCodeAsk: closeCodeAsk,
     join: function () {
+      if (staleBlocked()) return;
       if (!serverReady()) return;
-      var inp = $('netRoomInput');
-      var code = (inp && inp.value ? inp.value : '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var code = readCode($('netRoomInput'));
       if (code.length !== 6) { ui.tip('房间码是 6 位字母或数字，请再确认一下。', true); return; }
       connect(code);
     },
     // 准备是**可撤销的开关**：点一下＝已准备、再点一下＝撤销（两端都能撤销；撤销必须发一条，否则对方一直以为你已准备）。
     // 两端**都处于已准备**时才由房主开局；开局令（`start`）一旦发出，这一下就作废 —— 见 onPeer 的 ready 分支。
     ready: function () {
+      if (staleBlocked()) return;
       if (started) return;
       readySelf = !readySelf;
       send({ t: 'ready', ok: readySelf ? 1 : 0 });
       ui.tip(readySelf
-        ? '已准备 —— 等对手也点「我已准备」就开局（点错了可以再点一次取消）。'
+        ? '已准备 —— 等对手也准备好就开局（可再点一次取消）。'
         : '已取消准备 —— 想开局就再点一次「我已准备」。');
       syncMask();
       if (readySelf) maybeStart();
@@ -435,7 +636,7 @@
       var clip = navigator.clipboard;
       if (clip && typeof clip.writeText === 'function') {
         clip.writeText(room).then(
-          function () { ui.tip('房间码 ' + room + ' 已复制 —— 发给朋友，让他在同一个弹窗里点「加入房间」。'); },
+          function () { ui.tip('房间码 ' + room + ' 已复制 —— 发给朋友，让他「加入房间」。'); },
           function () { ui.tip('这台浏览器不允许自动复制 —— 请手抄房间码：' + room, true); });
         return;
       }
@@ -450,13 +651,78 @@
       syncOpponent();
       ui.tip('已退出房间。');
     },
+    /* 顶栏「←返回主页」在联机对局里走这三个（js/game.js 的 uiOnHome 调 leaveConfirm）：
+       **开局后、终局前**才问一句 —— 此时退房＝这一局按提交超时判你输，而按钮常驻顶栏、手机上容易误触；
+       还没开局 / 一局已打完都没什么可输的，直接退房回主页面。 */
+    leaveConfirm: function () {
+      if (!started || matchOver()) { leaveAndHome(); return; }
+      var m = $('leaveConfirmMask');
+      if (m) m.classList.remove('hidden');
+    },
+    leaveConfirmOk: function () {
+      var m = $('leaveConfirmMask');
+      if (m) m.classList.add('hidden');
+      leaveAndHome();
+    },
+    leaveConfirmCancel: function () {
+      var m = $('leaveConfirmMask');
+      if (m) m.classList.add('hidden');
+    },
   };
+  // 确认之后的收尾：退房（与房间弹窗「退出房间」同一条路径）+ 回主页面 + 在主页面给一句回执
+  function leaveAndHome() {
+    ui.leave();
+    if (window.Home && window.Home.show) window.Home.show();
+    if (window.Home && window.Home.toast) window.Home.toast('已退出房间，回到主页面。');
+  }
   function serverReady() {
     if (!SERVER) {
       ui.tip('还没配置服务器地址：先把 worker/ 部署上去，再把地址填进 js/net.js 顶部的 SERVER。', true);
       return false;
     }
     return true;
+  }
+
+  /* ---------------- 创建房间：随机码 / 自定义码 ----------------
+     手机端开完房往往要切出去（QQ / 微信）把码报给对方，切后台很容易把连接弄断、回来发现自己已掉线；
+     所以再给一条路：双方事先在聊天里约定同一串码，各自打开页面直接开房 / 进房，中途不用离开页面。
+     ⚠️ 自定义码**不需要服务端配合**：房间按码现开（worker 的 `ROOMS.idFromName(room)`），
+        角色按**到达顺序**分配（先到的那个当房主），走的与「加入房间」完全同一条连接逻辑。 */
+  function codeMask() { return $('netCodeMask'); }
+  function codeTip(text, warn) {
+    var el = $('netCodeTip');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'net-tip' + (warn ? ' warn' : '');
+  }
+  // 房间码一律大写、只留 A-Z / 0-9（「加入房间」与「自定义码建房」共用这一套口径）
+  function readCode(el) {
+    return String((el && el.value) || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+  function askCreate() {
+    var m = codeMask();
+    if (!m) { if (serverReady()) connect(randStr(6)); return; }   // 弹窗标记缺失（老页面）就按老路子随机建房
+    var inp = $('netCodeInput');
+    if (inp) inp.value = '';
+    codeTip('');
+    m.classList.remove('hidden');
+    // ⚠️ 刻意**不**自动聚焦输入框：手机上一聚焦就弹软键盘、挡掉"随机房间码"那个按钮，
+    //    而随机码这条老路是不该被多一步操作拖慢的（要自定义码的人自己会去点输入框）。
+  }
+  function closeCodeAsk() {
+    var m = codeMask();
+    if (m) m.classList.add('hidden');
+  }
+  function createRandom() {
+    closeCodeAsk();
+    if (serverReady()) connect(randStr(6));
+  }
+  function createCustom() {
+    if (!serverReady()) return;
+    var code = readCode($('netCodeInput'));
+    if (code.length !== 6) { codeTip('房间码是 6 位字母或数字（A-Z / 0-9），请再确认一下。', true); return; }
+    closeCodeAsk();
+    connect(code);
   }
 
   /* ---------------- 出战卡组 ----------------
@@ -492,31 +758,56 @@
     });
   }
 
-  /* ---------------- 连接 ---------------- */
-  function connect(code) {
-    // 上一根连接（重试 / 退出房间再进来留下的）：**先摘掉 `ws` 再关它**，这样它迟到的 close 会被下面的身份守卫丢掉，
+  /* ---------------- 连接（同域线路优先，连不上自动回落备用线路） ---------------- */
+  function connect(code, base) {
+    var list = endpointList();
+    var retry = !!base;                       // 带 base ＝ 已经在回落了（本次操作不再试第二条）
+    if (!retry) {
+      triedAlt = false;
+      if (netBase && list.indexOf(netBase) < 0) netBase = null;  // 换过域名的老记录别再用
+    }
+    var use = base || netBase || list[0];
+    // 上一根连接（重试 / 回落 / 退出房间再进来留下的）：**先摘掉 `ws` 再关它**，这样它迟到的 close 会被下面的身份守卫丢掉，
     // 不会把当前房间的在线状态写成"对手已掉线"（那根连接还可能占着房间里的一个角色）。
     var prev = ws;
     resetRoom();
     if (prev) { try { prev.close(); } catch (e) { /* ignore */ } }
     closed = false;
     selfGone = false;
+    gotWelcome = false;
+    connectBase = use;
     room = code;
     myName = (window.Home && window.Home.playerName && window.Home.playerName()) || ('玩家' + randStr(4));
-    ui.tip('正在连接房间 ' + room + ' …');
+    var lineName = (use === SERVER) ? '备用线路' : '同域线路';
+    ui.tip('正在连接房间 ' + room + ' …' + (retry ? '（' + lineName + '重试）' : (use === SERVER ? '' : '（' + lineName + '）')));
     syncMask();
-    var url = SERVER.replace(/\/+$/, '').replace(/^http/, 'ws') + '/ws/' + room
-      + '?token=' + encodeURIComponent(randStr(10)) + '&name=' + encodeURIComponent(myName);
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(wsUrlOf(use, room));
     } catch (e) {
       console.error('[net] WebSocket 建立失败：', e);
       ui.tip('连不上房间（地址不对，或被浏览器拦了）—— 详情见控制台。', true);
       return;
     }
+    // 传输层没建起来（**一条服务端消息都没收到**）⇒ 换另一条线路再试一次，而不是直接报"连不上"。
+    // 已经拿到 `welcome` 之后的断开不算（那是中途掉线，回落没有意义）；服务端明确回 `code:'full'` 也不算（onServer 里单独处理）。
+    var fallback = function () {
+      if (triedAlt || gotWelcome || closed) return false;
+      var alt = null;
+      for (var i = 0; i < list.length; i++) { if (list[i] !== use) { alt = list[i]; break; } }
+      if (!alt) return false;
+      triedAlt = true;
+      console.warn('[net] 线路 ' + netHostOf(use) + ' 连不上，改用 ' + netHostOf(alt) + ' 再试一次');
+      connect(code, alt);
+      return true;
+    };
     // 本次连接的身份：三个处理器**只认它** —— 过期连接（已被新连接顶替 / 已被 connect 主动关掉）的迟到事件一律丢弃。
     // 不判身份的话，那种连接的一句 `onclose` 就能把 `peerOnline` 写成 false，而对方没断线 ⇒ 没有任何事件能把它纠正回来。
     var sock = ws;
+    // 同域线路没部署 / 被拦时可能既不报错也不断开 ⇒ 给一条 4.5 秒的线：还没等到 `welcome` 就当这条线路不通，回落备用线路
+    connTimer = setTimeout(function () {
+      if (sock !== ws || gotWelcome || closed) return;
+      fallback();
+    }, 4500);
     sock.onmessage = function (ev) {
       if (sock !== ws) return;
       var data = null;
@@ -526,17 +817,25 @@
     sock.onclose = function () {
       if (sock !== ws) return;
       if (closed) return;
+      if (!gotWelcome && fallback()) return;   // 换线路重连：这一下不算"断开"，也不提示
       selfGone = true; // 是**本机**断了（不是主动退出）：状态条与提示都不能把这说成"对手掉线"
       peerOnline = false;
-      if (started) ui.tip('连接断了 —— 这一局到此为止：对面会在超时后判你认输（刷新页面等于离开房间）。', true);
-      else if (!role) ui.tip('没能进这个房间 —— 多半是里面已经有两个人了，换一个房间码或让对方退出后重试。', true);
+      if (started) ui.tip('连接断了 —— 这一局到此为止，对面会在超时后判你认输。', true);
+      // 没拿到 `welcome` 就断了 ⇒ 是**连不上房间服务**，不是"房间满"（房间满会收到服务端明确的 `code:'full'`，
+      // 上面 onServer 那条分支单独处理）。这两件事过去被写成同一句，把玩家引去"换个房间码"，白折腾很久。
+      else if (!role) {
+        // 顺便清掉房间状态：否则屏幕上会留着一个房间码、像是已经进房了 —— 玩家截图里那句"我进了"就是这么来的
+        resetRoom();
+        ui.tip('没能连上房间服务 —— 换网络 / 关浏览器「云加速」/ 用系统自带浏览器再试，或点「测试连接」看哪一步不通。', true);
+      }
       else ui.tip('连接已关闭。', true);
       renderBar();
       syncMask();
     };
     sock.onerror = function () {
       if (sock !== ws) return;
-      ui.tip('连接出错 —— 若地址是 *.workers.dev，国内网络经常连不上（见 worker/README.md）。', true);
+      if (!gotWelcome && fallback()) return;   // 同上：先换线路，别急着报错
+      ui.tip('连接出错 —— 多半是网络或中间设备拦了长连接：换网络 / 关「云加速」/ 用系统自带浏览器，或点「测试连接」。', true);
     };
   }
 
@@ -555,15 +854,23 @@
   function onServer(data) {
     if (data.t === 'error') {
       closed = true;
-      if (data.code === 'full') ui.tip('这个房间里已经有两个人了 —— 换一个房间码，或等对方退出。', true);
+      if (data.code === 'full') ui.tip('房间里已经有两个人了 —— 换一个房间码，或等对方退出。', true);
       else ui.tip('房间报错：' + (data.text || data.code || '未知'), true);
       try { if (ws) ws.close(); } catch (e) { /* ignore */ }
+      resetRoom();   // 没拿到 `welcome` ⇒ 不在房间里：清掉房间状态，界面回到"还没有进入房间"（提示留在上面说明原因）
+      syncMask();
       return;
     }
     if (data.t === 'welcome') {
       role = data.role;
+      // 这一条线路通了：记下来（本页后续连接直接用它，不再白试一遍；也是回落逻辑的"已握手"闸门）
+      gotWelcome = true;
+      netBase = connectBase;
+      if (connTimer) { clearTimeout(connTimer); connTimer = null; }
       peerOnline = !!data.peer;
-      ui.tip('已进入房间 ' + data.room + '，你是' + (role === 'host' ? '房主' : '加入者') + '。' + (peerOnline ? '' : '等对手进来…'));
+      ui.tip(peerOnline
+        ? '对手已就位 —— 双方各点一次「我已准备」即开局。'
+        : '等对手进来 —— 双方各点一次「我已准备」即开局。');
       syncMask();
       renderBar();
       sendHello();
@@ -583,7 +890,7 @@
       if (started) {
         if (data.online) ui.tip('对手已回到房间。');
         // 对局进行中掉线：仍按"等他的提交包超时判负"（这条提示只在那时说）；一局打完他还没回来则由下面那步收摊
-        else if (!matchOver()) ui.tip('对手的连接断了 —— 轮到他交牌时会在超时后判他认输。', true);
+        else if (!matchOver()) ui.tip('对手掉线 —— 轮到他交牌时会按超时判他认输。', true);
       }
       peerGoneCheck(); // 房主掉线（加入者）/ 一局打完对手不在 ⇒ 弹最靠前的提示并退出房间；准备阶段加入者掉线只提示、不散房
       // 对手刚进来：把在场时发过、但当时房间里没人的消息**再报一次** —— 房间只转发、不保存，
@@ -602,10 +909,10 @@
   function sendHello() {
     helloReady().then(function () {
       if (myHello) { send(myHello); maybeStart(); return; }
-      if (!chosenCodes) { ui.tip('还没有可出战的卡组 —— 关掉这个弹窗，重新点「🌐 联机对战」并选一套满 12 张的卡组。', true); return; }
+      if (!chosenCodes) { ui.tip('还没有可出战的卡组 —— 关掉本弹窗，重新点「联机对战」选一套满 12 张的。', true); return; }
       var g = window.Game;
       myHello = {
-        t: 'hello', name: myName, avatar: myAvatar(),
+        t: 'hello', name: myName, avatar: myAvatar(), device: myDevice(),
         dataHash: (g && g.dataHash) ? g.dataHash() : 'none',
         engineHash: engineHash, codes: chosenCodes,
       };
@@ -630,13 +937,13 @@
     if (!myHello || !peerHello) return false;
     var bad = false;
     if (peerHello.dataHash !== myHello.dataHash) {
-      ui.tip('双方卡牌数据版本不一致 —— 请双方都按 Ctrl+F5 硬刷新页面再试（弹窗里已并排列出两边的版本号）。', true);
+      ui.tip('双方卡牌数据版本不一致 —— 请双方都按 Ctrl+F5 硬刷新（下面已列出两边的版本号）。', true);
       bad = true;
     } else {
       // 引擎指纹拿不到（fetch 被拦）时只放行、不拦：数据哈希仍会把版本差异挡住
       var a = peerHello.engineHash, b = myHello.engineHash;
       if (a && b && a !== b && a !== 'none' && b !== 'none' && a !== 'pending' && b !== 'pending') {
-        ui.tip('双方的页面版本不一致（有一方还在跑缓存里的旧页面）—— 请双方都按 Ctrl+F5 硬刷新再试（弹窗里已并排列出两边的指纹）。', true);
+        ui.tip('双方页面版本不一致（有一方还在跑缓存的旧页面）—— 请双方都按 Ctrl+F5 硬刷新。', true);
         bad = true;
       }
     }
@@ -651,10 +958,11 @@
       case 'hello':
         msg.name = cleanPeerName(msg.name);       // 对手昵称：清洗后再落地（它会被写进结算弹窗的 HTML）
         msg.avatar = cleanPeerAvatar(msg.avatar); // 对手头像：只认本机真有的那张卡图
+        msg.device = cleanPeerDevice(msg.device); // 对手设备：只认 'pc' / 'phone'（只用于显示，认不出就什么都不显示）
         peerHello = msg;
         if (started) return;
         if (!checkHello()) { abort('双方版本不一致，未开局。'); return; }
-        ui.tip('对手就位（' + (msg.name || '匿名') + '）—— 双方都点「我已准备」即可开局。');
+        ui.tip('对手就位（' + (msg.name || '匿名') + '）—— 双方各点一次「我已准备」即开局。');
         syncMask();
         syncOpponent();
         maybeStart();
@@ -668,7 +976,7 @@
         if (readyPeer !== wasReady) {
           ui.tip(readyPeer
             ? '对手已准备 —— ' + (readySelf ? '你已准备，正在开局…' : '轮到你了。')
-            : '对手取消了准备 —— 想开局要等他再点一次「我已准备」。');
+            : '对手取消了准备 —— 想开局要等他再点一次。');
         }
         syncMask();
         maybeStart();
@@ -749,7 +1057,7 @@
     if (seed === null || !host || !guest) {
       var miss = (seed === null ? '还没收到种子' : '') + (seed === null && (!host || !guest) ? '、' : '')
         + (!host || !guest ? '还没收到双方的卡组' : '');
-      ui.tip('开局信息不全（' + miss + '）—— 本机已把版本与卡组再报一次；若几秒后仍是这样，双方各自点「退出房间」重来。', true);
+      ui.tip('开局信息不全（' + miss + '）—— 已重报一次；几秒后仍这样，双方各自「退出房间」重来。', true);
       sendHello(); // 我这边缺的可能是对方的 hello：再报一次自己的，对面收到后会回敬一份
       return;
     }
@@ -782,6 +1090,7 @@
     readyPeer = false;
   }
   function resetRoom() {
+    if (connTimer) { clearTimeout(connTimer); connTimer = null; }  // 别让上一次的握手超时线再触发一次回落
     ws = null;
     room = '';
     role = null;
@@ -867,7 +1176,7 @@
     lastCompare = { round: round, ok: ok }; // 常驻在状态条上（renderBar 每次重绘都带上）
     if (ok) { renderBar(); return; }
     abort('第 ' + round + ' 回合两端算出的盘面不一致（本机 ' + myHashes[round] + ' / 对手 ' + peerHashes[round]
-      + '）—— 本局已停下。请把这句话连同双方控制台的记录发给开发者：对不上说明还有某个"按座位顺序取随机"的点没对齐。');
+      + '）—— 本局已停下。请把这句话连同双方控制台的记录发给开发者。');
   }
 
   function abort(reason) {
@@ -905,5 +1214,25 @@
   (function bindMask() {
     var m = $('netMask');
     if (m) m.addEventListener('click', function (e) { if (e.target === m) ui.close(); });
+  })();
+
+  // 「退出房间并返回主页面？」这层确认：点空白处＝取消（同上，Esc 不接管）
+  (function bindLeaveConfirm() {
+    var m = $('leaveConfirmMask');
+    if (m) m.addEventListener('click', function (e) { if (e.target === m) ui.leaveConfirmCancel(); });
+  })();
+
+  // 选码弹窗（创建房间）：点空白处关闭；两个房间码输入框都**边打边清洗**成大写 A-Z / 0-9 ——
+  // 约定好的码打在框里一眼就能对出有没有打错，输入框里显示的也就是真正会用的那串
+  (function bindCodeMask() {
+    var m = codeMask();
+    if (m) m.addEventListener('click', function (e) { if (e.target === m) closeCodeAsk(); });
+    var custom = $('netCodeInput');
+    if (custom) {
+      custom.addEventListener('input', function () { custom.value = readCode(custom); });
+      custom.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); createCustom(); } });
+    }
+    var joinInput = $('netRoomInput');
+    if (joinInput) joinInput.addEventListener('input', function () { joinInput.value = readCode(joinInput); });
   })();
 })();

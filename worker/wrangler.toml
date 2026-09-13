@@ -11,3 +11,12 @@ class_name = "Room"
 [[migrations]]
 tag = "init"
 new_sqlite_classes = ["Room"]
+
+# 同域线路：把「游戏页面自己的域名」下的 /ws/* 也交给这个 Worker（`pvp.2houvv.xyz` 那个自定义域名照旧）。
+# 为什么需要：国内部分网络「网页能打开、连 pvp. 子域名的长连接被掐」（实测：玩家必须挂代理才能联机）。
+# 客户端优先连同域线路、连不上自动回落 pvp.，两条线路进的是**同一个房间**（DO 按房间码命名）。
+# ⚠️ 该路由只匹配 /ws/*（Pages 上没有这个路径），所以最坏情况也只是同域线路不通、不影响站点本身。
+# 删掉这段即取消同域线路（客户端会自动只用 pvp.）。改完记得：cd worker && npx wrangler deploy
+[[routes]]
+pattern = "game.2houvv.xyz/ws/*"
+zone_name = "2houvv.xyz"
